@@ -2,20 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#171a24">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#e4dccb">
   <meta
     name="description"
-    content="Working Volumes is an original interactive Three.js library of seven tactile field guides for contemporary creative tools."
+    content="Folio Atelier is a personal 3D bookmaking studio. Design a hardcover — cloth, foil, type, ornament and every page inside — then open it, turn its pages and keep it on your own shelf."
   >
-  <title>Working Volumes — Seven Tools for Making</title>
+  <title>Folio Atelier — A Personal 3D Bookmaking Studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='3' width='19' height='26' rx='1.5' fill='%23182a43'/%3E%3Crect x='10.5' y='6.5' width='12' height='19' fill='none' stroke='%23c87046' stroke-width='1.2'/%3E%3Crect x='7' y='3' width='3' height='26' fill='%23101c2e'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap"
+    data-fonts
+    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&amp;family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&amp;family=DM+Serif+Display:ital@0;1&amp;family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&amp;family=Inter:wght@400;500;600;700&amp;family=Italiana&amp;family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,400&amp;family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&amp;family=Noto+Sans+SC:wght@400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap"
     rel="stylesheet"
   >
-  <link rel="stylesheet" href="./styles/base.css">
+  <link rel="stylesheet" href="./styles/app.css">
   <script type="importmap">
     {
       "imports": {
@@ -31,14 +33,14 @@
       <canvas id="scene" aria-hidden="true"></canvas>
     </div>
 
-    <header class="editorial-header" aria-label="Collection">
-      <div class="editorial-identity">
-        <strong>Working Volumes</strong>
-        <span>Seven field guides for making</span>
+    <header class="masthead" aria-label="Folio Atelier">
+      <div class="masthead__identity">
+        <strong>Folio Atelier</strong>
+        <span>A personal 3D bookmaking studio</span>
       </div>
-      <div class="editorial-index">
-        <span>Edition 02 · 2026</span>
-        <span id="palette-label">Ultramarine · bone · copper</span>
+      <div class="masthead__index">
+        <span id="library-count">An empty shelf</span>
+        <span id="binding-label">&nbsp;</span>
       </div>
     </header>
 
@@ -64,121 +66,161 @@
 
     <div class="pointer-label" id="pointer-label" aria-hidden="true">
       <span id="pointer-label-index">Volume 01</span>
-      <strong id="pointer-label-title">Codex</strong>
+      <strong id="pointer-label-title"></strong>
     </div>
 
-    <section class="browse-ui" id="browse-ui" aria-label="Shelf navigation">
+    <!-- First visit: nothing on the shelf yet. -->
+    <section class="empty-state" id="empty-state" aria-labelledby="empty-title" hidden>
+      <p class="eyebrow">Your shelf is empty</p>
+      <h1 class="empty-state__title" id="empty-title">Craft a book that is<br><em>entirely yours.</em></h1>
+      <p class="empty-state__deck">
+        Choose a cloth, press a title in foil, set the pages inside —
+        then open it and turn them. Every book you make is kept here.
+      </p>
+      <div class="empty-state__actions">
+        <button class="pill-button pill-button--solid" id="create-first" type="button">Create your first book</button>
+        <button class="link-button" id="import-first" type="button">Import a .folio file</button>
+      </div>
+    </section>
+
+    <!-- The shelf. -->
+    <section class="browse-ui" id="browse-ui" aria-label="Your shelf" hidden>
       <div class="selection">
-        <span class="counter" id="counter">01 / 07</span>
+        <span class="counter" id="counter">01 / 01</span>
         <div class="selection__copy">
-          <h1 class="selection__title" id="selection-title">Codex</h1>
-          <p class="selection__note" id="selection-note">Precise intent, translated into tested systems.</p>
+          <h1 class="selection__title" id="selection-title"></h1>
+          <p class="selection__note" id="selection-note"></p>
+          <div class="selection__actions">
+            <button class="link-button" id="duplicate-book" type="button">Duplicate</button>
+            <button class="link-button" id="export-book" type="button">Export</button>
+            <button class="link-button link-button--danger" id="delete-book" type="button">Delete</button>
+          </div>
         </div>
       </div>
 
       <div class="browse-actions">
-        <button class="round-button" id="previous" type="button" aria-label="Previous volume">
+        <button class="round-button" id="previous" type="button" aria-label="Previous book">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 3.5-4.5 4.5 4.5 4.5"></path></svg>
         </button>
-        <button class="text-button" id="inspect" type="button">Open</button>
-        <button class="round-button" id="next" type="button" aria-label="Next volume">
+        <button class="pill-button" id="inspect" type="button">Open</button>
+        <button class="round-button" id="next" type="button" aria-label="Next book">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
         </button>
       </div>
 
-      <nav class="index-nav" aria-label="Volume index">
-        <div class="markers" id="markers" role="tablist" aria-label="Choose a volume"></div>
-        <p class="microcopy">Wheel · arrows · select</p>
+      <nav class="index-nav" aria-label="Library">
+        <div class="index-nav__actions">
+          <button class="link-button" id="import-book" type="button">Import</button>
+          <button class="pill-button pill-button--solid" id="new-book" type="button">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>
+            New book
+          </button>
+        </div>
+        <div class="markers" id="markers" role="tablist" aria-label="Choose a book"></div>
       </nav>
     </section>
 
-    <aside
-      class="detail-panel"
-      id="detail-panel"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="detail-title"
-      aria-hidden="true"
-      inert
-    >
-      <button class="close-button" id="close-detail" type="button" aria-label="Return volume to shelf">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"></path></svg>
-      </button>
-      <p class="eyebrow" id="detail-eyebrow">Volume I · Agentic craft</p>
-      <h2 class="detail-title" id="detail-title">Codex</h2>
-      <p class="detail-deck" id="detail-deck">
-        A field manual for turning clear intent into working software, with verification treated as part of the craft.
-      </p>
-      <dl class="meta-list">
-        <div>
-          <dt>Binding</dt>
-          <dd id="detail-binding">Evergreen cloth · antique brass foil</dd>
-        </div>
-        <div>
-          <dt>Format</dt>
-          <dd id="detail-format">148 × 216 mm · imagined edition</dd>
-        </div>
-        <div>
-          <dt>Theme</dt>
-          <dd id="detail-theme">Intent into implementation</dd>
-        </div>
-        <div>
-          <dt>Motif</dt>
-          <dd id="detail-motif">Nested brackets</dd>
-        </div>
-      </dl>
-      <div class="page-navigation" role="group" aria-label="Browse sample pages">
-        <button class="page-button" id="previous-page" type="button" aria-label="Previous sample page" disabled>
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 3.5-4.5 4.5 4.5 4.5"></path></svg>
+    <!-- The atelier: 3D book on the left, the workbench on the right. -->
+    <aside class="studio" id="studio" aria-label="Book studio" aria-hidden="true" inert>
+      <header class="studio__header">
+        <button class="icon-button" id="close-detail" type="button" aria-label="Return book to the shelf">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3.5 5 8l4.5 4.5"></path></svg>
         </button>
-        <p class="page-status" aria-live="off">
-          <strong id="page-label">Closed</strong>
-          <span id="page-counter">Click book to open</span>
-        </p>
-        <button class="page-button" id="next-page" type="button" aria-label="Next sample page" disabled>
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
-        </button>
-      </div>
-      <div class="detail-controls">
-        <p class="microcopy">Drag cover or click once to open · Background to orbit</p>
-        <div class="detail-buttons">
-          <button class="text-button reset-button" id="toggle-book" type="button" aria-pressed="false">Open book</button>
-          <button class="text-button reset-button" id="reset-view" type="button">Reset view</button>
+        <div class="studio__heading">
+          <span class="studio__status" id="save-status" aria-live="polite">Saved</span>
+          <h2 class="studio__title" id="studio-title"></h2>
         </div>
-      </div>
+        <div class="studio__history">
+          <button class="icon-button" id="undo" type="button" aria-label="Undo" disabled>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 3 7l3 3M3.2 7H9a3.5 3.5 0 0 1 0 7H7"></path></svg>
+          </button>
+          <button class="icon-button" id="redo" type="button" aria-label="Redo" disabled>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 4 3 3-3 3M12.8 7H7a3.5 3.5 0 0 0 0 7h2"></path></svg>
+          </button>
+        </div>
+      </header>
+      <div class="studio__tabs" id="studio-tabs" role="tablist" aria-label="Parts of the book"></div>
+      <div class="studio__body" id="studio-body" role="tabpanel" data-scroll tabindex="-1"></div>
     </aside>
 
+    <!-- Reading controls, under the book while it is in the atelier. -->
+    <div class="reader-bar" id="reader-bar" role="group" aria-label="Reading controls" aria-hidden="true" inert>
+      <button class="round-button" id="previous-page" type="button" aria-label="Previous page" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 3.5-4.5 4.5 4.5 4.5"></path></svg>
+      </button>
+      <p class="reader-bar__status">
+        <strong id="page-label">Closed</strong>
+        <span id="page-counter">Click the book to open it</span>
+      </p>
+      <button class="round-button" id="next-page" type="button" aria-label="Next page" disabled>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
+      </button>
+      <span class="reader-bar__rule" aria-hidden="true"></span>
+      <button class="link-button" id="toggle-book" type="button" aria-pressed="false">Open book</button>
+      <button class="link-button" id="reset-view" type="button">Reset view</button>
+    </div>
+
+    <dialog class="sheet" id="new-book-dialog" aria-labelledby="new-book-title">
+      <form class="sheet__form" id="new-book-form" method="dialog">
+        <header class="sheet__header">
+          <p class="eyebrow">A new volume</p>
+          <h2 id="new-book-title">Begin a book</h2>
+          <button class="icon-button sheet__close" type="button" value="cancel" id="new-book-cancel" aria-label="Cancel">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"></path></svg>
+          </button>
+        </header>
+        <div class="sheet__fields">
+          <label class="field">
+            <span class="field__label">Title</span>
+            <input class="field__input field__input--display" id="new-book-name" name="title" type="text" maxlength="80" placeholder="Untitled" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field__label">Author</span>
+            <input class="field__input" id="new-book-author" name="author" type="text" maxlength="60" placeholder="Your name" autocomplete="off">
+          </label>
+        </div>
+        <fieldset class="sheet__presets">
+          <legend class="field__label">Start from a binding — everything can be changed later</legend>
+          <div class="preset-grid" id="new-book-presets" role="radiogroup" aria-label="Starting binding"></div>
+        </fieldset>
+        <footer class="sheet__footer">
+          <p class="microcopy" id="new-book-note">Ultramarine cloth · copper foil</p>
+          <button class="pill-button pill-button--solid" type="submit" value="create">Create book</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog class="sheet sheet--small" id="confirm-dialog" aria-labelledby="confirm-title">
+      <form class="sheet__form" method="dialog">
+        <header class="sheet__header">
+          <h2 id="confirm-title">Delete this book?</h2>
+        </header>
+        <p class="sheet__text" id="confirm-text"></p>
+        <footer class="sheet__footer">
+          <button class="link-button" type="submit" value="cancel">Keep it</button>
+          <button class="pill-button pill-button--danger" type="submit" value="confirm" id="confirm-accept">Delete</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <input id="import-file" type="file" accept=".folio,.json,application/json" hidden>
+    <input id="image-file" type="file" accept="image/*" hidden>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     <div class="sr-only" id="live-region" aria-live="polite"></div>
 
     <section class="static-fallback" id="static-fallback" aria-labelledby="fallback-title">
-      <div class="fallback__header">
-        <div>
-          <p class="fallback__kicker">Working Volumes · Static catalog</p>
-          <h2 id="fallback-title">Seven tools for making.</h2>
-        </div>
-        <p class="fallback__status" id="fallback-status">
-          The complete catalog remains readable while the interactive shelf is prepared.
-        </p>
-      </div>
-      <div class="fallback__grid" aria-label="Seven conceptual hardcovers">
-        <article class="fallback-book" style="--book-color:#182a43;--book-foil:#c87046;--book-height:390px"><span>Volume I</span><strong>Codex</strong></article>
-        <article class="fallback-book" style="--book-color:#c24d24;--book-foil:#efc16d;--book-height:356px"><span>Volume II</span><strong>Claude Code</strong></article>
-        <article class="fallback-book" style="--book-color:#afc400;--book-foil:#171a16;--book-height:374px"><span>Volume III</span><strong>Cursor</strong></article>
-        <article class="fallback-book" style="--book-color:#1537a1;--book-foil:#dbe8f1;--book-height:404px"><span>Volume IV</span><strong>Antigravity</strong></article>
-        <article class="fallback-book" style="--book-color:#c83222;--book-foil:#efb0aa;--book-height:365px"><span>Volume V</span><strong>Figma</strong></article>
-        <article class="fallback-book" style="--book-color:#da3b2f;--book-foil:#ff8eab;--book-height:385px"><span>Volume VI</span><strong>Framer</strong></article>
-        <article class="fallback-book" style="--book-color:#78a7bd;--book-foil:#e4e7e5;--book-height:398px"><span>Volume VII</span><strong>Xcode</strong></article>
-      </div>
-      <div class="fallback__footer">
-        <span>All bindings, motifs, descriptions, geometry, and cover artworks are original to this conceptual study.</span>
-        <span>Product names are used editorially and remain the property of their respective owners.</span>
+      <div>
+        <p class="eyebrow">Folio Atelier</p>
+        <h2 id="fallback-title">The atelier needs WebGL.</h2>
+        <p id="fallback-status">Preparing the studio…</p>
       </div>
     </section>
 
-    <div class="loading" id="loading" hidden aria-live="polite">
+    <div class="loading" id="loading" aria-live="polite">
       <div class="loading__inner">
         <div class="loading__mark" aria-hidden="true"></div>
-        <p>Binding the collection</p>
+        <p>Preparing the atelier</p>
       </div>
     </div>
   </main>
