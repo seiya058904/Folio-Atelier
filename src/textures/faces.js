@@ -9,6 +9,7 @@ import { getImage } from "../state/images.js";
 import { layerText } from "../state/schema.js";
 import { rgba } from "../util.js";
 import { drawMotif, hasMotif } from "./motifs.js";
+import { hasPattern, patternMask, stampPattern } from "./patterns.js";
 import { paintMaterialBase } from "./surface.js";
 import { breakText, drawLine, fitDisplayText, isCjk, lineString, setTracking } from "./text.js";
 
@@ -51,7 +52,187 @@ function withFinish(layers, finish, color, draw) {
   }
 }
 
+/* ---------- boards: material, two-tone binding, all-over pattern ---------- */
+
+const STRIP = 0.2;
+const TIP = 0.215;
+
+/** Trace the second-colour areas of a quarter or half binding. */
+function tracePartRegion(ctx, binding, width, height, hinge) {
+  const left = hinge === "left";
+  ctx.beginPath();
+  ctx.rect(left ? 0 : width * (1 - STRIP), 0, width * STRIP, height);
+  if (binding === "half") {
+    const x = left ? width : 0;
+    const dir = left ? -1 : 1;
+    const leg = width * TIP;
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + dir * leg, 0);
+    ctx.lineTo(x, leg);
+    ctx.closePath();
+    ctx.moveTo(x, height);
+    ctx.lineTo(x + dir * leg, height);
+    ctx.lineTo(x, height - leg);
+    ctx.closePath();
+  }
+}
+
+function stampFinish(layers, mask, width, height, finish, color, opacity) {
+  if (finish === "foil") {
+    stampPattern(layers.foil, mask, width, height, "#ffffff", opacity);
+  } else if (finish === "blind") {
+    stampPattern(layers.base, mask, width, height, "rgb(255,255,255)", 0.13 * opacity, 1.3, 1.5);
+    stampPattern(layers.base, mask, width, height, "rgb(0,0,0)", 0.34 * opacity);
+  } else {
+    stampPattern(layers.base, mask, width, height, color, opacity);
+  }
+}
+
+function paintBoard(layers, target, book, face, width, height) {
+  const material = book.material;
+  const hinge = face === "back" ? "right" : "left";
+  const ctx = layers.base;
+  const seed = book.seed + (face === "back" ? 3 : 0);
+  const twoTone = material.binding === "quarter" || material.binding === "half";
+  paintMaterialBase(ctx, width, height, material.color, material.kind, seed, { flip: hinge === "right" });
+
+  const pattern = book.pattern;
+  if (pattern && hasPattern(pattern.key)) {
+    const mask = patternMask(pattern.key, target.canvas.width, target.canvas.height, { width, height }, {
+      scale: pattern.scale || 1, seed: book.seed
+    });
+    const clipFoil = pattern.finish === "foil" && twoTone;
+    if (clipFoil) {
+      layers.foil.save();
+      tracePartRegion(layers.foil, material.binding, width, height, hinge);
+      layers.foil.rect(0, 0, width, height);
+      layers.foil.clip("evenodd");
+    }
+    stampFinish(layers, mask, width, height, pattern.finish, pattern.color, pattern.opacity ?? 0.6);
+    if (clipFoil) layers.foil.restore();
+  }
+
+  if (twoTone) {
+    const left = hinge === "left";
+    ctx.save();
+    tracePartRegion(ctx, material.binding, width, height, hinge);
+    ctx.clip();
+    paintMaterialBase(ctx, width, height, material.second, material.kind, seed + 11, { flip: !left });
+    ctx.restore();
+    // The second covering laps over the first: a lit edge with a shadow beside it.
+    const seam = (x1, y1, x2, y2, nx, ny) => {
+      ctx.save();
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = "rgba(0,0,0,0.3)";
+      ctx.beginPath();
+      ctx.moveTo(x1 + nx * 1.6, y1 + ny * 1.6);
+      ctx.lineTo(x2 + nx * 1.6, y2 + ny * 1.6);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
+      ctx.beginPath();
+      ctx.moveTo(x1 - nx * 0.6, y1 - ny * 0.6);
+      ctx.lineTo(x2 - nx * 0.6, y2 - ny * 0.6);
+      ctx.stroke();
+      ctx.restore();
+    };
+    const dir = left ? 1 : -1;
+    const stripX = left ? width * STRIP : width * (1 - STRIP);
+    seam(stripX, 0, stripX, height, dir, 0);
+    if (material.binding === "half") {
+      const x = left ? width : 0;
+      const leg = width * TIP;
+      seam(x - dir * leg, 0, x, leg, -dir * 0.7, 0.7);
+      seam(x - dir * leg, height, x, height - leg, -dir * 0.7, -0.7);
+    }
+  }
+
+  // Stab binding: thread through holes near the hinge, wrapped round the spine.
+  const stitch = book.details.stitch;
+  if (stitch?.show) {
+    const left = hinge === "left";
+    const x = left ? width * 0.062 : width * (1 - 0.062);
+    const edge = left ? 0 : width;
+    const holes = stitchHoles(stitch.holes);
+    ctx.save();
+    ctx.lineCap = "round";
+    const thread = (x1, y1, x2, y2) => {
+      ctx.strokeStyle = "rgba(0,0,0,0.3)";
+      ctx.lineWidth = 4.6;
+      ctx.beginPath();
+      ctx.moveTo(x1 + 1, y1 + 1.4);
+      ctx.lineTo(x2 + 1, y2 + 1.4);
+      ctx.stroke();
+      ctx.strokeStyle = stitch.color;
+      ctx.lineWidth = 3.4;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    };
+    thread(x, 0, x, height);
+    holes.forEach((position) => thread(edge, position * height, x, position * height));
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    holes.forEach((position) => {
+      ctx.beginPath();
+      ctx.arc(x, position * height, 2.3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.restore();
+  }
+}
+
+export const stitchHoles = (count) => (Number(count) === 6
+  ? [0.05, 0.14, 0.38, 0.62, 0.86, 0.95]
+  : [0.07, 0.355, 0.645, 0.93]);
+
+/** Metal corner pieces, cut into the foil layer at the fore-edge corners. */
+function drawCorners(ctx, style, width, height, hinge) {
+  if (!style || style === "none") return;
+  const left = hinge === "left";
+  const x = left ? width : 0;
+  const dir = left ? -1 : 1;
+  const leg = width * 0.17;
+  ctx.save();
+  ctx.fillStyle = "#ffffff";
+  [[0, 1], [height, -1]].forEach(([y, dy]) => {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + dir * leg, y);
+    if (style === "scalloped") {
+      ctx.quadraticCurveTo(x + dir * leg * 0.62, y + dy * leg * 0.3, x + dir * leg * 0.5, y + dy * leg * 0.5);
+      ctx.quadraticCurveTo(x + dir * leg * 0.3, y + dy * leg * 0.62, x, y + dy * leg);
+    } else {
+      ctx.lineTo(x, y + dy * leg);
+    }
+    ctx.closePath();
+    ctx.fill();
+    if (style !== "plain") {
+      // Engraving: lines and a rivet cut out of the leaf.
+      ctx.save();
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.lineWidth = 1.6;
+      [0.52, 0.66].forEach((t) => {
+        ctx.beginPath();
+        ctx.moveTo(x + dir * leg * t, y + dy * 5);
+        ctx.lineTo(x + dir * 5, y + dy * leg * t);
+        ctx.stroke();
+      });
+      ctx.beginPath();
+      ctx.arc(x + dir * leg * 0.2, y + dy * leg * 0.2, 4.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.beginPath();
+      ctx.arc(x + dir * leg * 0.2, y + dy * leg * 0.2, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+  ctx.restore();
+}
+
 /* ---------- borders ---------- */
+
+const CORNERS = (m, width, height) => [[m, m, 1, 1], [width - m, m, -1, 1], [m, height - m, 1, -1], [width - m, height - m, -1, -1]];
 
 function drawBorder(ctx, color, style, inset, width, height) {
   const m = inset * width;
@@ -63,6 +244,21 @@ function drawBorder(ctx, color, style, inset, width, height) {
     ctx.lineWidth = lineWidth;
     ctx.strokeRect(m + offset, m + offset, width - (m + offset) * 2, height - (m + offset) * 2);
   };
+  // Run `unit(a, pitch)` along all four sides; (a, b) are along / inward.
+  const sides = (offset, target, unit) => {
+    const o = m + offset;
+    [
+      [o, o, 1, 0, 0, 1, width - o * 2],
+      [width - o, o, 0, 1, -1, 0, height - o * 2],
+      [width - o, height - o, -1, 0, 0, -1, width - o * 2],
+      [o, height - o, 0, -1, 1, 0, height - o * 2]
+    ].forEach(([x0, y0, ux, uy, vx, vy, length]) => {
+      const count = Math.max(1, Math.round(length / target));
+      const pitch = length / count;
+      const at = (a, b) => [x0 + ux * a + vx * b, y0 + uy * a + vy * b];
+      for (let index = 0; index < count; index += 1) unit(index * pitch, pitch, at);
+    });
+  };
   if (style === "single") {
     rect(0, 2.2);
   } else if (style === "double") {
@@ -72,35 +268,144 @@ function drawBorder(ctx, color, style, inset, width, height) {
     rect(0, 6);
     rect(13, 1.6);
     rect(21, 1.6);
+  } else if (style === "rounded") {
+    [[0, 2.2, 34], [12, 1.3, 24]].forEach(([offset, lineWidth, radius]) => {
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      ctx.roundRect(m + offset, m + offset, width - (m + offset) * 2, height - (m + offset) * 2, radius);
+      ctx.stroke();
+    });
   } else if (style === "corners") {
     const arm = width * 0.085;
     ctx.lineWidth = 2.4;
-    [[m, m, 1, 1], [width - m, m, -1, 1], [m, height - m, 1, -1], [width - m, height - m, -1, -1]]
-      .forEach(([x, y, dx, dy]) => {
-        ctx.beginPath();
-        ctx.moveTo(x + dx * arm, y);
-        ctx.lineTo(x, y);
-        ctx.lineTo(x, y + dy * arm);
-        ctx.stroke();
-      });
+    CORNERS(m, width, height).forEach(([x, y, dx, dy]) => {
+      ctx.beginPath();
+      ctx.moveTo(x + dx * arm, y);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x, y + dy * arm);
+      ctx.stroke();
+    });
   } else if (style === "deco") {
     rect(0, 2);
     const step = width * 0.034;
     ctx.lineWidth = 1.6;
-    [[m, m, 1, 1], [width - m, m, -1, 1], [m, height - m, 1, -1], [width - m, height - m, -1, -1]]
-      .forEach(([x, y, dx, dy]) => {
-        for (let ring = 1; ring <= 3; ring += 1) {
-          const reach = step * (4 - ring) * 1.5;
-          ctx.beginPath();
-          ctx.moveTo(x + dx * (ring * step + reach), y + dy * ring * step);
-          ctx.lineTo(x + dx * ring * step, y + dy * ring * step);
-          ctx.lineTo(x + dx * ring * step, y + dy * (ring * step + reach));
-          ctx.stroke();
-        }
+    CORNERS(m, width, height).forEach(([x, y, dx, dy]) => {
+      for (let ring = 1; ring <= 3; ring += 1) {
+        const reach = step * (4 - ring) * 1.5;
         ctx.beginPath();
-        ctx.arc(x + dx * step * 4.6, y + dy * step * 4.6, 3.2, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(x + dx * (ring * step + reach), y + dy * ring * step);
+        ctx.lineTo(x + dx * ring * step, y + dy * ring * step);
+        ctx.lineTo(x + dx * ring * step, y + dy * (ring * step + reach));
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(x + dx * step * 4.6, y + dy * step * 4.6, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  } else if (style === "ornate") {
+    // A ticket frame: corners bitten out by quarter circles, with a curl in each.
+    const q = width * 0.062;
+    const frame = (offset, lineWidth) => {
+      const l = m + offset;
+      const r = width - m - offset;
+      const t = m + offset;
+      const b = height - m - offset;
+      const radius = q - offset * 0.2;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      ctx.moveTo(l + radius, t);
+      ctx.lineTo(r - radius, t);
+      ctx.arc(r, t, radius, Math.PI, Math.PI / 2, true);
+      ctx.lineTo(r, b - radius);
+      ctx.arc(r, b, radius, Math.PI * 1.5, Math.PI, true);
+      ctx.lineTo(l + radius, b);
+      ctx.arc(l, b, radius, 0, Math.PI * 1.5, true);
+      ctx.lineTo(l, t + radius);
+      ctx.arc(l, t, radius, Math.PI / 2, 0, true);
+      ctx.closePath();
+      ctx.stroke();
+    };
+    frame(0, 2.2);
+    frame(11, 1.2);
+    CORNERS(m, width, height).forEach(([x, y, dx, dy]) => {
+      ctx.beginPath();
+      ctx.arc(x + dx * q * 0.2, y + dy * q * 0.2, 4.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(x + dx * q * 0.2, y + dy * q * 0.2, q * 0.46, 0, Math.PI * 2);
+      ctx.stroke();
+      const cx = x + dx * q * 1.5;
+      const cy = y + dy * q * 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 7);
+      ctx.lineTo(cx + 5, cy);
+      ctx.lineTo(cx, cy + 7);
+      ctx.lineTo(cx - 5, cy);
+      ctx.closePath();
+      ctx.fill();
+    });
+  } else if (style === "beaded") {
+    rect(13, 1.4);
+    sides(0, 15, (a, pitch, at) => {
+      const [x, y] = at(a + pitch / 2, 0);
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  } else if (style === "meander") {
+    rect(0, 2);
+    rect(27, 2);
+    ctx.lineWidth = 1.7;
+    ctx.lineCap = "square";
+    const key = [[0.12, 0.76], [0.12, 0.24], [0.88, 0.24], [0.88, 0.76], [0.38, 0.76], [0.38, 0.5], [0.64, 0.5]];
+    const band = 27;
+    sides(0, 27, (a, pitch, at) => {
+      // Leave the four corner squares clear.
+      if (a < band - 1) return;
+      ctx.beginPath();
+      key.forEach(([u, v], index) => {
+        const [x, y] = at(a + u * pitch, v * band);
+        if (index) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
       });
+      ctx.stroke();
+    });
+    CORNERS(m, width, height).forEach(([x, y, dx, dy]) => {
+      ctx.fillRect(x + dx * band * 0.5 - 4, y + dy * band * 0.5 - 4, 8, 8);
+    });
+  } else if (style === "scallop") {
+    rect(0, 2.2);
+    ctx.lineWidth = 1.5;
+    sides(0, 30, (a, pitch, at) => {
+      const [x1, y1] = at(a, 0);
+      const [cx, cy] = at(a + pitch / 2, pitch * 0.62);
+      const [x2, y2] = at(a + pitch, 0);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo(cx, cy, x2, y2);
+      ctx.stroke();
+    });
+  } else if (style === "lozenge") {
+    rect(0, 2.2);
+    const o = m + 12;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(width / 2, o);
+    ctx.lineTo(width - o, height / 2);
+    ctx.lineTo(width / 2, height - o);
+    ctx.lineTo(o, height / 2);
+    ctx.closePath();
+    ctx.stroke();
+    CORNERS(m + 30, width, height).forEach(([x, y]) => {
+      ctx.beginPath();
+      ctx.moveTo(x, y - 12);
+      ctx.lineTo(x + 8, y);
+      ctx.lineTo(x, y + 12);
+      ctx.lineTo(x - 8, y);
+      ctx.closePath();
+      ctx.fill();
+    });
   } else if (style === "arch") {
     const left = m;
     const right = width - m;
@@ -121,10 +426,12 @@ function drawBorder(ctx, color, style, inset, width, height) {
 
 /** The pasted paper label used by the "Label" layout. */
 function drawPanel(layers, border, width, height) {
-  const x = width * 0.15;
-  const y = height * 0.155;
-  const w = width * 0.7;
-  const h = height * 0.3;
+  // "slip" is the tall title slip of a thread-bound book, pasted near the hinge.
+  const slip = border.style === "slip";
+  const x = width * (slip ? 0.105 : 0.15);
+  const y = height * (slip ? 0.075 : 0.155);
+  const w = width * (slip ? 0.2 : 0.7);
+  const h = height * (slip ? 0.51 : 0.3);
   if (border.finish === "ink") {
     const ctx = layers.base;
     ctx.save();
@@ -136,10 +443,13 @@ function drawPanel(layers, border, width, height) {
     ctx.restore();
     ctx.save();
     ctx.strokeStyle = rgba("#1c1712", 0.55);
+    const gap = slip ? 8 : 13;
     ctx.lineWidth = 1.6;
-    ctx.strokeRect(x + 13, y + 13, w - 26, h - 26);
-    ctx.lineWidth = 0.8;
-    ctx.strokeRect(x + 19, y + 19, w - 38, h - 38);
+    ctx.strokeRect(x + gap, y + gap, w - gap * 2, h - gap * 2);
+    if (!slip) {
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(x + 19, y + 19, w - 38, h - 38);
+    }
     ctx.restore();
   } else {
     withFinish(layers, border.finish, border.color, (ctx, color) => {
@@ -156,10 +466,58 @@ function drawPanel(layers, border, width, height) {
 
 /* ---------- text ---------- */
 
+/**
+ * Set a line down the sheet. CJK reads upright, one character per line;
+ * anything else is turned a quarter and reads top to bottom.
+ */
+function drawVerticalText(ctx, text, layer, cx, cy, room, maxSize) {
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  if (isCjk(text) && !/[A-Za-z]{2,}/.test(text)) {
+    const characters = [...text.replace(/\s+/g, "")];
+    let size = Math.min(layer.size, maxSize);
+    let pitch = size * (1.12 + (layer.tracking || 0));
+    if (pitch * characters.length > room) {
+      size *= room / (pitch * characters.length);
+      pitch = size * (1.12 + (layer.tracking || 0));
+    }
+    ctx.font = fontString(layer, size);
+    ctx.letterSpacing = "0px";
+    const top = cy - (pitch * (characters.length - 1)) / 2;
+    characters.forEach((character, index) => {
+      ctx.fillText(character, cx, top + index * pitch);
+    });
+    return;
+  }
+  let size = Math.min(layer.size, maxSize);
+  const setFont = (value) => {
+    ctx.font = fontString(layer, value);
+    setTracking(ctx, layer.tracking, value);
+  };
+  setFont(size);
+  const measured = ctx.measureText(text).width;
+  if (measured > room) {
+    size *= room / measured;
+    setFont(size);
+  }
+  ctx.translate(cx, cy);
+  ctx.rotate(Math.PI / 2);
+  ctx.fillText(text, (layer.tracking || 0) * size * 0.5, size * 0.04);
+}
+
 function drawTextLayer(layers, book, layer, width, height) {
   if (!layer.show) return;
   const text = layerText(book, layer).trim();
   if (!text) return;
+  if (layer.vertical) {
+    withFinish(layers, layer.finish, layer.color, (ctx, color) => {
+      ctx.save();
+      ctx.fillStyle = color;
+      drawVerticalText(ctx, text, layer, layer.x * width, layer.y * height, (layer.width || 0.5) * height, width * 0.24);
+      ctx.restore();
+    });
+    return;
+  }
   const maxWidth = (layer.width || 0.8) * width;
   const isDisplay = layer.size >= 44;
 
@@ -236,7 +594,7 @@ export function paintFront(book, baseTarget, foilTarget, onAsset) {
   const { width, height } = FACE_SIZE.front;
   const layers = { base: begin(baseTarget, FACE_SIZE.front), foil: begin(foilTarget, FACE_SIZE.front) };
   const front = book.front;
-  paintMaterialBase(layers.base, width, height, book.material.color, book.material.kind, book.seed);
+  paintBoard(layers, baseTarget, book, "front", width, height);
 
   if (front.image?.id) {
     const image = getImage(front.image.id, onAsset);
@@ -268,7 +626,7 @@ export function paintFront(book, baseTarget, foilTarget, onAsset) {
     }
   }
 
-  if (front.border.style === "panel") {
+  if (front.border.style === "panel" || front.border.style === "slip") {
     drawPanel(layers, front.border, width, height);
   } else if (front.border.style !== "none") {
     withFinish(layers, front.border.finish, front.border.color, (ctx, color) => {
@@ -277,6 +635,7 @@ export function paintFront(book, baseTarget, foilTarget, onAsset) {
   }
   drawMotifLayer(layers, book, front.motif, width, height);
   front.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
+  drawCorners(layers.foil, book.details.corners?.style, width, height, "left");
   baseTarget.commit();
   foilTarget.commit();
 }
@@ -285,20 +644,21 @@ export function paintBack(book, baseTarget, foilTarget) {
   const { width, height } = FACE_SIZE.back;
   const layers = { base: begin(baseTarget, FACE_SIZE.back), foil: begin(foilTarget, FACE_SIZE.back) };
   const back = book.back;
-  paintMaterialBase(layers.base, width, height, book.material.color, book.material.kind, book.seed + 3);
+  paintBoard(layers, baseTarget, book, "back", width, height);
 
-  if (back.border.style !== "none" && back.border.style !== "panel") {
+  if (!["none", "panel", "slip"].includes(back.border.style)) {
     withFinish(layers, back.border.finish, back.border.color, (ctx, color) => {
       drawBorder(ctx, color, back.border.style, back.border.inset, width, height);
     });
   }
   drawMotifLayer(layers, book, back.motif, width, height);
   back.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
+  drawCorners(layers.foil, book.details.corners?.style, width, height, "right");
   baseTarget.commit();
   foilTarget.commit();
 }
 
-function drawSpineText(layers, book, layer, width, height) {
+function drawSpineText(layers, book, layer, width, height, room) {
   if (!layer.show) return;
   const text = layerText(book, layer).trim();
   if (!text) return;
@@ -307,11 +667,11 @@ function drawSpineText(layers, book, layer, width, height) {
     ctx.fillStyle = color;
     ctx.textBaseline = "middle";
     ctx.textAlign = "center";
-    const setFont = (size) => {
-      ctx.font = fontString(layer, size);
-      setTracking(ctx, layer.tracking, size);
-    };
     if (layer.orient === "horizontal") {
+      const setFont = (size) => {
+        ctx.font = fontString(layer, size);
+        setTracking(ctx, layer.tracking, size);
+      };
       const fitted = fitDisplayText(ctx, text, {
         size: layer.size, maxWidth: width * 0.62, maxLines: 4, minScale: 0.45, setFont
       });
@@ -322,63 +682,138 @@ function drawSpineText(layers, book, layer, width, height) {
       fitted.lines.forEach((line, index) => {
         ctx.fillText(lineString(line), width / 2 + trail, top + index * lineHeight);
       });
-    } else if (isCjk(text) && !/[A-Za-z]{2,}/.test(text)) {
-      // CJK titles read upright, one character per line down the spine.
-      const characters = [...text.replace(/\s+/g, "")];
-      const room = height * 0.56;
-      let size = Math.min(layer.size, width * 0.5);
-      let pitch = size * (1.12 + (layer.tracking || 0));
-      if (pitch * characters.length > room) {
-        size *= room / (pitch * characters.length);
-        pitch = size * (1.12 + (layer.tracking || 0));
-      }
-      ctx.font = fontString(layer, size);
-      ctx.letterSpacing = "0px";
-      const top = layer.y * height - (pitch * (characters.length - 1)) / 2;
-      characters.forEach((character, index) => {
-        ctx.fillText(character, width / 2, top + index * pitch);
-      });
     } else {
-      let size = Math.min(layer.size, width * 0.56);
-      setFont(size);
-      const room = height * 0.56;
-      const measured = ctx.measureText(text).width;
-      if (measured > room) {
-        size *= room / measured;
-        setFont(size);
-      }
-      ctx.translate(width / 2, layer.y * height);
-      ctx.rotate(Math.PI / 2);
-      ctx.fillText(text, (layer.tracking || 0) * size * 0.5, size * 0.04);
+      drawVerticalText(ctx, text, layer, width / 2, layer.y * height, room, width * 0.54);
     }
     ctx.restore();
   });
 }
 
+const BAND_POSITIONS = [0.135, 0.3, 0.7, 0.865];
+
 export function paintSpine(book, baseTarget, foilTarget) {
   const { width, height } = FACE_SIZE.spine;
   const layers = { base: begin(baseTarget, FACE_SIZE.spine), foil: begin(foilTarget, FACE_SIZE.spine) };
   const spine = book.spine;
-  paintMaterialBase(layers.base, width, height, book.material.color, book.material.kind, book.seed + 7, { spine: true });
+  const material = book.material;
+  const twoTone = material.binding === "quarter" || material.binding === "half";
+  paintMaterialBase(layers.base, width, height, twoTone ? material.second : material.color, material.kind, book.seed + 7, { spine: true });
+
+  const pattern = book.pattern;
+  if (!twoTone && pattern?.spine && hasPattern(pattern.key)) {
+    const mask = patternMask(pattern.key, baseTarget.canvas.width, baseTarget.canvas.height, { width, height }, {
+      scale: (pattern.scale || 1) * 1.3, seed: book.seed + 1
+    });
+    stampFinish(layers, mask, width, height, pattern.finish, pattern.color, pattern.opacity ?? 0.6);
+  }
+
+  const stitch = book.details.stitch;
+  if (stitch?.show) {
+    const ctx = layers.base;
+    ctx.save();
+    stitchHoles(stitch.holes).forEach((position) => {
+      ctx.fillStyle = "rgba(0,0,0,0.28)";
+      ctx.fillRect(0, position * height + 0.6, width, 4.6);
+      ctx.fillStyle = stitch.color;
+      ctx.fillRect(0, position * height - 1.7, width, 3.4);
+    });
+    ctx.restore();
+  }
+
+  // A pasted title label, as on a leather-backed library binding.
+  const title = spine.texts.find((layer) => layer.id === "spine-title");
+  const labelled = Boolean(spine.label?.show && title);
+  const labelHalf = labelled ? (title.orient === "horizontal" ? 0.085 : 0.2) * height : 0;
+  if (labelled) {
+    const ctx = layers.base;
+    const top = title.y * height - labelHalf;
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.35)";
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+    ctx.fillStyle = spine.label.color;
+    ctx.fillRect(22, top, width - 44, labelHalf * 2);
+    ctx.restore();
+    const shade = ctx.createLinearGradient(0, 0, width, 0);
+    shade.addColorStop(0, "rgba(0,0,0,0.16)");
+    shade.addColorStop(0.3, "rgba(255,255,255,0.04)");
+    shade.addColorStop(1, "rgba(0,0,0,0.14)");
+    ctx.fillStyle = shade;
+    ctx.fillRect(22, top, width - 44, labelHalf * 2);
+  }
 
   withFinish(layers, spine.finish, spine.color, (ctx, color) => {
     ctx.save();
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    if (spine.style === "frame") {
+    if (labelled) {
+      [-1, 1].forEach((side) => {
+        ctx.fillRect(30, title.y * height + side * (labelHalf - 9) - 1, width - 60, 2);
+      });
+    }
+    if (spine.style === "frame" || spine.style === "double") {
       ctx.lineWidth = 2.4;
       ctx.strokeRect(30, 38, width - 60, height - 76);
+      if (spine.style === "double") {
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(40, 48, width - 80, height - 96);
+      }
     } else if (spine.style === "rules") {
       [44, 60, height - 60, height - 44].forEach((y, index) => {
         ctx.fillRect(26, y, width - 52, index === 0 || index === 3 ? 4 : 1.6);
       });
-    } else if (spine.style === "bands") {
-      [0.135, 0.3, 0.7, 0.865].forEach((position) => {
+    } else if (spine.style === "bands" || spine.style === "panels") {
+      BAND_POSITIONS.forEach((position) => {
         const y = position * height;
         ctx.fillRect(18, y - 9, width - 36, 2);
         ctx.fillRect(18, y + 7, width - 36, 2);
       });
       [36, height - 36].forEach((y) => ctx.fillRect(18, y - 2, width - 36, 4));
+      if (spine.style === "panels") {
+        const stops = [36 / height, ...BAND_POSITIONS, 1 - 36 / height];
+        ctx.lineWidth = 1.2;
+        for (let index = 0; index < stops.length - 1; index += 1) {
+          const top = stops[index] * height + 22;
+          const bottom = stops[index + 1] * height - 22;
+          if (labelled && index === 2) continue;
+          ctx.strokeRect(34, top, width - 68, bottom - top);
+        }
+        const cy = ((BAND_POSITIONS[0] + BAND_POSITIONS[1]) / 2) * height;
+        ctx.beginPath();
+        ctx.moveTo(width / 2, cy - 30);
+        ctx.lineTo(width / 2 + 20, cy);
+        ctx.lineTo(width / 2, cy + 30);
+        ctx.lineTo(width / 2 - 20, cy);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    if (spine.emblem === "diamond") {
+      const y = height - 122;
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(width / 2, y - 30);
+      ctx.lineTo(width / 2 + 21, y);
+      ctx.lineTo(width / 2, y + 30);
+      ctx.lineTo(width / 2 - 21, y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(width / 2, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (spine.emblem === "star") {
+      const y = height - 122;
+      ctx.beginPath();
+      for (let index = 0; index < 16; index += 1) {
+        const radius = index % 2 ? 7 : index % 4 === 0 ? 28 : 16;
+        const angle = (index / 16) * Math.PI * 2 - Math.PI / 2;
+        const px = width / 2 + Math.cos(angle) * radius;
+        const py = y + Math.sin(angle) * radius;
+        if (index) ctx.lineTo(px, py);
+        else ctx.moveTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
     }
     if (spine.emblem === "ring") {
       const y = height - 122;
@@ -402,10 +837,10 @@ export function paintSpine(book, baseTarget, foilTarget) {
     });
   }
 
-  if (spine.style === "bands") {
+  if (spine.style === "bands" || spine.style === "panels") {
     // Raised bands: a soft shadow under each cord so the bump reads in the dye too.
     const ctx = layers.base;
-    [0.135, 0.3, 0.7, 0.865].forEach((position) => {
+    BAND_POSITIONS.forEach((position) => {
       const y = position * height;
       const shade = ctx.createLinearGradient(0, y - 16, 0, y + 20);
       shade.addColorStop(0, "rgba(0,0,0,0)");
@@ -417,7 +852,10 @@ export function paintSpine(book, baseTarget, foilTarget) {
     });
   }
 
-  spine.texts.forEach((layer) => drawSpineText(layers, book, layer, width, height));
+  spine.texts.forEach((layer) => {
+    const room = labelled && layer.id === "spine-title" ? labelHalf * 2 - 44 : height * 0.56;
+    drawSpineText(layers, book, layer, width, height, room);
+  });
   baseTarget.commit();
   foilTarget.commit();
 }
@@ -451,6 +889,11 @@ export function paintEndpaper(book, target) {
         ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fill();
       }
     }
+  } else if (pattern !== "marble" && hasPattern(pattern)) {
+    const mask = patternMask(pattern, target.canvas.width, target.canvas.height, logical, {
+      unit: 40, lineWidth: 1, seed: book.seed
+    });
+    stampPattern(ctx, mask, width, height, book.material.color, 0.36);
   } else if (pattern === "marble") {
     ctx.lineWidth = 1.4;
     for (let band = 0; band < 46; band += 1) {

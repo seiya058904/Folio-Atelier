@@ -1,6 +1,7 @@
 // Form controls for the studio. Each builder returns an element and calls
 // back with the new value; none of them know about books or the store.
 
+import { t } from "../i18n.js";
 import { h } from "./dom.js";
 
 let controlCount = 0;
@@ -8,8 +9,8 @@ const nextId = (prefix) => `${prefix}-${(controlCount += 1)}`;
 
 export function group(title, hint, ...children) {
   return h("section", { class: "group" },
-    h("div", { class: "group__head" }, h("h3", { class: "group__title", text: title })),
-    hint ? h("p", { class: "group__hint", text: hint }) : null,
+    h("div", { class: "group__head" }, h("h3", { class: "group__title", text: t(title) })),
+    hint ? h("p", { class: "group__hint", text: t(hint) }) : null,
     h("div", { class: "stack" }, children)
   );
 }
@@ -23,14 +24,14 @@ export function textField({ label, value = "", placeholder = "", display = false
     class: `field__input${display ? " field__input--display" : ""}`,
     type: "text",
     value,
-    placeholder,
+    placeholder: t(placeholder),
     maxLength,
     autocomplete: "off",
     spellcheck: false,
     oninput: (event) => onInput(event.target.value)
   });
   return h("div", { class: "field" },
-    h("label", { class: "field__label", for: id, text: label }),
+    h("label", { class: "field__label", for: id, text: t(label) }),
     input
   );
 }
@@ -38,11 +39,11 @@ export function textField({ label, value = "", placeholder = "", display = false
 export function textArea({ label, value = "", placeholder = "", tall = false, onInput }) {
   const id = nextId("area");
   return h("div", { class: "field" },
-    h("label", { class: "field__label", for: id, text: label }),
+    h("label", { class: "field__label", for: id, text: t(label) }),
     h("textarea", {
       id,
       class: `field__textarea${tall ? " field__textarea--tall" : ""}`,
-      placeholder,
+      placeholder: t(placeholder),
       value,
       oninput: (event) => onInput(event.target.value)
     })
@@ -54,7 +55,7 @@ export function slider({ label, value, min, max, step = 0.01, format = (v) => v,
   const output = h("span", { class: "field__value", text: format(value) });
   return h("div", { class: "field" },
     h("div", { class: "field__head" },
-      h("label", { class: "field__label", for: id, text: label }),
+      h("label", { class: "field__label", for: id, text: t(label) }),
       output
     ),
     h("input", {
@@ -80,9 +81,9 @@ export function select({ label, value, options, onChange }) {
     id,
     class: "field__select",
     onchange: (event) => onChange(event.target.value)
-  }, options.map((option) => h("option", { value: option.id, text: option.label, selected: option.id === value })));
+  }, options.map((option) => h("option", { value: option.id, text: t(option.label), selected: option.id === value })));
   return h("div", { class: "field" },
-    h("label", { class: "field__label", for: id, text: label }),
+    h("label", { class: "field__label", for: id, text: t(label) }),
     element
   );
 }
@@ -119,20 +120,20 @@ export function segmented({ label, value, options, onChange }) {
     type: "button",
     role: "radio",
     dataset: { value: option.id },
-    text: option.label,
-    title: option.label
+    text: t(option.label),
+    title: t(option.note || option.label)
   }));
-  const container = h("div", { class: "segmented", role: "radiogroup", "aria-label": label }, buttons);
+  const container = h("div", { class: "segmented", role: "radiogroup", "aria-label": t(label) }, buttons);
   radioGroup(container, buttons, value, onChange);
   return h("div", { class: "field" },
-    label ? h("span", { class: "field__label", text: label }) : null,
+    label ? h("span", { class: "field__label", text: t(label) }) : null,
     container
   );
 }
 
 export function toggle({ label, value, onChange }) {
   return h("label", { class: "toggle" },
-    h("span", { class: "field__label", text: label }),
+    h("span", { class: "field__label", text: t(label) }),
     h("input", { type: "checkbox", checked: Boolean(value), onchange: (event) => onChange(event.target.checked) })
   );
 }
@@ -148,14 +149,14 @@ export function colorField({ label, value, swatches = [], metal = false, custom 
     type: "button",
     role: "radio",
     class: `swatch${metal || item.metal ? " swatch--metal" : ""}`,
-    title: item.label,
-    "aria-label": item.label,
+    title: t(item.label),
+    "aria-label": t(item.label),
     dataset: { value: item.value },
     style: { "--swatch": item.color }
   }));
   buttons.forEach((button, index) => button.style.setProperty("--swatch", items[index].color));
-  const picker = custom ? h("label", { class: "swatch swatch--custom", title: "Custom colour" },
-    h("span", { class: "sr-only", text: `${label}: custom colour` }),
+  const picker = custom ? h("label", { class: "swatch swatch--custom", title: t("Custom colour") },
+    h("span", { class: "sr-only", text: `${t(label)}: ${t("Custom colour")}` }),
     h("input", {
       type: "color",
       value: /^#[0-9a-f]{6}$/i.test(value) ? value : "#888888",
@@ -165,10 +166,10 @@ export function colorField({ label, value, swatches = [], metal = false, custom 
       }
     })
   ) : null;
-  const container = h("div", { class: "swatches", role: "radiogroup", "aria-label": label }, buttons, picker);
+  const container = h("div", { class: "swatches", role: "radiogroup", "aria-label": t(label) }, buttons, picker);
   const mark = radioGroup(container, buttons, value, (next) => onInput(next, false));
   return h("div", { class: "field" },
-    h("span", { class: "field__label", text: label }),
+    h("span", { class: "field__label", text: t(label) }),
     container
   );
 }
@@ -182,10 +183,10 @@ export function tiles({ label, value, options, render, className = "", onChange 
     type: "button",
     role: "radio",
     class: "tile",
-    title: option.note || option.label,
+    title: t(option.note || option.label),
     dataset: { value: option.id }
-  }, render(option), h("span", { text: option.label })));
-  const container = h("div", { class: `tiles ${className}`.trim(), role: "radiogroup", "aria-label": label }, buttons);
+  }, render(option), h("span", { text: t(option.label) })));
+  const container = h("div", { class: `tiles ${className}`.trim(), role: "radiogroup", "aria-label": t(label) }, buttons);
   radioGroup(container, buttons, value, onChange);
   return container;
 }

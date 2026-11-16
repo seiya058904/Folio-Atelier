@@ -7,10 +7,12 @@ Start from an empty shelf. Choose a cloth, press a title in foil, set the pages 
 ## What you can do
 
 - **Begin from nothing.** The first visit shows an empty walnut shelf and one invitation: create your first book.
-- **Design the binding.** Fourteen starting bindings; five covering materials (bookcloth, linen, leather, paper, velvet); nine foils with adjustable metal and polish; any colour.
-- **Compose the cover, spine and back.** Six cover layouts, eight border styles, sixteen ornaments, your own artwork as a full cover or inset plate, and lettering lines with typeface, size, weight, tracking, position and finish (foil, print or blind stamp).
-- **Finish the details.** Gilt or stained page edges, patterned endpapers, ribbon marker, headbands, paper stock.
-- **Write the inside.** Ten page templates — half-title, title page, dedication, contents, chapter opener, body text, pull quote, plate, colophon, blank. Long text flows onto as many pages as it needs; the contents page builds itself from your chapters. Latin and CJK text are both typeset.
+- **Work in English or Chinese.** Switch the interface with the `EN / 中` control; each book also chooses the language of its own printed labels (“Chapter I” or “第一章”).
+- **Design the binding.** Twenty-two starting bindings; nine covering materials (bookcloth, buckram, linen, silk, leather, suede, vellum, paper, velvet); full, quarter or half binding in two colours; sixteen foils including holographic and pearl, with adjustable metal, polish and iridescence.
+- **Lay a pattern over the boards.** Seventeen all-over patterns — stripes, harlequin, wave scales, linked circles, fret, clouds, sprigs, marbling and more — stamped in foil, printed, or pressed blind, optionally carried across the spine.
+- **Compose the cover, spine and back.** Eight cover layouts (two of them set the title vertically), fourteen border styles, thirty-three ornaments, your own artwork as a full cover or inset plate, and lettering lines with typeface, size, weight, tracking, position, direction and finish. Twenty-one typefaces, five of them Chinese.
+- **Finish the details.** Gilt, stained, sprinkled or ombré page edges; metal corner pieces; stab stitching in four or six holes; a pasted spine label; patterned endpapers; one or two ribbons; plain or striped headbands; seven paper stocks.
+- **Write the inside.** Thirteen page templates — half-title, title page, dedication, epigraph, contents, part title, chapter opener, body text, verse, pull quote, plate, colophon, blank. Long text flows onto as many pages as it needs; the contents page builds itself; `***` on its own line sets a section break. Choose leading, chapter-opening style, page-number position and ink colour. Latin and CJK text are both typeset.
 - **Handle the book.** Orbit, zoom, open the cover, drag pages with curved page-turn physics, and jump the camera to the front, spine, back or edges.
 - **Keep a library.** Books save automatically. Duplicate, delete, export to a `.folio` file and import it elsewhere. Undo and redo while editing.
 
@@ -34,10 +36,11 @@ styles/app.css        Interface
 assets/               Walnut texture, ambient score and Foley
 src/
   main.js             Start-up; connects store, engine and interface
+  i18n.js             English / Chinese interface strings
   engine.js           Room, shelf, cameras, shelf <-> studio state machine, page interaction
   book/rig.js         The hardcover: boards, rounded spine, hinges, leaves, edges, foil layers
   scene/quality.js    Rendering tiers
-  textures/           Procedural painters: materials, covers, ornaments, typesetting, pages
+  textures/           Procedural painters: materials, covers, patterns, ornaments, typesetting, pages
   state/              BookSpec schema, store with undo, IndexedDB, images
   data/               Presets, layouts, foils, ornaments, typefaces
   ui/                 Shelf interface, studio workbench, controls

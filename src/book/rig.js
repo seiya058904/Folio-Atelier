@@ -12,6 +12,7 @@ import { createPaintTexture } from "../textures/gl.js";
 import { PAGE_SIZE, paintPage } from "../textures/pages.js";
 import {
   getContactShadowTexture,
+  getHeadbandTexture,
   getMaterialMaps,
   getPageEdgeTextures,
   getPaperFaceTexture
@@ -425,6 +426,11 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
   );
   ribbon.rotation.z = (book.seed % 2 ? -1 : 1) * 0.014;
   motion.add(ribbon);
+  const secondRibbonMaterial = ribbonMaterial.clone();
+  const secondRibbon = createMesh(g.ribbon, secondRibbonMaterial, "ribbon-bookmark-2", false, true);
+  secondRibbon.position.set(ribbon.position.x + 0.058, ribbon.position.y - 0.03, ribbon.position.z + 0.0006);
+  secondRibbon.rotation.z = -ribbon.rotation.z * 1.6;
+  motion.add(secondRibbon);
 
   for (let index = 0; index < 6; index += 1) {
     const signature = createMesh(shared.box, signatureMaterial, `page-signature-${index + 1}`, false, true);
@@ -474,7 +480,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
   const fadeMaterials = [
     cloth, coverArt, foilArt, spineArt, spineFoilArt, backArt, backFoilArt,
     endpaperMaterial, foreEdgeMaterial, headTailEdgeMaterial, grooveMaterial,
-    pageMaterial, ...sheetMaterials, headbandMaterial, signatureMaterial, ribbonMaterial
+    pageMaterial, ...sheetMaterials, headbandMaterial, signatureMaterial, ribbonMaterial,
+    secondRibbonMaterial
   ];
 
   /* ----- look: everything that is a material parameter rather than paint ----- */
@@ -504,7 +511,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
     });
     lookReady = true;
     cloth.color.set(spec.material.color);
-    grooveMaterial.color.set(spec.material.color).multiplyScalar(0.42);
+    const twoTone = spec.material.binding === "quarter" || spec.material.binding === "half";
+    grooveMaterial.color.set(twoTone ? spec.material.second : spec.material.color).multiplyScalar(0.42);
 
     [foilArt, spineFoilArt, backFoilArt].forEach((material) => {
       material.color.copy(foilColor);
@@ -523,9 +531,20 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
       material.anisotropy = anisotropy;
       material.emissive.copy(foilColor);
       material.emissiveIntensity = metallic ? 0.2 : 0.06;
+      // Holographic and pearl foils: thin-film colour that shifts with the view.
+      const iridescence = spec.foil.iridescence || 0;
+      if ((material.iridescence > 0) !== (iridescence > 0)) material.needsUpdate = true;
+      material.iridescence = iridescence;
+      material.iridescenceIOR = 1.9;
+      material.iridescenceThicknessRange = [180, 620];
+      if (iridescence > 0) material.emissiveIntensity *= 1 - iridescence * 0.7;
     });
 
     const edge = spec.details.edge;
+    const baked = edge.style === "sprinkled" || edge.style === "ombre";
+    const edgeMaps = getPageEdgeTextures(baked ? edge.style : "plain", edge.color);
+    foreEdgeMaterial.map = edgeMaps.fore;
+    headTailEdgeMaterial.map = edgeMaps.headTail;
     [foreEdgeMaterial, headTailEdgeMaterial].forEach((material) => {
       if (edge.style === "gilt") {
         material.color.set(edge.color || "#d9b25f");
@@ -547,7 +566,14 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
 
     ribbon.visible = spec.details.ribbon.show !== false;
     ribbonMaterial.color.set(spec.details.ribbon.color);
-    headbandMaterial.color.set(spec.details.headband.color);
+    secondRibbon.visible = ribbon.visible && Boolean(spec.details.ribbon.double);
+    secondRibbonMaterial.color.set(spec.details.ribbon.second || spec.details.ribbon.color);
+    const headband = spec.details.headband;
+    const stripes = headband.striped ? getHeadbandTexture(headband.color, headband.second || "#f3ece0") : null;
+    if (Boolean(headbandMaterial.map) !== Boolean(stripes)) headbandMaterial.needsUpdate = true;
+    headbandMaterial.map = stripes;
+    if (stripes) headbandMaterial.color.set(0xffffff);
+    else headbandMaterial.color.set(headband.color);
     contactShadowMaterial.color.set(bookPalette(spec).shelfDark);
 
     const stock = getPaperFaceTexture(spec.interior.paper);

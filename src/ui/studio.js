@@ -4,17 +4,22 @@
 
 import { FONTS, getFont } from "../data/fonts.js";
 import {
+  BINDING_STYLES,
   BORDERS,
+  CORNER_STYLES,
   EDGE_STYLES,
   ENDPAPER_PATTERNS,
   FOILS,
   LAYOUTS,
   MATERIALS,
   MOTIFS,
+  PATTERNS,
   PRESETS,
+  SPINE_EMBLEMS,
   SPINE_STYLES,
   getFoil
 } from "../data/presets.js";
+import { t } from "../i18n.js";
 import { addImage, getImage } from "../state/images.js";
 import {
   PAGE_TYPES,
@@ -23,7 +28,9 @@ import {
   createPage,
   layerText
 } from "../state/schema.js";
-import { PAPER_STOCKS } from "../textures/surface.js";
+import { PAGE_INKS } from "../textures/pages.js";
+import { patternMask } from "../textures/patterns.js";
+import { PAPER_STOCKS, paintMaterialBase } from "../textures/surface.js";
 import { deepClone, uid } from "../util.js";
 import {
   colorField,
@@ -57,6 +64,8 @@ const CLOTH_COLORS = [
 ];
 const INK_COLORS = ["#f3ece0", "#1d1813", "#c6532f", "#b8892f", "#2f4a3c", "#1f3a6b", "#7a2a34"];
 const EDGE_COLORS = ["#d9b25f", "#c9ccd1", "#c6532f", "#1f3a6b", "#2f4a3c", "#17181b", "#e7a9b4"];
+const LABEL_COLORS = ["#6f1d2a", "#17181b", "#1f4033", "#182a43", "#5a3a22", "#efe6d4", "#b8892f"];
+const THREAD_COLORS = ["#f3ece0", "#17181b", "#b8892f", "#c6532f", "#1f3a6b", "#7a2a34"];
 const ENDPAPER_COLORS = ["#efe6d4", "#e3d9c4", "#d9c7b2", "#c9d6d2", "#d7c7d0", "#2a2622", "#b9482f", "#30475e"];
 
 const SOURCES = [
@@ -77,6 +86,7 @@ const LAYER_NAMES = {
   "back-blurb": "Blurb", "back-title": "Title", "back-author": "Author", "back-imprint": "Imprint"
 };
 const PAGE_LABEL = Object.fromEntries(PAGE_TYPES.map((type) => [type.id, type.label]));
+const pageTypeLabel = (type) => t(PAGE_LABEL[type] || "Page");
 
 const percent = (value) => `${Math.round(value * 100)}%`;
 
@@ -124,7 +134,7 @@ export function createStudioUi({ store, engine, audio }) {
       id: `tab-${entry.id}`,
       "aria-selected": String(entry.id === tab),
       tabIndex: entry.id === tab ? 0 : -1,
-      text: entry.label,
+      text: t(entry.label),
       onclick: () => setTab(entry.id)
     })));
     body.setAttribute("aria-labelledby", `tab-${tab}`);
@@ -184,6 +194,23 @@ export function createStudioUi({ store, engine, audio }) {
   }
 
   const coverCanvas = () => h("canvas", { class: "tile__art", width: 132, height: 198 });
+
+  function drawPatternGlyph(canvas, key) {
+    const size = canvas.width;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, size, size);
+    const color = getComputedStyle(canvas).color || "#231d17";
+    if (key === "none") {
+      drawMotifGlyph(canvas, "none");
+      return;
+    }
+    const mask = patternMask(key, size, size, { width: 150, height: 150 }, { unit: 46, lineWidth: 2, seed: 3 });
+    ctx.drawImage(mask, 0, 0);
+    ctx.globalCompositeOperation = "source-in";
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, size, size);
+    ctx.globalCompositeOperation = "source-over";
+  }
   const glyphCanvas = () => h("canvas", { class: "tile__glyph", width: 96, height: 96 });
 
   /* ---------------------------------------------------------------- */
@@ -251,14 +278,14 @@ export function createStudioUi({ store, engine, audio }) {
 
   function borderEditor(face) {
     const border = () => book()[face].border;
-    const options = face === "back" ? BORDERS.filter((entry) => entry.id !== "panel") : BORDERS;
+    const options = face === "back" ? BORDERS.filter((entry) => entry.id !== "panel" && entry.id !== "slip") : BORDERS;
     return [
       row(
         select({
           label: "Frame", value: border().style, options,
           onChange: (value) => edit(() => {
             border().style = value;
-            if (value === "panel") { border().finish = "ink"; border().color = "#f1eadf"; }
+            if (value === "panel" || value === "slip") { border().finish = "ink"; border().color = "#f1eadf"; }
           }, [face], { rerender: true })
         }),
         slider({
@@ -286,7 +313,7 @@ export function createStudioUi({ store, engine, audio }) {
     const details = h("details", { class: "layer", open: openLayers.has(layerId) });
     const refreshSummary = () => {
       const value = layerText(book(), layer());
-      preview.textContent = value || "Empty";
+      preview.textContent = value || t("Empty");
       preview.dataset.empty = String(!value);
       details.dataset.hidden = String(!layer().show);
     };
@@ -347,7 +374,7 @@ export function createStudioUi({ store, engine, audio }) {
 
     details.append(
       h("summary", { class: "layer__summary" },
-        h("span", { class: "layer__name", text: LAYER_NAMES[layerId] || "Line" }),
+        h("span", { class: "layer__name", text: t(LAYER_NAMES[layerId] || "Line") }),
         preview,
         icon(ICONS.chevron, "layer__chevron")
       ),
@@ -399,14 +426,18 @@ export function createStudioUi({ store, engine, audio }) {
           font.italic ? toggle({
             label: "Italic", value: current.italic,
             onChange: (value) => edit(() => { layer().italic = value; }, dirty)
-          }) : null
+          }) : null,
+          isSpine ? null : toggle({
+            label: "Vertical", value: Boolean(current.vertical),
+            onChange: (value) => edit(() => { layer().vertical = value; }, dirty)
+          })
         ),
         placement,
         ...finishControls(layer, dirty, `${face}-${layerId}`),
         removable ? h("button", {
           class: "link-button link-button--danger",
           type: "button",
-          text: "Remove this line",
+          text: t("Remove this line"),
           style: { justifySelf: "start" },
           onclick: () => edit(() => {
             const texts = book()[face].texts;
@@ -430,8 +461,9 @@ export function createStudioUi({ store, engine, audio }) {
           ...deepClone(template),
           id,
           source: "custom",
-          text: "A new line",
+          text: t("A new line"),
           show: true,
+          vertical: false,
           y: 0.5,
           x: template.align === "left" ? template.x : 0.5
         });
@@ -440,7 +472,7 @@ export function createStudioUi({ store, engine, audio }) {
     return group("Lettering", hint,
       h("div", {}, current[face].texts.map((layer) => layerEditor(face, layer.id))),
       face !== "spine" ? h("button", {
-        class: "link-button", type: "button", text: "Add a line", style: { justifySelf: "start" }, onclick: addLine
+        class: "link-button", type: "button", text: t("Add a line"), style: { justifySelf: "start" }, onclick: addLine
       }) : null
     );
   }
@@ -454,7 +486,7 @@ export function createStudioUi({ store, engine, audio }) {
     const sharedField = (property, label, placeholder, display = false) => textField({
       label, placeholder, display, value: current[property],
       onInput: (value) => {
-        edit(() => { book()[property] = property === "title" ? value || "Untitled" : value; }, ["meta"], { key: `meta-${property}` });
+        edit(() => { book()[property] = property === "title" ? value || t("Untitled") : value; }, ["meta"], { key: `meta-${property}` });
         updateHeader();
       }
     });
@@ -480,6 +512,28 @@ export function createStudioUi({ store, engine, audio }) {
     const foilSwatches = FOILS.filter((foil) => foil.id !== "custom").map((foil) => ({
       color: foil.color, label: foil.label, value: foil.id, metal: foil.metalness > 0.5
     }));
+    const pattern = () => book().pattern;
+
+    // Material swatches are painted with the same code as the boards.
+    const materialCanvases = [];
+    const paintMaterialTiles = () => materialCanvases.forEach(([canvas, kind]) => {
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      paintMaterialBase(ctx, canvas.width, canvas.height, book().material.color, kind, 5);
+    });
+    const materialTiles = tiles({
+      label: "Covering",
+      className: "tiles--motif tiles--material",
+      value: current.material.kind,
+      options: MATERIALS,
+      render: (option) => {
+        const canvas = glyphCanvas();
+        materialCanvases.push([canvas, option.id]);
+        return canvas;
+      },
+      onChange: (value) => edit(() => { book().material.kind = value; }, ["material"])
+    });
+    queueThumb(paintMaterialTiles);
 
     return [
       group("The book", "These words are shared by the cover, spine, back and title page.",
@@ -491,19 +545,59 @@ export function createStudioUi({ store, engine, audio }) {
         presetTiles
       ),
       group("Material", null,
-        segmented({
-          label: "Covering", value: current.material.kind, options: MATERIALS,
-          onChange: (value) => edit(() => { book().material.kind = value; }, ["material"])
-        }),
+        materialTiles,
         colorField({
           label: "Colour", value: current.material.color, swatches: CLOTH_COLORS,
-          onInput: (value) => edit(() => {
-            const target = book();
-            target.material.color = value;
-            // A hand-picked colour leaves the preset's room behind.
-            target.palette = null;
-          }, ["material"], { key: "material-color" })
-        })
+          onInput: (value) => {
+            edit(() => {
+              const target = book();
+              target.material.color = value;
+              // A hand-picked colour leaves the preset's room behind.
+              target.palette = null;
+            }, ["material"], { key: "material-color" });
+            paintMaterialTiles();
+          }
+        }),
+        segmented({
+          label: "Binding", value: current.material.binding || "full", options: BINDING_STYLES,
+          onChange: (value) => edit(() => { book().material.binding = value; }, ["material"], { rerender: true })
+        }),
+        current.material.binding && current.material.binding !== "full" ? colorField({
+          label: current.material.binding === "half" ? "Spine & corners" : "Spine",
+          value: current.material.second, swatches: CLOTH_COLORS,
+          onInput: (value) => edit(() => { book().material.second = value; }, ["material"], { key: "material-second" })
+        }) : null
+      ),
+      group("Pattern", "An all-over pattern on the boards: stamped in foil, printed, or pressed blind into the covering.",
+        tiles({
+          label: "Pattern",
+          className: "tiles--motif",
+          value: current.pattern.key,
+          options: PATTERNS,
+          render: (option) => {
+            const canvas = glyphCanvas();
+            queueThumb(() => drawPatternGlyph(canvas, option.id));
+            return canvas;
+          },
+          onChange: (value) => edit(() => { pattern().key = value; }, ["material"], { rerender: true })
+        }),
+        current.pattern.key !== "none" ? [
+          row(
+            slider({
+              label: "Size", value: current.pattern.scale, min: 0.5, max: 2.4, step: 0.01, format: percent,
+              onInput: (value) => edit(() => { pattern().scale = value; }, ["material"], { key: "pattern-scale" })
+            }),
+            slider({
+              label: "Strength", value: current.pattern.opacity ?? 0.6, min: 0.1, max: 1, step: 0.01, format: percent,
+              onInput: (value) => edit(() => { pattern().opacity = value; }, ["material"], { key: "pattern-opacity" })
+            })
+          ),
+          ...finishControls(pattern, ["material"], "pattern"),
+          toggle({
+            label: "Carry across the spine", value: Boolean(current.pattern.spine),
+            onChange: (value) => edit(() => { pattern().spine = value; }, ["material"])
+          })
+        ] : null
       ),
       group("Foil", "Used for everything stamped in foil on the boards and spine.",
         colorField({
@@ -514,7 +608,10 @@ export function createStudioUi({ store, engine, audio }) {
               target.foil = { ...target.foil, preset: "custom", color: value };
             } else {
               const foil = getFoil(value);
-              target.foil = { preset: foil.id, color: foil.color, metalness: foil.metalness, roughness: foil.roughness };
+              target.foil = {
+                preset: foil.id, color: foil.color, metalness: foil.metalness, roughness: foil.roughness,
+                iridescence: foil.iridescence || 0
+              };
             }
           }, ["foil"], { key: custom ? "foil-color" : null, rerender: !custom })
         }),
@@ -526,6 +623,10 @@ export function createStudioUi({ store, engine, audio }) {
           slider({
             label: "Polish", value: 1 - current.foil.roughness, min: 0.2, max: 0.95, step: 0.01, format: percent,
             onInput: (value) => edit(() => { book().foil.roughness = 1 - value; }, ["foil"], { key: "foil-rough" })
+          }),
+          slider({
+            label: "Iridescence", value: current.foil.iridescence || 0, min: 0, max: 1, step: 0.01, format: percent,
+            onInput: (value) => edit(() => { book().foil.iridescence = value; }, ["foil"], { key: "foil-iridescence" })
           })
         )
       )
@@ -550,7 +651,7 @@ export function createStudioUi({ store, engine, audio }) {
       if (!file) return;
       const id = await addImage(file);
       if (!id) {
-        toast("That image could not be read.");
+        toast(t("That image could not be read."));
         return;
       }
       edit(() => {
@@ -577,9 +678,9 @@ export function createStudioUi({ store, engine, audio }) {
       group("Artwork", "Use your own picture as the whole cover or as an inset plate. Foil and print sit on top.",
         h("div", { class: "upload" },
           image ? thumb : null,
-          h("button", { class: "link-button", type: "button", text: image ? "Replace image" : "Upload an image", onclick: chooseImage }),
+          h("button", { class: "link-button", type: "button", text: t(image ? "Replace image" : "Upload an image"), onclick: chooseImage }),
           image ? h("button", {
-            class: "link-button link-button--danger", type: "button", text: "Remove",
+            class: "link-button link-button--danger", type: "button", text: t("Remove"),
             onclick: () => edit(() => { book().front.image = null; }, ["front"], { rerender: true })
           }) : null
         ),
@@ -604,16 +705,27 @@ export function createStudioUi({ store, engine, audio }) {
     const spine = () => book().spine;
     return [
       group("Structure", null,
-        segmented({
-          label: "Tooling", value: current.spine.style, options: SPINE_STYLES,
-          onChange: (value) => edit(() => { spine().style = value; }, ["spine"])
-        }),
-        segmented({
-          label: "Tail emblem", value: current.spine.emblem,
-          options: [{ id: "none", label: "None" }, { id: "ring", label: "Ring" }, { id: "motif", label: "Ornament" }],
-          onChange: (value) => edit(() => { spine().emblem = value; }, ["spine"])
-        }),
+        row(
+          select({
+            label: "Tooling", value: current.spine.style, options: SPINE_STYLES,
+            onChange: (value) => edit(() => { spine().style = value; }, ["spine"])
+          }),
+          select({
+            label: "Tail emblem", value: current.spine.emblem, options: SPINE_EMBLEMS,
+            onChange: (value) => edit(() => { spine().emblem = value; }, ["spine"])
+          })
+        ),
         ...finishControls(spine, ["spine"], "spine")
+      ),
+      group("Title label", "A pasted label behind the title, as on a library binding.",
+        toggle({
+          label: "Show the label", value: Boolean(current.spine.label?.show),
+          onChange: (value) => edit(() => { spine().label.show = value; }, ["spine"])
+        }),
+        colorField({
+          label: "Label colour", value: current.spine.label.color, swatches: LABEL_COLORS,
+          onInput: (value) => edit(() => { spine().label.color = value; spine().label.show = true; }, ["spine"], { key: "spine-label" })
+        })
       ),
       letteringGroup("spine", "Long titles shrink to fit. Chinese, Japanese and Korean titles are set upright.")
     ];
@@ -641,7 +753,7 @@ export function createStudioUi({ store, engine, audio }) {
     const edgeColour = h("div");
     const paintEdge = () => {
       edgeColour.replaceChildren(details().edge.style === "plain" ? "" : colorField({
-        label: details().edge.style === "gilt" ? "Leaf" : "Stain",
+        label: details().edge.style === "gilt" ? "Leaf" : details().edge.style === "sprinkled" ? "Sprinkle" : "Stain",
         value: details().edge.color,
         swatches: EDGE_COLORS,
         metal: details().edge.style === "gilt",
@@ -650,6 +762,7 @@ export function createStudioUi({ store, engine, audio }) {
     };
     paintEdge();
 
+    const boards = ["details", "material"];
     return [
       group("Page edges", "Gilding and staining show on the three trimmed edges of the block.",
         segmented({
@@ -665,7 +778,30 @@ export function createStudioUi({ store, engine, audio }) {
         }),
         edgeColour
       ),
-      group("Endpapers", "The sheets pasted inside the boards — open the cover to see them.",
+      group("Corner pieces", "Metal corners in the book's foil, on the two outer corners of each board.",
+        segmented({
+          label: "Corners", value: current.details.corners.style, options: CORNER_STYLES,
+          onChange: (value) => edit(() => { details().corners.style = value; }, boards)
+        })
+      ),
+      group("Stab stitching", "Thread sewn through the boards and wrapped round the spine, as on a thread-bound book.",
+        toggle({
+          label: "Sew the binding", value: Boolean(current.details.stitch.show),
+          onChange: (value) => edit(() => { details().stitch.show = value; }, boards)
+        }),
+        row(
+          segmented({
+            label: "Holes", value: String(current.details.stitch.holes),
+            options: [{ id: "4", label: "Four" }, { id: "6", label: "Six" }],
+            onChange: (value) => edit(() => { details().stitch.holes = Number(value); }, boards)
+          })
+        ),
+        colorField({
+          label: "Thread", value: current.details.stitch.color, swatches: THREAD_COLORS,
+          onInput: (value) => edit(() => { details().stitch.color = value; }, boards, { key: "stitch-color" })
+        })
+      ),
+      group("Endpapers", "The sheets pasted inside the boards \u2014 open the cover to see them.",
         select({
           label: "Pattern", value: current.details.endpaper.pattern, options: ENDPAPER_PATTERNS,
           onChange: (value) => {
@@ -680,21 +816,39 @@ export function createStudioUi({ store, engine, audio }) {
         })
       ),
       group("Ribbon & headbands", null,
-        toggle({
-          label: "Ribbon marker", value: current.details.ribbon.show,
-          onChange: (value) => edit(() => { details().ribbon.show = value; }, ["details"])
-        }),
+        h("div", { class: "toggles" },
+          toggle({
+            label: "Ribbon marker", value: current.details.ribbon.show,
+            onChange: (value) => edit(() => { details().ribbon.show = value; }, ["details"])
+          }),
+          toggle({
+            label: "Second ribbon", value: Boolean(current.details.ribbon.double),
+            onChange: (value) => edit(() => { details().ribbon.double = value; }, ["details"], { rerender: true })
+          })
+        ),
         colorField({
           label: "Ribbon", value: current.details.ribbon.color, swatches: EDGE_COLORS,
           onInput: (value) => edit(() => { details().ribbon.color = value; }, ["details"], { key: "ribbon-color" })
         }),
+        current.details.ribbon.double ? colorField({
+          label: "Second ribbon colour", value: current.details.ribbon.second, swatches: EDGE_COLORS,
+          onInput: (value) => edit(() => { details().ribbon.second = value; }, ["details"], { key: "ribbon-second" })
+        }) : null,
         colorField({
           label: "Headbands", value: current.details.headband.color, swatches: EDGE_COLORS,
           onInput: (value) => edit(() => { details().headband.color = value; }, ["details"], { key: "headband-color" })
-        })
+        }),
+        toggle({
+          label: "Striped headbands", value: Boolean(current.details.headband.striped),
+          onChange: (value) => edit(() => { details().headband.striped = value; }, ["details"], { rerender: true })
+        }),
+        current.details.headband.striped ? colorField({
+          label: "Stripe", value: current.details.headband.second, swatches: EDGE_COLORS,
+          onInput: (value) => edit(() => { details().headband.second = value; }, ["details"], { key: "headband-second" })
+        }) : null
       ),
       group("Paper", "The stock the book is printed on.",
-        segmented({
+        select({
           label: "Stock", value: current.interior.paper,
           options: Object.entries(PAPER_STOCKS).map(([id, stock]) => ({ id, label: stock.label })),
           onChange: (value) => edit(() => { book().interior.paper = value; }, ["details", "interior"])
@@ -711,13 +865,16 @@ export function createStudioUi({ store, engine, audio }) {
     switch (page.type) {
       case "halftitle":
       case "title": return current.title;
-      case "chapter": return page.title || "Untitled chapter";
-      case "body": return first(page.heading) || first(page.text) || "Empty text";
+      case "part":
+      case "chapter": return page.title || t("Untitled");
+      case "body": return first(page.heading) || first(page.text) || t("Empty text");
+      case "poem": return first(page.title) || first(page.text) || t("Empty");
       case "quote":
-      case "dedication": return first(page.text) || "Empty";
-      case "plate": return first(page.caption) || (page.image ? "Image" : "Ornament");
-      case "colophon": return first(page.text) || "Written for you";
-      case "contents": return page.heading || "Contents";
+      case "epigraph":
+      case "dedication": return first(page.text) || t("Empty");
+      case "plate": return first(page.caption) || t(page.image ? "Image" : "Ornament");
+      case "colophon": return first(page.text) || t("Written for you");
+      case "contents": return page.heading || t("Contents");
       default: return "—";
     }
   }
@@ -749,6 +906,25 @@ export function createStudioUi({ store, engine, audio }) {
           onInput: set("text")
         })
       );
+    } else if (page.type === "part") {
+      fields.push(
+        textField({ label: "Part title", value: page.title, placeholder: "Part Title", onInput: set("title", { later: true }) }),
+        textArea({ label: "Note", value: page.text, placeholder: "An optional line under the title", onInput: set("text") })
+      );
+    } else if (page.type === "poem") {
+      fields.push(
+        textField({ label: "Heading", value: page.title, placeholder: "Optional", onInput: set("title", { later: true }) }),
+        textArea({
+          label: "Verse", value: page.text, tall: true,
+          placeholder: "One line of verse per line. Leave an empty line between stanzas.",
+          onInput: set("text", { later: true })
+        })
+      );
+    } else if (page.type === "epigraph") {
+      fields.push(
+        textArea({ label: "Quotation", value: page.text, onInput: set("text", { later: true }) }),
+        textField({ label: "Attribution", value: page.attribution, placeholder: "Optional", onInput: set("attribution") })
+      );
     } else if (page.type === "body") {
       fields.push(
         textField({ label: "Heading", value: page.heading, placeholder: "Optional", onInput: set("heading", { later: true }) }),
@@ -768,29 +944,32 @@ export function createStudioUi({ store, engine, audio }) {
     } else if (page.type === "title") {
       fields.push(
         textField({ label: "Imprint line", value: page.imprint, placeholder: "Folio Atelier", onInput: set("imprint") }),
-        h("p", { class: "group__hint", text: "Title, subtitle, author and series come from the Design tab." })
+        h("p", { class: "group__hint", text: t("Title, subtitle, author and series come from the Design tab.") })
       );
     } else if (page.type === "contents") {
       fields.push(
         textField({ label: "Heading", value: page.heading, placeholder: "Contents", onInput: set("heading", { later: true }) }),
-        h("p", { class: "group__hint", text: "The list is built from your chapter openers, with their page numbers." })
+        h("p", { class: "group__hint", text: t("The list is built from your chapter openers, with their page numbers.") })
       );
     } else if (page.type === "plate") {
       const choose = async () => {
         const file = await pickFile(imageInput);
         if (!file) return;
         const id = await addImage(file);
-        if (!id) { toast("That image could not be read."); return; }
+        if (!id) { toast(t("That image could not be read.")); return; }
         edit(() => { target().image = id; }, ["pages"], { rerender: true });
       };
       fields.push(
         h("div", { class: "upload" },
-          h("button", { class: "link-button", type: "button", text: page.image ? "Replace image" : "Upload an image", onclick: choose }),
+          h("button", { class: "link-button", type: "button", text: t(page.image ? "Replace image" : "Upload an image"), onclick: choose }),
           page.image ? h("button", {
-            class: "link-button link-button--danger", type: "button", text: "Remove",
+            class: "link-button link-button--danger", type: "button", text: t("Remove"),
             onclick: () => edit(() => { target().image = null; }, ["pages"], { rerender: true })
           }) : null
         ),
+        page.image ? toggle({
+          label: "Fill the whole page", value: Boolean(page.bleed), onChange: set("bleed")
+        }) : null,
         page.image ? null : select({
           label: "Ornament", value: page.motif || "",
           options: [{ id: "", label: "Same as the cover" }, ...MOTIFS.slice(1)],
@@ -805,13 +984,13 @@ export function createStudioUi({ store, engine, audio }) {
         onInput: set("text", { later: true })
       }));
     } else {
-      fields.push(h("p", { class: "group__hint", text: page.type === "halftitle"
+      fields.push(h("p", { class: "group__hint", text: t(page.type === "halftitle"
         ? "The half-title shows the book's title alone. Change it in the Design tab."
-        : "A blank page — useful for starting a chapter on a right-hand page." }));
+        : "A blank page \u2014 useful for starting a chapter on a right-hand page.") }));
     }
     return h("div", { class: "page-editor" },
       h("div", { class: "page-editor__head" },
-        h("h3", { class: "group__title", text: PAGE_LABEL[page.type] || "Page" })
+        h("h3", { class: "group__title", text: pageTypeLabel(page.type) })
       ),
       fields
     );
@@ -847,7 +1026,7 @@ export function createStudioUi({ store, engine, audio }) {
       },
         h("span", {
           class: "page-item__grip",
-          title: "Drag to reorder",
+          title: t("Drag to reorder"),
           onpointerdown: () => { item.draggable = true; },
           onpointerup: () => { item.draggable = false; }
         }, (() => {
@@ -856,20 +1035,20 @@ export function createStudioUi({ store, engine, audio }) {
           return svg;
         })()),
         h("button", { class: "page-item__main", type: "button", onclick: () => selectPage(page.id) },
-          h("span", { class: "page-item__type", text: PAGE_LABEL[page.type] || "Page" }),
+          h("span", { class: "page-item__type", text: pageTypeLabel(page.type) }),
           h("span", { class: "page-item__text", text: pageSummary(page) })
         ),
         h("span", { class: "page-item__tools" },
           h("button", {
-            class: "mini-button", type: "button", "aria-label": "Move up", disabled: index === 0,
+            class: "mini-button", type: "button", "aria-label": t("Move up"), title: t("Move up"), disabled: index === 0,
             onclick: () => movePage(index, index - 1)
           }, icon(ICONS.up)),
           h("button", {
-            class: "mini-button", type: "button", "aria-label": "Move down", disabled: index === current.pages.length - 1,
+            class: "mini-button", type: "button", "aria-label": t("Move down"), title: t("Move down"), disabled: index === current.pages.length - 1,
             onclick: () => movePage(index, index + 1)
           }, icon(ICONS.down)),
           h("button", {
-            class: "mini-button", type: "button", "aria-label": "Duplicate page",
+            class: "mini-button", type: "button", "aria-label": t("Duplicate page"), title: t("Duplicate page"),
             onclick: () => {
               const copy = { ...deepClone(page), id: uid("pg") };
               selectedPageId = copy.id;
@@ -877,7 +1056,7 @@ export function createStudioUi({ store, engine, audio }) {
             }
           }, icon(ICONS.copy)),
           h("button", {
-            class: "mini-button", type: "button", "aria-label": "Delete page", disabled: current.pages.length <= 1,
+            class: "mini-button", type: "button", "aria-label": t("Delete page"), title: t("Delete page"), disabled: current.pages.length <= 1,
             onclick: () => {
               if (selectedPageId === page.id) selectedPageId = null;
               edit(() => { book().pages.splice(index, 1); }, ["pages"], { rerender: true });
@@ -940,9 +1119,9 @@ export function createStudioUi({ store, engine, audio }) {
         pageList(),
         selected ? pageEditor(selected) : null,
         h("div", { class: "field" },
-          h("span", { class: "field__label", text: selected ? "Add after this page" : "Add a page" }),
+          h("span", { class: "field__label", text: t(selected ? "Add after this page" : "Add a page") }),
           h("div", { class: "add-pages" }, PAGE_TYPES.map((type) => h("button", {
-            class: "chip", type: "button", title: type.note, text: type.label, onclick: () => addPage(type.id)
+            class: "chip", type: "button", title: t(type.note), text: t(type.label), onclick: () => addPage(type.id)
           })))
         )
       ),
@@ -957,11 +1136,41 @@ export function createStudioUi({ store, engine, audio }) {
             onChange: (value) => edit(() => { interior().headingFont = value; }, ["interior"])
           })
         ),
-        slider({
-          label: "Text size", value: current.interior.scale, min: 0.8, max: 1.35, step: 0.01,
-          format: (value) => `${(value * 10.5).toFixed(1)} pt`,
-          onInput: (value) => edit(() => { interior().scale = value; }, ["interior"], { key: "interior-scale" })
+        row(
+          slider({
+            label: "Text size", value: current.interior.scale, min: 0.8, max: 1.35, step: 0.01,
+            format: (value) => `${(value * 10.5).toFixed(1)} pt`,
+            onInput: (value) => edit(() => { interior().scale = value; }, ["interior"], { key: "interior-scale" })
+          }),
+          slider({
+            label: "Leading", value: current.interior.leading || 1.5, min: 1.25, max: 1.9, step: 0.01,
+            format: (value) => value.toFixed(2),
+            onInput: (value) => edit(() => { interior().leading = value; }, ["interior"], { key: "interior-leading" })
+          })
+        ),
+        segmented({
+          label: "Chapter openings", value: current.interior.chapterStyle || "classic",
+          options: [{ id: "classic", label: "Classic" }, { id: "centered", label: "Centred" }, { id: "numeral", label: "Numeral" }],
+          onChange: (value) => edit(() => { interior().chapterStyle = value; }, ["interior"])
         }),
+        row(
+          segmented({
+            label: "Page numbers at", value: current.interior.folioPlace || "outer",
+            options: [{ id: "outer", label: "Outer corner" }, { id: "center", label: "Centre" }],
+            onChange: (value) => edit(() => { interior().folioPlace = value; }, ["interior"])
+          }),
+          segmented({
+            label: "Printed labels", value: current.interior.labels || "en",
+            options: [{ id: "en", label: "English" }, { id: "zh", label: "\u4e2d\u6587" }],
+            onChange: (value) => edit(() => { interior().labels = value; }, ["interior"])
+          })
+        ),
+        colorField({
+          label: "Ink", value: current.interior.ink || "black", custom: false,
+          swatches: Object.entries(PAGE_INKS).map(([id, ink]) => ({ color: ink.color, label: ink.label, value: id })),
+          onInput: (value) => edit(() => { interior().ink = value; }, ["interior"])
+        }),
+        h("p", { class: "group__hint", text: t("Type *** on a line of its own for a section break.") }),
         h("div", { class: "toggles" },
           toggle({ label: "Justified", value: current.interior.justify, onChange: (value) => edit(() => { interior().justify = value; }, ["interior"]) }),
           toggle({ label: "Drop capitals", value: current.interior.dropCap, onChange: (value) => edit(() => { interior().dropCap = value; }, ["interior"]) }),
@@ -1001,19 +1210,19 @@ export function createStudioUi({ store, engine, audio }) {
   function renderPageState(state) {
     previousPage.disabled = state.locked || state.spread === 0;
     nextPage.disabled = state.locked || state.spread >= state.spreads - 1;
-    toggleBook.textContent = state.open ? "Close book" : "Open book";
+    toggleBook.textContent = t(state.open ? "Close book" : "Open book");
     toggleBook.setAttribute("aria-pressed", String(state.open));
     if (!state.open) {
-      pageLabel.textContent = "Closed";
-      pageCounter.textContent = "Click the book to open it";
+      pageLabel.textContent = t("Closed");
+      pageCounter.textContent = t("Click the book to open it");
       return;
     }
     const entry = state.right || state.left;
-    pageLabel.textContent = entry ? entry.label : "End of the book";
+    pageLabel.textContent = entry ? entry.label : t("End of the book");
     const numbers = [state.leftIndex, state.rightIndex].filter((index) => index >= 0).map((index) => index + 1);
     pageCounter.textContent = numbers.length
-      ? `${numbers.length > 1 ? "Pages" : "Page"} ${numbers.join("–")} of ${state.pages}`
-      : `${state.pages} pages`;
+      ? t(numbers.length > 1 ? "Pages {range} of {count}" : "Page {range} of {count}", { range: numbers.join("–"), count: state.pages })
+      : t("{count} pages", { count: state.pages });
 
     // Keep the page list in step with what the book is showing.
     if (tab === "pages") {
@@ -1038,7 +1247,7 @@ export function createStudioUi({ store, engine, audio }) {
     panel.setAttribute("aria-hidden", "false");
     readerBar.inert = false;
     readerBar.setAttribute("aria-hidden", "false");
-    saveStatus.textContent = "Saved";
+    saveStatus.textContent = t("Saved");
     saveStatus.dataset.state = "ok";
     renderTabs();
     renderBody({ keepScroll: false });
@@ -1096,17 +1305,26 @@ export function createStudioUi({ store, engine, audio }) {
   store.on("history", ({ id }) => { if (id === bookId) updateHeader(); });
   store.on("saving", ({ book: saving }) => {
     if (saving.id !== bookId) return;
-    saveStatus.textContent = "Saving…";
+    saveStatus.textContent = t("Saving…");
   });
   store.on("saved", ({ book: saved }) => {
     if (saved.id !== bookId) return;
-    saveStatus.textContent = "Saved to this browser";
+    saveStatus.textContent = t("Saved to this browser");
     saveStatus.dataset.state = "ok";
   });
   store.on("save-state", ({ ok }) => {
-    saveStatus.textContent = ok ? "Saved to this browser" : "Not saved — storage is unavailable";
+    saveStatus.textContent = t(ok ? "Saved to this browser" : "Not saved — storage is unavailable");
     saveStatus.dataset.state = ok ? "ok" : "error";
   });
 
-  return { show, hide, renderPageState, focus: () => closeButton.focus({ preventScroll: true }) };
+  /** Redraw everything that carries words, after the language changes. */
+  function relocalize() {
+    if (!bookId) return;
+    saveStatus.textContent = t("Saved");
+    renderTabs();
+    renderBody({ keepScroll: true });
+    renderPageState(engine.pageState);
+  }
+
+  return { show, hide, relocalize, renderPageState, focus: () => closeButton.focus({ preventScroll: true }) };
 }

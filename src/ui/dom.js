@@ -73,7 +73,7 @@ export function toast(message, duration = 2600) {
 }
 
 /** Promise-based confirmation using the shared <dialog>. */
-export function confirmDialog({ title, text, accept = "Delete" }) {
+export function confirmDialog({ title, text, accept }) {
   const dialog = document.querySelector("#confirm-dialog");
   dialog.querySelector("#confirm-title").textContent = title;
   dialog.querySelector("#confirm-text").textContent = text;

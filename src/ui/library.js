@@ -3,6 +3,7 @@
 
 import { PRESETS, getPreset } from "../data/presets.js";
 import { ensureFonts } from "../data/fonts.js";
+import { t } from "../i18n.js";
 import { bookImageIds, getImageBlob, restoreImage } from "../state/images.js";
 import {
   bindingLabel,
@@ -47,7 +48,7 @@ export function createLibraryUi({ store, engine, audio }) {
       class: "marker",
       type: "button",
       role: "tab",
-      "aria-label": `Select ${book.title}`,
+      "aria-label": t("Select {title}", { title: book.title }),
       "aria-selected": String(index === engine.selectedIndex),
       tabIndex: index === engine.selectedIndex ? 0 : -1,
       onclick: (event) => engine.select(index, event.currentTarget)
@@ -62,19 +63,19 @@ export function createLibraryUi({ store, engine, audio }) {
     emptyState.hidden = !empty;
     browseUi.hidden = empty;
     libraryCount.textContent = empty
-      ? "An empty shelf"
-      : `${count} ${count === 1 ? "volume" : "volumes"} on your shelf`;
+      ? t("An empty shelf")
+      : t(count === 1 ? "1 volume on your shelf" : "{n} volumes on your shelf", { n: count });
     bindingLabelElement.textContent = book ? bindingLabel(book) : " ";
     if (!book) return;
     counter.textContent = `${pad(index + 1)} / ${pad(count)}`;
     selectionTitle.textContent = book.title;
     const pages = book.pages.length;
     selectionNote.textContent = [
-      book.author ? `by ${book.author}` : null,
+      book.author ? t("by {author}", { author: book.author }) : null,
       bindingLabel(book),
-      `${pages} ${pages === 1 ? "page template" : "page templates"}`
+      t(pages === 1 ? "1 page template" : "{n} page templates", { n: pages })
     ].filter(Boolean).join("  ·  ");
-    inspectButton.setAttribute("aria-label", `Open ${book.title} in the atelier`);
+    inspectButton.setAttribute("aria-label", t("Open {title} in the atelier", { title: book.title }));
     previousButton.disabled = index <= 0;
     nextButton.disabled = index >= count - 1;
     [...markers.children].forEach((marker, markerIndex) => {
@@ -94,7 +95,7 @@ export function createLibraryUi({ store, engine, audio }) {
   function sampleBook(presetId) {
     return createBook({
       presetId,
-      title: nameInput.value.trim() || "Untitled",
+      title: nameInput.value.trim() || t("Untitled"),
       author: authorInput.value.trim()
     });
   }
@@ -121,7 +122,7 @@ export function createLibraryUi({ store, engine, audio }) {
       button.setAttribute("aria-checked", String(checked));
       button.tabIndex = checked ? 0 : -1;
     });
-    presetNote.textContent = getPreset(id).note;
+    presetNote.textContent = t(getPreset(id).note);
   }
 
   function buildPresetGrid() {
@@ -131,11 +132,14 @@ export function createLibraryUi({ store, engine, audio }) {
         type: "button",
         role: "radio",
         class: "tile",
-        title: preset.note,
+        title: t(preset.note),
         dataset: { value: preset.id },
         onclick: () => choosePreset(preset.id)
-      }, canvas, h("span", { text: preset.label }));
+      }, canvas, h("span", { text: t(preset.label) }));
     }));
+  }
+
+  function wirePresetGrid() {
     presetGrid.addEventListener("keydown", (event) => {
       const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
       if (!step) return;
@@ -163,7 +167,7 @@ export function createLibraryUi({ store, engine, audio }) {
   function createFromDialog() {
     const book = createBook({
       presetId: chosenPreset,
-      title: nameInput.value,
+      title: nameInput.value.trim() || t("Untitled"),
       author: authorInput.value
     });
     addToShelf(book, { open: true });
@@ -187,22 +191,22 @@ export function createLibraryUi({ store, engine, audio }) {
     const book = store.books[engine.selectedIndex];
     if (!book || engine.mode !== "hero") return;
     const copy = addToShelf(duplicateBook(book));
-    toast(`Made a copy: ${copy.title}`);
+    toast(t("Made a copy: {title}", { title: copy.title }));
   }
 
   async function deleteSelected() {
     const book = store.books[engine.selectedIndex];
     if (!book || engine.mode !== "hero") return;
     const confirmed = await confirmDialog({
-      title: "Delete this book?",
-      text: `“${book.title}” will be removed from your shelf, with its cover and all of its pages. This cannot be undone.`,
-      accept: "Delete book"
+      title: t("Delete this book?"),
+      text: t("“{title}” will be removed from your shelf, with its cover and all of its pages. This cannot be undone.", { title: book.title }),
+      accept: t("Delete book")
     });
     if (!confirmed) return;
     engine.removeBook(book.id);
     store.remove(book.id);
     refresh();
-    toast(`Deleted “${book.title}”.`);
+    toast(t("Deleted “{title}”.", { title: book.title }));
   }
 
   /* ----- export / import ----- */
@@ -225,7 +229,7 @@ export function createLibraryUi({ store, engine, audio }) {
     const payload = { format: "folio-atelier", version: 1, exportedAt: new Date().toISOString(), book, images };
     const name = (book.title || "book").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "book";
     downloadBlob(new Blob([JSON.stringify(payload)], { type: "application/json" }), `${name}.folio`);
-    toast(`Exported ${name}.folio`);
+    toast(t("Exported {name}.folio", { name }));
   }
 
   async function importBook() {
@@ -256,15 +260,16 @@ export function createLibraryUi({ store, engine, audio }) {
         if (page.image) page.image = remap.get(page.image) || null;
       });
       addToShelf(book);
-      toast(`Imported “${book.title}”.`);
+      toast(t("Imported “{title}”.", { title: book.title }));
     } catch (error) {
-      toast("That file is not a Folio Atelier book.");
+      toast(t("That file is not a Folio Atelier book."));
     }
   }
 
   /* ----- wiring ----- */
 
   buildPresetGrid();
+  wirePresetGrid();
   $("#create-first").addEventListener("click", openNewBookDialog);
   $("#new-book").addEventListener("click", openNewBookDialog);
   $("#import-first").addEventListener("click", importBook);
@@ -294,6 +299,11 @@ export function createLibraryUi({ store, engine, audio }) {
   return {
     refresh,
     renderSelection,
+    relocalize() {
+      buildPresetGrid();
+      choosePreset(chosenPreset);
+      refresh();
+    },
     setInteractive(active) {
       browseUi.inert = !active;
       emptyState.inert = !active;

@@ -3,11 +3,18 @@
 
 import { AUDIO_SOURCES, createAudioSystem } from "./audio.js";
 import { engine } from "./engine.js";
+import { getLang, localizeDocument, onLang, setLang, t } from "./i18n.js";
 import { createStore } from "./state/store.js";
 import { createLibraryUi } from "./ui/library.js";
 import { createStudioUi } from "./ui/studio.js";
 
 async function start() {
+  localizeDocument();
+  const langToggle = document.querySelector("#lang-toggle");
+  const markLang = () => { langToggle.dataset.lang = getLang(); };
+  markLang();
+  langToggle.addEventListener("click", () => setLang(getLang() === "zh" ? "en" : "zh"));
+
   const audio = createAudioSystem(AUDIO_SOURCES);
   const store = createStore();
   await store.init();
@@ -42,6 +49,12 @@ async function start() {
   studio = createStudioUi({ store, engine, audio });
   library.refresh();
 
+  onLang(() => {
+    markLang();
+    library.relocalize();
+    studio.relocalize();
+  });
+
   // Every edit repaints the book it belongs to.
   store.on("change", ({ book, dirty }) => engine.refreshBook(book, dirty));
 
@@ -53,5 +66,5 @@ async function start() {
 
 start().catch((error) => {
   console.error(error);
-  engine.showFallback("The atelier could not be prepared. Reload the page to try again.");
+  engine.showFallback(t("The atelier could not be prepared. Reload the page to try again."));
 });

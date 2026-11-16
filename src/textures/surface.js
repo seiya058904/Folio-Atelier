@@ -129,6 +129,55 @@ const HEIGHT_FIELDS = {
       }
     }
   },
+  buckram(field) {
+    // The same plain weave as bookcloth, heavier and less even.
+    HEIGHT_FIELDS.cloth(field);
+    const slub = valueNoise(20, 433);
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        field[y * SIZE + x] += (slub(x / SIZE, (y / SIZE) * 2) - 0.5) * 0.3;
+      }
+    }
+  },
+  silk(field) {
+    // Fine horizontal rib with a slow drift, which gives the watered look.
+    const drift = valueNoise(7, 311);
+    const fine = valueNoise(96, 17);
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        const u = x / SIZE;
+        const v = y / SIZE;
+        const rib = Math.sin((y + (drift(u, v) - 0.5) * 5) * Math.PI * 0.5);
+        field[y * SIZE + x] = 0.5 + rib * 0.2 + (fine(u, v) - 0.5) * 0.08;
+      }
+    }
+  },
+  suede(field) {
+    const a = valueNoise(128, 613);
+    const b = valueNoise(48, 71);
+    const nap = valueNoise(8, 29);
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        const u = x / SIZE;
+        const v = y / SIZE;
+        field[y * SIZE + x] = 0.5 + (a(u, v) - 0.5) * 0.4 + (b(u, v) - 0.5) * 0.2 + (nap(u, v) - 0.5) * 0.3;
+      }
+    }
+  },
+  vellum(field) {
+    const cells = worley(7, 907);
+    const soft = valueNoise(12, 43);
+    const fine = valueNoise(96, 9);
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        const u = x / SIZE;
+        const v = y / SIZE;
+        const [near, second] = cells(u, v);
+        const vein = 1 - clamp((second - near) * 9, 0, 1);
+        field[y * SIZE + x] = 0.5 + soft(u, v) * 0.18 - vein * 0.1 + (fine(u, v) - 0.5) * 0.05;
+      }
+    }
+  },
   velvet(field) {
     const a = valueNoise(128, 211);
     const nap = valueNoise(12, 19);
@@ -163,6 +212,26 @@ export const MATERIAL_LOOK = {
     repeat: [2, 3], normal: 0.22, slope: 1.2, roughBase: 0.82, roughRange: 0.14,
     roughness: 0.92, metalness: 0, sheen: 0, sheenRoughness: 1, sheenFromFoil: false,
     clearcoat: 0, clearcoatRoughness: 0.7, thread: "fibre"
+  },
+  buckram: {
+    repeat: [4.6, 6.9], normal: 0.9, slope: 1.6, roughBase: 0.8, roughRange: 0.2,
+    roughness: 1, metalness: 0, sheen: 0.16, sheenRoughness: 0.9, sheenFromFoil: false,
+    clearcoat: 0, clearcoatRoughness: 0.7, thread: "woven"
+  },
+  silk: {
+    repeat: [5, 7.5], normal: 0.34, slope: 1.3, roughBase: 0.4, roughRange: 0.24,
+    roughness: 0.72, metalness: 0.04, sheen: 1, sheenRoughness: 0.24, sheenFromFoil: false,
+    clearcoat: 0.06, clearcoatRoughness: 0.4, thread: "silk"
+  },
+  suede: {
+    repeat: [5, 7.5], normal: 0.42, slope: 1.5, roughBase: 0.9, roughRange: 0.1,
+    roughness: 1, metalness: 0, sheen: 0.6, sheenRoughness: 0.8, sheenFromFoil: false,
+    clearcoat: 0, clearcoatRoughness: 0.7, thread: "none"
+  },
+  vellum: {
+    repeat: [1.6, 2.4], normal: 0.2, slope: 1.6, roughBase: 0.42, roughRange: 0.22,
+    roughness: 0.62, metalness: 0, sheen: 0.05, sheenRoughness: 0.6, sheenFromFoil: false,
+    clearcoat: 0.22, clearcoatRoughness: 0.42, thread: "none"
   },
   velvet: {
     repeat: [6, 9], normal: 0.3, slope: 1.3, roughBase: 0.9, roughRange: 0.1,
@@ -238,7 +307,7 @@ export function getMaterialMaps(kind) {
  * Paint the base colour of a binding material: flat dye, edge shading and the
  * fine colour variation that makes the surface read as fabric, hide or paper.
  */
-export function paintMaterialBase(ctx, width, height, color, kind, seed, { spine = false } = {}) {
+export function paintMaterialBase(ctx, width, height, color, kind, seed, { spine = false, flip = false } = {}) {
   const look = MATERIAL_LOOK[kind] || MATERIAL_LOOK.cloth;
   const random = seededRandom(hashSeed(`${kind}-${seed}-${spine ? "s" : "f"}`));
   ctx.fillStyle = color;
@@ -263,6 +332,21 @@ export function paintMaterialBase(ctx, width, height, color, kind, seed, { spine
         vertical ? x + (random() - 0.5) * 1.4 : x + length,
         vertical ? y + length : y + (random() - 0.5) * 1.4
       );
+      ctx.stroke();
+    }
+  } else if (look.thread === "silk") {
+    // Long, faint weft lines.
+    const count = Math.round(900 * area);
+    for (let thread = 0; thread < count; thread += 1) {
+      const y = random() * height;
+      const x = random() * width;
+      ctx.strokeStyle = random() > 0.5
+        ? `rgba(255,255,255,${0.02 + random() * 0.035})`
+        : `rgba(0,0,0,${0.015 + random() * 0.03})`;
+      ctx.lineWidth = 0.4 + random() * 0.7;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 60 + random() * 260, y + (random() - 0.5) * 1.2);
       ctx.stroke();
     }
   } else if (look.thread === "fibre") {
@@ -298,7 +382,7 @@ export function paintMaterialBase(ctx, width, height, color, kind, seed, { spine
   }
 
   // Board edges catch less light: darker towards the hinge and the fore-edge.
-  const edge = ctx.createLinearGradient(0, 0, width, 0);
+  const edge = flip ? ctx.createLinearGradient(width, 0, 0, 0) : ctx.createLinearGradient(0, 0, width, 0);
   edge.addColorStop(0, `rgba(0,0,0,${spine ? 0.2 : 0.17})`);
   edge.addColorStop(spine ? 0.14 : 0.055, "rgba(255,255,255,0.03)");
   edge.addColorStop(spine ? 0.62 : 0.9, "rgba(255,255,255,0)");
@@ -319,7 +403,10 @@ export const PAPER_STOCKS = {
   cream: { label: "Cream", base: "#e8e1d3", warm: "103,87,64" },
   white: { label: "Bright white", base: "#f1eeea", warm: "96,92,88" },
   ivory: { label: "Ivory", base: "#efe6cf", warm: "118,94,54" },
-  grey: { label: "Soft grey", base: "#dcdad5", warm: "80,80,84" }
+  grey: { label: "Soft grey", base: "#dcdad5", warm: "80,80,84" },
+  aged: { label: "Aged", base: "#e1d2ad", warm: "124,92,44" },
+  blush: { label: "Blush", base: "#efdfd8", warm: "128,84,76" },
+  rice: { label: "Rice paper", base: "#f1ede2", warm: "110,104,84", fibre: 2.4 }
 };
 
 export function drawPaperSurface(ctx, width, height, random, stock = "cream") {
@@ -335,7 +422,7 @@ export function drawPaperSurface(ctx, width, height, random, stock = "cream") {
   ctx.fillRect(0, 0, width, height);
 
   const area = (width * height) / (512 * 768);
-  for (let fibre = 0; fibre < 2400 * area; fibre += 1) {
+  for (let fibre = 0; fibre < 2400 * area * (paper.fibre || 1); fibre += 1) {
     const x = random() * width;
     const y = random() * height;
     const length = 5 + random() * 34;
@@ -372,10 +459,17 @@ export function getPaperFaceTexture(stock = "cream") {
 
 /* ---------- page edges ---------- */
 
-let pageEdgeTextures = null;
+const pageEdgeCache = new Map();
 
-export function getPageEdgeTextures() {
-  if (pageEdgeTextures) return pageEdgeTextures;
+/**
+ * Textures for the trimmed edges of the block. The plain pair is tinted by the
+ * material colour (natural, gilt, stained); `sprinkled` and `ombre` bake the
+ * colour into the texture.
+ */
+export function getPageEdgeTextures(variant = "plain", color = "#c6532f") {
+  const baked = variant === "sprinkled" || variant === "ombre";
+  const key = baked ? `${variant}-${color}` : "plain";
+  if (pageEdgeCache.has(key)) return pageEdgeCache.get(key);
 
   const make = (width, height, suffix) => {
     const canvas = makeCanvas(width, height);
@@ -383,6 +477,20 @@ export function getPageEdgeTextures() {
     const random = seededRandom(hashSeed(`edge-${suffix}`));
     ctx.fillStyle = "#dcd5c7";
     ctx.fillRect(0, 0, width, height);
+    if (variant === "ombre") {
+      // Stain that fades from the tail to the head (fore-edge) or from the
+      // fore-edge inwards (head and tail).
+      const fade = suffix === "fore"
+        ? ctx.createLinearGradient(0, height, 0, 0)
+        : ctx.createLinearGradient(width, 0, 0, 0);
+      fade.addColorStop(0, color);
+      fade.addColorStop(suffix === "fore" ? 0.92 : 0.8, "rgba(220,213,199,0)");
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = fade;
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalAlpha = 1;
+    }
     const step = suffix === "fore" ? 2 : 1.35;
     for (let y = 0; y < height; y += step) {
       const shade = Math.round(106 + random() * 74);
@@ -398,6 +506,17 @@ export function getPageEdgeTextures() {
       );
       ctx.stroke();
     }
+    if (variant === "sprinkled") {
+      ctx.fillStyle = color;
+      const count = Math.round((width * height) / 150);
+      for (let dot = 0; dot < count; dot += 1) {
+        ctx.globalAlpha = 0.5 + random() * 0.5;
+        ctx.beginPath();
+        ctx.arc(random() * width, random() * height, 0.8 + random() * random() * 4.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
     const shade = ctx.createLinearGradient(0, 0, width, 0);
     shade.addColorStop(0, "rgba(58,48,35,0.18)");
     shade.addColorStop(0.035, "rgba(255,255,255,0.04)");
@@ -408,11 +527,42 @@ export function getPageEdgeTextures() {
     return configureCanvasTexture(new THREE.CanvasTexture(canvas));
   };
 
-  pageEdgeTextures = {
-    fore: make(512, 2048, "fore"),
-    headTail: make(2048, 384, "head-tail")
-  };
-  return pageEdgeTextures;
+  const textures = baked
+    ? { fore: make(256, 1024, "fore"), headTail: make(1024, 192, "head-tail") }
+    : { fore: make(512, 2048, "fore"), headTail: make(2048, 384, "head-tail") };
+  pageEdgeCache.set(key, textures);
+  // Dragging the colour picker makes many variants; keep only the recent ones.
+  if (pageEdgeCache.size > 9) {
+    const oldest = [...pageEdgeCache.keys()].find((candidate) => candidate !== "plain");
+    const stale = pageEdgeCache.get(oldest);
+    stale.fore.dispose();
+    stale.headTail.dispose();
+    pageEdgeCache.delete(oldest);
+  }
+  return textures;
+}
+
+/** Two-colour striped silk for headbands. */
+const headbandCache = new Map();
+export function getHeadbandTexture(first, second) {
+  const key = `${first}-${second}`;
+  if (headbandCache.has(key)) return headbandCache.get(key);
+  const canvas = makeCanvas(8, 64);
+  const ctx = canvas.getContext("2d");
+  for (let band = 0; band < 8; band += 1) {
+    ctx.fillStyle = band % 2 ? second : first;
+    ctx.fillRect(0, band * 8, 8, 8);
+  }
+  const texture = configureCanvasTexture(new THREE.CanvasTexture(canvas));
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1, 2.5);
+  headbandCache.set(key, texture);
+  if (headbandCache.size > 12) {
+    const oldest = headbandCache.keys().next().value;
+    headbandCache.get(oldest).dispose();
+    headbandCache.delete(oldest);
+  }
+  return texture;
 }
 
 /* ---------- contact shadow ---------- */

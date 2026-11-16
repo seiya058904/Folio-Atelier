@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 export const AUDIO_SOURCES = Object.freeze({
@@ -76,14 +77,14 @@ export function createAudioSystem(sources) {
 
   function updateInterface() {
     audioToggle.setAttribute("aria-pressed", String(muted));
-    audioToggle.setAttribute("aria-label", muted ? "Turn sound on" : "Mute sound");
+    audioToggle.setAttribute("aria-label", t(muted ? "Turn sound on" : "Mute sound"));
     audioVolume.value = String(volume);
     audioControls.dataset.state = muted ? "muted" : unlocked ? "playing" : "ready";
     audioStatus.textContent = muted
-      ? "Sound muted"
+      ? t("Sound muted")
       : unlocked
-        ? `Sound on at ${Math.round(volume * 100)} percent`
-        : `Sound ready at ${Math.round(volume * 100)} percent`;
+        ? t("Sound on at {n} percent", { n: Math.round(volume * 100) })
+        : t("Sound ready at {n} percent", { n: Math.round(volume * 100) });
     music.volume = muted ? 0 : clamp(volume * MUSIC_GAIN, 0, 1);
     activeVoices.forEach(setVoiceVolume);
   }

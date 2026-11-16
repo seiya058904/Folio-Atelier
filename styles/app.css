@@ -1861,3 +1861,75 @@ p {
     right: var(--edge);
   }
 }
+
+/* ---------- language switch ---------- */
+
+.lang-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-right: 6px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+
+.lang-toggle span {
+  opacity: 0.45;
+  transition: opacity 180ms ease;
+}
+
+.lang-toggle i {
+  font-style: normal;
+  opacity: 0.3;
+}
+
+.lang-toggle[data-lang="en"] [data-lang="en"],
+.lang-toggle[data-lang="zh"] [data-lang="zh"] {
+  opacity: 1;
+  border-bottom: 1px solid currentColor;
+}
+
+.lang-toggle:hover span {
+  opacity: 0.85;
+}
+
+.masthead__index {
+  padding-right: 176px;
+}
+
+/* Chinese sets wider and needs more size than tracked Latin capitals. */
+html[lang="zh-CN"] :is(
+  .eyebrow, .pill-button, .link-button, .masthead span, .pointer-label, .counter, .selection__note,
+  .studio__status, .tab, .group__hint, .field__label, .field__value, .segmented button, .tile, .chip,
+  .layer__name, .page-item__type, .reader-bar__status span, .microcopy, .toast
+) {
+  letter-spacing: 0.04em;
+}
+
+html[lang="zh-CN"] :is(.field__label, .segmented button, .tile, .chip, .tab, .link-button, .pill-button, .layer__name, .page-item__type, .eyebrow, .masthead span, .studio__status) {
+  font-size: 0.7rem;
+}
+
+html[lang="zh-CN"] .group__hint {
+  font-size: 0.74rem;
+  line-height: 1.7;
+}
+
+html[lang="zh-CN"] .empty-state__title,
+html[lang="zh-CN"] .selection__title {
+  letter-spacing: 0;
+}
+
+html[lang="zh-CN"] .empty-state__title em {
+  font-style: normal;
+}
+
+.tiles--material .tile__glyph {
+  border-radius: 2px;
+}

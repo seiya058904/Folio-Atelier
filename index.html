@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
     data-fonts
-    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&amp;family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&amp;family=DM+Serif+Display:ital@0;1&amp;family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&amp;family=Inter:wght@400;500;600;700&amp;family=Italiana&amp;family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,400&amp;family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&amp;family=Noto+Sans+SC:wght@400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap"
+    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&amp;family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&amp;family=DM+Serif+Display:ital@0;1&amp;family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&amp;family=Inter:wght@400;500;600;700&amp;family=Italiana&amp;family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,400&amp;family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&amp;family=Noto+Sans+SC:wght@400;500;700&amp;family=Noto+Serif+SC:wght@400;500;600;700&amp;family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=Bodoni+Moda:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;family=Fraunces:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&amp;family=Marcellus&amp;family=Pinyon+Script&amp;family=Special+Elite&amp;family=Ma+Shan+Zheng&amp;family=ZCOOL+XiaoWei&amp;family=Long+Cang&amp;display=swap"
     rel="stylesheet"
   >
   <link rel="stylesheet" href="./styles/app.css">
@@ -36,7 +36,7 @@
     <header class="masthead" aria-label="Folio Atelier">
       <div class="masthead__identity">
         <strong>Folio Atelier</strong>
-        <span>A personal 3D bookmaking studio</span>
+        <span data-i18n>A personal 3D bookmaking studio</span>
       </div>
       <div class="masthead__index">
         <span id="library-count">An empty shelf</span>
@@ -44,7 +44,10 @@
       </div>
     </header>
 
-    <div class="audio-controls" id="audio-controls" role="group" aria-label="Sound controls" data-state="ready">
+    <div class="audio-controls" id="audio-controls" role="group" aria-label="Sound and language" data-i18n-attrs="aria-label" data-state="ready">
+      <button class="lang-toggle" id="lang-toggle" type="button" aria-label="Switch language" data-i18n-attrs="aria-label">
+        <span data-lang="en">EN</span><i aria-hidden="true">/</i><span data-lang="zh">中</span>
+      </button>
       <button class="audio-toggle" id="audio-toggle" type="button" aria-label="Mute sound" aria-pressed="false">
         <svg viewBox="0 0 18 18" aria-hidden="true">
           <path d="M3.25 7.1h2.4L9 4.35v9.3L5.65 10.9h-2.4z"></path>
@@ -60,7 +63,7 @@
       </button>
       <label>
         <span class="sr-only" id="audio-status">Sound ready</span>
-        <input class="audio-volume" id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.55" aria-label="Sound volume">
+        <input class="audio-volume" id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.55" aria-label="Sound volume" data-i18n-attrs="aria-label">
       </label>
     </div>
 
@@ -71,121 +74,121 @@
 
     <!-- First visit: nothing on the shelf yet. -->
     <section class="empty-state" id="empty-state" aria-labelledby="empty-title" hidden>
-      <p class="eyebrow">Your shelf is empty</p>
-      <h1 class="empty-state__title" id="empty-title">Craft a book that is<br><em>entirely yours.</em></h1>
-      <p class="empty-state__deck">
+      <p class="eyebrow" data-i18n>Your shelf is empty</p>
+      <h1 class="empty-state__title" id="empty-title" data-i18n="html">Craft a book that is<br><em>entirely yours.</em></h1>
+      <p class="empty-state__deck" data-i18n>
         Choose a cloth, press a title in foil, set the pages inside —
         then open it and turn them. Every book you make is kept here.
       </p>
       <div class="empty-state__actions">
-        <button class="pill-button pill-button--solid" id="create-first" type="button">Create your first book</button>
-        <button class="link-button" id="import-first" type="button">Import a .folio file</button>
+        <button class="pill-button pill-button--solid" id="create-first" type="button" data-i18n>Create your first book</button>
+        <button class="link-button" id="import-first" type="button" data-i18n>Import a .folio file</button>
       </div>
     </section>
 
     <!-- The shelf. -->
-    <section class="browse-ui" id="browse-ui" aria-label="Your shelf" hidden>
+    <section class="browse-ui" id="browse-ui" aria-label="Your shelf" data-i18n-attrs="aria-label" hidden>
       <div class="selection">
         <span class="counter" id="counter">01 / 01</span>
         <div class="selection__copy">
           <h1 class="selection__title" id="selection-title"></h1>
           <p class="selection__note" id="selection-note"></p>
           <div class="selection__actions">
-            <button class="link-button" id="duplicate-book" type="button">Duplicate</button>
-            <button class="link-button" id="export-book" type="button">Export</button>
-            <button class="link-button link-button--danger" id="delete-book" type="button">Delete</button>
+            <button class="link-button" id="duplicate-book" type="button" data-i18n>Duplicate</button>
+            <button class="link-button" id="export-book" type="button" data-i18n>Export</button>
+            <button class="link-button link-button--danger" id="delete-book" type="button" data-i18n>Delete</button>
           </div>
         </div>
       </div>
 
       <div class="browse-actions">
-        <button class="round-button" id="previous" type="button" aria-label="Previous book">
+        <button class="round-button" id="previous" type="button" aria-label="Previous book" data-i18n-attrs="aria-label">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 3.5-4.5 4.5 4.5 4.5"></path></svg>
         </button>
-        <button class="pill-button" id="inspect" type="button">Open</button>
-        <button class="round-button" id="next" type="button" aria-label="Next book">
+        <button class="pill-button" id="inspect" type="button" data-i18n>Open</button>
+        <button class="round-button" id="next" type="button" aria-label="Next book" data-i18n-attrs="aria-label">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
         </button>
       </div>
 
-      <nav class="index-nav" aria-label="Library">
+      <nav class="index-nav" aria-label="Library" data-i18n-attrs="aria-label">
         <div class="index-nav__actions">
-          <button class="link-button" id="import-book" type="button">Import</button>
+          <button class="link-button" id="import-book" type="button" data-i18n>Import</button>
           <button class="pill-button pill-button--solid" id="new-book" type="button">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>
-            New book
+            <span data-i18n>New book</span>
           </button>
         </div>
-        <div class="markers" id="markers" role="tablist" aria-label="Choose a book"></div>
+        <div class="markers" id="markers" role="tablist" aria-label="Choose a book" data-i18n-attrs="aria-label"></div>
       </nav>
     </section>
 
     <!-- The atelier: 3D book on the left, the workbench on the right. -->
-    <aside class="studio" id="studio" aria-label="Book studio" aria-hidden="true" inert>
+    <aside class="studio" id="studio" aria-label="Book studio" data-i18n-attrs="aria-label" aria-hidden="true" inert>
       <header class="studio__header">
-        <button class="icon-button" id="close-detail" type="button" aria-label="Return book to the shelf">
+        <button class="icon-button" id="close-detail" type="button" aria-label="Return book to the shelf" data-i18n-attrs="aria-label">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3.5 5 8l4.5 4.5"></path></svg>
         </button>
         <div class="studio__heading">
-          <span class="studio__status" id="save-status" aria-live="polite">Saved</span>
+          <span class="studio__status" id="save-status" aria-live="polite" data-i18n>Saved</span>
           <h2 class="studio__title" id="studio-title"></h2>
         </div>
         <div class="studio__history">
-          <button class="icon-button" id="undo" type="button" aria-label="Undo" disabled>
+          <button class="icon-button" id="undo" type="button" aria-label="Undo" data-i18n-attrs="aria-label" disabled>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 3 7l3 3M3.2 7H9a3.5 3.5 0 0 1 0 7H7"></path></svg>
           </button>
-          <button class="icon-button" id="redo" type="button" aria-label="Redo" disabled>
+          <button class="icon-button" id="redo" type="button" aria-label="Redo" data-i18n-attrs="aria-label" disabled>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 4 3 3-3 3M12.8 7H7a3.5 3.5 0 0 0 0 7h2"></path></svg>
           </button>
         </div>
       </header>
-      <div class="studio__tabs" id="studio-tabs" role="tablist" aria-label="Parts of the book"></div>
+      <div class="studio__tabs" id="studio-tabs" role="tablist" aria-label="Parts of the book" data-i18n-attrs="aria-label"></div>
       <div class="studio__body" id="studio-body" role="tabpanel" data-scroll tabindex="-1"></div>
     </aside>
 
     <!-- Reading controls, under the book while it is in the atelier. -->
-    <div class="reader-bar" id="reader-bar" role="group" aria-label="Reading controls" aria-hidden="true" inert>
-      <button class="round-button" id="previous-page" type="button" aria-label="Previous page" disabled>
+    <div class="reader-bar" id="reader-bar" role="group" aria-label="Reading controls" data-i18n-attrs="aria-label" aria-hidden="true" inert>
+      <button class="round-button" id="previous-page" type="button" aria-label="Previous page" data-i18n-attrs="aria-label" disabled>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10.5 3.5-4.5 4.5 4.5 4.5"></path></svg>
       </button>
       <p class="reader-bar__status">
-        <strong id="page-label">Closed</strong>
-        <span id="page-counter">Click the book to open it</span>
+        <strong id="page-label" data-i18n>Closed</strong>
+        <span id="page-counter" data-i18n>Click the book to open it</span>
       </p>
-      <button class="round-button" id="next-page" type="button" aria-label="Next page" disabled>
+      <button class="round-button" id="next-page" type="button" aria-label="Next page" data-i18n-attrs="aria-label" disabled>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
       </button>
       <span class="reader-bar__rule" aria-hidden="true"></span>
-      <button class="link-button" id="toggle-book" type="button" aria-pressed="false">Open book</button>
-      <button class="link-button" id="reset-view" type="button">Reset view</button>
+      <button class="link-button" id="toggle-book" type="button" aria-pressed="false" data-i18n>Open book</button>
+      <button class="link-button" id="reset-view" type="button" data-i18n>Reset view</button>
     </div>
 
     <dialog class="sheet" id="new-book-dialog" aria-labelledby="new-book-title">
       <form class="sheet__form" id="new-book-form" method="dialog">
         <header class="sheet__header">
-          <p class="eyebrow">A new volume</p>
-          <h2 id="new-book-title">Begin a book</h2>
-          <button class="icon-button sheet__close" type="button" value="cancel" id="new-book-cancel" aria-label="Cancel">
+          <p class="eyebrow" data-i18n>A new volume</p>
+          <h2 id="new-book-title" data-i18n>Begin a book</h2>
+          <button class="icon-button sheet__close" type="button" value="cancel" id="new-book-cancel" aria-label="Cancel" data-i18n-attrs="aria-label">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"></path></svg>
           </button>
         </header>
         <div class="sheet__fields">
           <label class="field">
-            <span class="field__label">Title</span>
-            <input class="field__input field__input--display" id="new-book-name" name="title" type="text" maxlength="80" placeholder="Untitled" autocomplete="off">
+            <span class="field__label" data-i18n>Title</span>
+            <input class="field__input field__input--display" id="new-book-name" name="title" type="text" maxlength="80" placeholder="Untitled" data-i18n-attrs="placeholder" autocomplete="off">
           </label>
           <label class="field">
-            <span class="field__label">Author</span>
-            <input class="field__input" id="new-book-author" name="author" type="text" maxlength="60" placeholder="Your name" autocomplete="off">
+            <span class="field__label" data-i18n>Author</span>
+            <input class="field__input" id="new-book-author" name="author" type="text" maxlength="60" placeholder="Your name" data-i18n-attrs="placeholder" autocomplete="off">
           </label>
         </div>
         <fieldset class="sheet__presets">
-          <legend class="field__label">Start from a binding — everything can be changed later</legend>
-          <div class="preset-grid" id="new-book-presets" role="radiogroup" aria-label="Starting binding"></div>
+          <legend class="field__label" data-i18n>Start from a binding — everything can be changed later</legend>
+          <div class="preset-grid" id="new-book-presets" role="radiogroup" aria-label="Starting binding" data-i18n-attrs="aria-label"></div>
         </fieldset>
         <footer class="sheet__footer">
           <p class="microcopy" id="new-book-note">Ultramarine cloth · copper foil</p>
-          <button class="pill-button pill-button--solid" type="submit" value="create">Create book</button>
+          <button class="pill-button pill-button--solid" type="submit" value="create" data-i18n>Create book</button>
         </footer>
       </form>
     </dialog>
@@ -193,11 +196,11 @@
     <dialog class="sheet sheet--small" id="confirm-dialog" aria-labelledby="confirm-title">
       <form class="sheet__form" method="dialog">
         <header class="sheet__header">
-          <h2 id="confirm-title">Delete this book?</h2>
+          <h2 id="confirm-title" data-i18n>Delete this book?</h2>
         </header>
         <p class="sheet__text" id="confirm-text"></p>
         <footer class="sheet__footer">
-          <button class="link-button" type="submit" value="cancel">Keep it</button>
+          <button class="link-button" type="submit" value="cancel" data-i18n>Keep it</button>
           <button class="pill-button pill-button--danger" type="submit" value="confirm" id="confirm-accept">Delete</button>
         </footer>
       </form>
@@ -212,15 +215,15 @@
     <section class="static-fallback" id="static-fallback" aria-labelledby="fallback-title">
       <div>
         <p class="eyebrow">Folio Atelier</p>
-        <h2 id="fallback-title">The atelier needs WebGL.</h2>
-        <p id="fallback-status">Preparing the studio…</p>
+        <h2 id="fallback-title" data-i18n>The atelier needs WebGL.</h2>
+        <p id="fallback-status" data-i18n>Preparing the studio…</p>
       </div>
     </section>
 
     <div class="loading" id="loading" aria-live="polite">
       <div class="loading__inner">
         <div class="loading__mark" aria-hidden="true"></div>
-        <p>Preparing the atelier</p>
+        <p data-i18n>Preparing the atelier</p>
       </div>
     </div>
   </main>

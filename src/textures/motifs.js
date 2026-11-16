@@ -317,6 +317,409 @@ const DRAW = {
     ctx.fillText(letter, cx, cy + (ascent - descent) / 2);
   },
 
+  seal(ctx, cx, cy, size, alpha, options) {
+    const side = size * 1.56;
+    const weight = ctx.lineWidth;
+    ctx.lineWidth = weight * 2.2;
+    ctx.lineJoin = "round";
+    ctx.strokeRect(cx - side / 2, cy - side / 2, side, side);
+    ctx.lineWidth = weight;
+    const character = [...(options.text || "A").trim()][0] || "A";
+    ctx.font = `700 ${size * 1.12}px "Noto Serif SC", "Songti SC", "Cormorant Garamond", serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    const metrics = ctx.measureText(character);
+    const ascent = metrics.actualBoundingBoxAscent || size * 0.8;
+    const descent = metrics.actualBoundingBoxDescent || 0;
+    ctx.fillText(character.toUpperCase(), cx, cy + (ascent - descent) / 2);
+  },
+
+  lotus(ctx, cx, cy, size, alpha) {
+    const baseY = cy + size * 0.42;
+    const petal = (angle, length, width) => {
+      ctx.save();
+      ctx.translate(cx, baseY);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(length * 0.5, -width, length, 0);
+      ctx.quadraticCurveTo(length * 0.5, width, 0, 0);
+      ctx.stroke();
+      ctx.restore();
+    };
+    [[1.12, 0.3, -1.12], [0.7, 0.26, -0.7], [0.36, 0.22, -0.36]].forEach(([spread, width], index) => {
+      ctx.globalAlpha = alpha * (0.62 + index * 0.19);
+      const length = size * (0.92 + index * 0.16);
+      petal(-Math.PI / 2 - spread, length, size * width);
+      petal(-Math.PI / 2 + spread, length, size * width);
+    });
+    ctx.globalAlpha = alpha;
+    petal(-Math.PI / 2, size * 1.36, size * 0.24);
+    ctx.globalAlpha = alpha * 0.6;
+    [0.62, 0.8].forEach((offset, index) => {
+      const reach = size * (1 - index * 0.36);
+      line(ctx, cx - reach, cy + size * offset, cx + reach, cy + size * offset);
+    });
+  },
+
+  cloud(ctx, cx, cy, size) {
+    const r = size * 0.36;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.5, cy - r * 0.2, r, Math.PI * 0.95, Math.PI * 2.55);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.42, cy - r * 0.1, r * 0.48, Math.PI * 1.2, Math.PI * 2.9);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx + r * 0.95, cy + r * 0.15, r * 0.7, Math.PI * 1.08, Math.PI * 2.3);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 1.5, cy - r * 0.1);
+    ctx.quadraticCurveTo(cx - r * 2.3, cy + r * 0.2, cx - r * 2.75, cy + r * 0.95);
+    ctx.lineTo(cx + r * 2.75, cy + r * 0.95);
+    ctx.stroke();
+  },
+
+  peaks(ctx, cx, cy, size, alpha) {
+    const path = (points) => {
+      ctx.beginPath();
+      points.forEach(([x, y], index) => {
+        if (index) ctx.lineTo(cx + x * size, cy + y * size);
+        else ctx.moveTo(cx + x * size, cy + y * size);
+      });
+      ctx.stroke();
+    };
+    ctx.lineJoin = "round";
+    ctx.globalAlpha = alpha * 0.6;
+    path([[-1, 0.62], [-0.52, -0.2], [-0.18, 0.3]]);
+    path([[0.16, -0.36], [0.4, -0.5], [0.52, -0.3]]);
+    ctx.globalAlpha = alpha;
+    path([[-0.5, 0.62], [0.34, -0.82], [1, 0.62]]);
+    line(ctx, cx - size, cy + size * 0.62, cx + size, cy + size * 0.62);
+    ctx.beginPath();
+    ctx.arc(cx - size * 0.52, cy - size * 0.62, size * 0.17, 0, TAU);
+    ctx.stroke();
+  },
+
+  bamboo(ctx, cx, cy, size, alpha) {
+    const stalk = (x, top, bottom, joints, width) => {
+      const step = (bottom - top) / joints;
+      for (let joint = 0; joint < joints; joint += 1) {
+        const y0 = cy + (top + joint * step) * size + size * 0.025;
+        const y1 = cy + (top + (joint + 1) * step) * size - size * 0.025;
+        ctx.strokeRect(cx + x * size - width / 2, y0, width, y1 - y0);
+      }
+    };
+    stalk(-0.22, -1, 1, 4, size * 0.15);
+    ctx.globalAlpha = alpha * 0.7;
+    stalk(0.2, -0.56, 1, 3, size * 0.1);
+    ctx.globalAlpha = alpha;
+    [[-0.14, -0.5, -0.5], [-0.14, -0.5, -0.05], [-0.14, 0, -0.42], [0.26, -0.04, -0.6], [0.26, -0.04, -0.12]]
+      .forEach(([x, y, angle]) => leaf(ctx, cx + x * size, cy + y * size, size * 0.62, size * 0.085, angle));
+  },
+
+  crescent(ctx, cx, cy, size, alpha) {
+    const radius = size * 0.78;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx - size * 0.1, cy, radius, 0, TAU);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.rect(cx - size * 2, cy - size * 2, size * 4, size * 4);
+    ctx.arc(cx + size * 0.24, cy - size * 0.14, radius * 0.86, 0, TAU);
+    ctx.fill("evenodd");
+    ctx.restore();
+    const spark = (x, y, reach) => {
+      ctx.beginPath();
+      for (let index = 0; index < 8; index += 1) {
+        const r = index % 2 === 0 ? reach : reach * 0.26;
+        const angle = (index / 8) * TAU - Math.PI / 2;
+        const px = cx + x * size + Math.cos(angle) * r;
+        const py = cy + y * size + Math.sin(angle) * r;
+        if (index) ctx.lineTo(px, py);
+        else ctx.moveTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+    };
+    spark(0.5, -0.5, size * 0.2);
+    ctx.globalAlpha = alpha * 0.7;
+    spark(0.82, 0.08, size * 0.11);
+    spark(0.36, 0.3, size * 0.08);
+  },
+
+  tree(ctx, cx, cy, size, alpha) {
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.arc(cx, cy - size * 0.3, size * 0.7, 0, TAU);
+    ctx.stroke();
+    line(ctx, cx, cy + size, cx, cy - size * 0.62);
+    [[0.34, -0.1, 0.5], [0.08, -0.38, 0.34], [-0.16, 0.08, 0.42], [-0.34, -0.22, 0.3]].forEach(([from, to, reach], index) => {
+      const side = index % 2 === 0 ? 1 : -1;
+      line(ctx, cx, cy + from * size, cx + side * reach * size, cy + to * size - reach * size * 0.5);
+    });
+    ctx.globalAlpha = alpha * 0.6;
+    line(ctx, cx - size * 0.6, cy + size, cx + size * 0.6, cy + size);
+  },
+
+  feather(ctx, cx, cy, size, alpha) {
+    const at = (t) => {
+      const inverse = 1 - t;
+      return [
+        cx + (inverse * inverse * -0.5 + 2 * inverse * t * -0.1 + t * t * 0.46) * size,
+        cy + (inverse * inverse * 1 + 2 * inverse * t * 0.1 + t * t * -0.96) * size
+      ];
+    };
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(...at(0));
+    ctx.quadraticCurveTo(cx - size * 0.1, cy + size * 0.1, ...at(1));
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(...at(0.3));
+    ctx.bezierCurveTo(cx - size * 0.7, cy - size * 0.1, cx - size * 0.1, cy - size * 0.9, ...at(1));
+    ctx.bezierCurveTo(cx + size * 0.75, cy - size * 0.3, cx + size * 0.3, cy + size * 0.45, ...at(0.3));
+    ctx.stroke();
+    ctx.globalAlpha = alpha * 0.55;
+    for (let barb = 0; barb < 6; barb += 1) {
+      const [x, y] = at(0.4 + barb * 0.09);
+      const reach = size * (0.3 - barb * 0.03);
+      line(ctx, x, y, x - reach, y - reach * 0.5);
+      line(ctx, x, y, x + reach * 0.9, y + reach * 0.05);
+    }
+  },
+
+  key(ctx, cx, cy, size) {
+    ctx.beginPath();
+    ctx.arc(cx, cy - size * 0.62, size * 0.34, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy - size * 0.62, size * 0.14, 0, TAU);
+    ctx.stroke();
+    line(ctx, cx, cy - size * 0.28, cx, cy + size);
+    line(ctx, cx - size * 0.16, cy - size * 0.16, cx + size * 0.16, cy - size * 0.16);
+    line(ctx, cx, cy + size * 0.62, cx + size * 0.34, cy + size * 0.62);
+    line(ctx, cx, cy + size * 0.8, cx + size * 0.24, cy + size * 0.8);
+    line(ctx, cx, cy + size * 0.98, cx + size * 0.34, cy + size * 0.98);
+  },
+
+  hourglass(ctx, cx, cy, size, alpha) {
+    [-1, 1].forEach((side) => {
+      line(ctx, cx - size * 0.62, cy + side * size * 0.96, cx + size * 0.62, cy + side * size * 0.96);
+      ctx.beginPath();
+      ctx.moveTo(cx + side * size * 0.48, cy - size * 0.96);
+      ctx.bezierCurveTo(
+        cx + side * size * 0.48, cy - size * 0.36, cx + side * size * 0.06, cy - size * 0.2,
+        cx + side * size * 0.06, cy
+      );
+      ctx.bezierCurveTo(
+        cx + side * size * 0.06, cy + size * 0.2, cx + side * size * 0.48, cy + size * 0.36,
+        cx + side * size * 0.48, cy + size * 0.96
+      );
+      ctx.stroke();
+    });
+    ctx.globalAlpha = alpha * 0.75;
+    ctx.beginPath();
+    ctx.moveTo(cx - size * 0.4, cy + size * 0.92);
+    ctx.quadraticCurveTo(cx, cy + size * 0.36, cx + size * 0.4, cy + size * 0.92);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx - size * 0.3, cy - size * 0.5);
+    ctx.quadraticCurveTo(cx, cy - size * 0.36, cx + size * 0.3, cy - size * 0.5);
+    ctx.quadraticCurveTo(cx + size * 0.1, cy - size * 0.2, cx, cy - size * 0.04);
+    ctx.quadraticCurveTo(cx - size * 0.1, cy - size * 0.2, cx - size * 0.3, cy - size * 0.5);
+    ctx.fill();
+  },
+
+  eye(ctx, cx, cy, size, alpha) {
+    ctx.beginPath();
+    ctx.moveTo(cx - size, cy);
+    ctx.quadraticCurveTo(cx, cy - size * 0.8, cx + size, cy);
+    ctx.quadraticCurveTo(cx, cy + size * 0.8, cx - size, cy);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.33, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.14, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = alpha * 0.6;
+    for (let ray = -3; ray <= 3; ray += 1) {
+      const angle = -Math.PI / 2 + ray * 0.3;
+      line(
+        ctx,
+        cx + Math.cos(angle) * size * 0.62, cy + Math.sin(angle) * size * 0.62,
+        cx + Math.cos(angle) * size * 0.94, cy + Math.sin(angle) * size * 0.94
+      );
+    }
+  },
+
+  anchor(ctx, cx, cy, size) {
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.arc(cx, cy - size * 0.82, size * 0.15, 0, TAU);
+    ctx.stroke();
+    line(ctx, cx, cy - size * 0.67, cx, cy + size * 0.9);
+    line(ctx, cx - size * 0.42, cy - size * 0.42, cx + size * 0.42, cy - size * 0.42);
+    ctx.beginPath();
+    ctx.arc(cx, cy + size * 0.2, size * 0.7, Math.PI * 0.06, Math.PI * 0.94);
+    ctx.stroke();
+    [-1, 1].forEach((side) => {
+      const x = cx + side * size * 0.69;
+      const y = cy + size * 0.33;
+      ctx.beginPath();
+      ctx.moveTo(x - side * size * 0.2, y + size * 0.04);
+      ctx.lineTo(x + side * size * 0.03, y - size * 0.2);
+      ctx.lineTo(x + side * size * 0.16, y + size * 0.1);
+      ctx.stroke();
+    });
+  },
+
+  fleur(ctx, cx, cy, size, alpha) {
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - size);
+    ctx.bezierCurveTo(cx + size * 0.36, cy - size * 0.45, cx + size * 0.24, cy, cx, cy + size * 0.26);
+    ctx.bezierCurveTo(cx - size * 0.24, cy, cx - size * 0.36, cy - size * 0.45, cx, cy - size);
+    ctx.stroke();
+    [-1, 1].forEach((side) => {
+      ctx.beginPath();
+      ctx.moveTo(cx + side * size * 0.1, cy + size * 0.26);
+      ctx.bezierCurveTo(
+        cx + side * size * 0.3, cy - size * 0.32, cx + side * size * 0.92, cy - size * 0.56,
+        cx + side * size * 0.86, cy - size * 0.04
+      );
+      ctx.bezierCurveTo(
+        cx + side * size * 0.82, cy + size * 0.24, cx + side * size * 0.52, cy + size * 0.22,
+        cx + side * size * 0.46, cy + size * 0.04
+      );
+      ctx.stroke();
+      line(ctx, cx + side * size * 0.12, cy + size * 0.44, cx + side * size * 0.42, cy + size * 0.9);
+    });
+    ctx.strokeRect(cx - size * 0.42, cy + size * 0.28, size * 0.84, size * 0.14);
+    line(ctx, cx, cy + size * 0.44, cx, cy + size);
+    ctx.globalAlpha = alpha;
+  },
+
+  crown(ctx, cx, cy, size, alpha) {
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    [[-0.8, 0.34], [-0.94, -0.46], [-0.42, 0], [0, -0.74], [0.42, 0], [0.94, -0.46], [0.8, 0.34]].forEach(([x, y], index) => {
+      if (index) ctx.lineTo(cx + x * size, cy + y * size);
+      else ctx.moveTo(cx + x * size, cy + y * size);
+    });
+    ctx.stroke();
+    ctx.strokeRect(cx - size * 0.8, cy + size * 0.34, size * 1.6, size * 0.26);
+    [[-0.94, -0.46], [0, -0.74], [0.94, -0.46]].forEach(([x, y]) => {
+      ctx.beginPath();
+      ctx.arc(cx + x * size, cy + y * size - size * 0.1, size * 0.075, 0, TAU);
+      ctx.fill();
+    });
+    ctx.globalAlpha = alpha * 0.6;
+    [-0.5, 0, 0.5].forEach((x) => {
+      ctx.beginPath();
+      ctx.arc(cx + x * size, cy + size * 0.47, size * 0.05, 0, TAU);
+      ctx.fill();
+    });
+  },
+
+  knot(ctx, cx, cy, size, alpha) {
+    const square = (radius, rotation) => {
+      ctx.beginPath();
+      for (let corner = 0; corner < 4; corner += 1) {
+        const angle = rotation + (corner / 4) * TAU;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        if (corner) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    };
+    square(size, 0);
+    square(size, Math.PI / 4);
+    ctx.globalAlpha = alpha * 0.6;
+    square(size * 0.54, 0);
+    square(size * 0.54, Math.PI / 4);
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.12, 0, TAU);
+    ctx.fill();
+  },
+
+  rosette(ctx, cx, cy, size, alpha) {
+    const radius = size * 0.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, size, 0, TAU);
+    ctx.stroke();
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, size, 0, TAU);
+    ctx.clip();
+    ctx.globalAlpha = alpha * 0.8;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, TAU);
+    ctx.stroke();
+    for (let petal = 0; petal < 6; petal += 1) {
+      const angle = (petal / 6) * TAU;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius, radius, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
+  },
+
+  book(ctx, cx, cy, size, alpha) {
+    ctx.lineJoin = "round";
+    [-1, 1].forEach((side) => {
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - size * 0.22);
+      ctx.quadraticCurveTo(cx + side * size * 0.5, cy - size * 0.5, cx + side * size, cy - size * 0.28);
+      ctx.lineTo(cx + side * size, cy + size * 0.62);
+      ctx.quadraticCurveTo(cx + side * size * 0.5, cy + size * 0.4, cx, cy + size * 0.68);
+      ctx.stroke();
+      ctx.globalAlpha = alpha * 0.5;
+      for (let row = 0; row < 3; row += 1) {
+        const y = cy - size * 0.08 + row * size * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(cx + side * size * 0.16, y + size * 0.03);
+        ctx.quadraticCurveTo(cx + side * size * 0.5, y - size * 0.14, cx + side * size * 0.84, y);
+        ctx.stroke();
+      }
+    });
+    ctx.globalAlpha = alpha;
+    line(ctx, cx, cy - size * 0.22, cx, cy + size * 0.68);
+    ctx.beginPath();
+    for (let index = 0; index < 8; index += 1) {
+      const r = index % 2 === 0 ? size * 0.2 : size * 0.055;
+      const angle = (index / 8) * TAU - Math.PI / 2;
+      const x = cx + Math.cos(angle) * r;
+      const y = cy - size * 0.74 + Math.sin(angle) * r;
+      if (index) ctx.lineTo(x, y);
+      else ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  },
+
+  heart(ctx, cx, cy, size, alpha) {
+    const heart = (scale) => {
+      const s = size * scale;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + s * 0.86);
+      ctx.bezierCurveTo(cx - s * 1.5, cy - s * 0.1, cx - s * 0.7, cy - s * 1.2, cx, cy - s * 0.42);
+      ctx.bezierCurveTo(cx + s * 0.7, cy - s * 1.2, cx + s * 1.5, cy - s * 0.1, cx, cy + s * 0.86);
+      ctx.stroke();
+    };
+    ctx.lineJoin = "round";
+    heart(1);
+    ctx.globalAlpha = alpha * 0.55;
+    heart(0.62);
+  },
+
   // Back-cover registration rings, carried over from the original back boards.
   rings(ctx, cx, cy, size, alpha) {
     for (let ring = 0; ring < 5; ring += 1) {

@@ -2,9 +2,10 @@
 // Everything the 3D rig and the page painters need is derived from this.
 
 import { deepClone, derivePalette, hashSeed, luminance, mixHex, uid } from "../util.js";
-import { FOILS, LAYOUTS, getFoil, getPreset } from "../data/presets.js";
+import { FOILS, LAYOUTS, MATERIALS, getFoil, getPreset } from "../data/presets.js";
+import { getLang, t } from "../i18n.js";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** Standard trim: one shared hardcover format for every book. */
 export const BOOK_FORMAT = Object.freeze({ width: 1.06, height: 1.59, depth: 0.27 });
@@ -13,24 +14,71 @@ export const PAGE_TYPES = [
   { id: "halftitle", label: "Half-title", note: "The title alone" },
   { id: "title", label: "Title page", note: "Title, subtitle, author" },
   { id: "dedication", label: "Dedication", note: "A short line, centred" },
+  { id: "epigraph", label: "Epigraph", note: "A short quotation before the text" },
   { id: "contents", label: "Contents", note: "Built from your chapters" },
+  { id: "part", label: "Part title", note: "Divides the book into parts" },
   { id: "chapter", label: "Chapter opener", note: "Number, title, opening text" },
   { id: "body", label: "Body text", note: "Flows across pages" },
+  { id: "poem", label: "Verse", note: "Keeps your line breaks" },
   { id: "quote", label: "Pull quote", note: "A large quotation" },
   { id: "plate", label: "Plate", note: "Image or ornament with caption" },
   { id: "colophon", label: "Colophon", note: "Notes on the edition" },
   { id: "blank", label: "Blank", note: "An empty page" }
 ];
 
+// Starter words for new pages, in the language the interface is using.
+const WORDS = {
+  en: {
+    dedication: "For those who keep making.",
+    contents: "Contents",
+    chapter: "A New Chapter",
+    part: "Part Title",
+    quote: "A book is a place you can return to.",
+    epigraph: "We read to know we are not alone.",
+    poem: "A line of verse\nand then another,\nkept exactly as you break them.",
+    firstChapter: "The Empty Room",
+    secondChapter: "What Comes Next",
+    firstQuote: "Make the thing you wish you had found on the shelf.",
+    opening: [
+      "Every book begins as an empty room. There is a table, a window, and the particular quiet that comes before anything has been decided. This page is that room: replace these lines with your own.",
+      "Write the way you would speak to one attentive reader. Leave the long explanations for later chapters, and let the first paragraphs do only what first paragraphs must \u2014 open the door, and make it easy to step inside.",
+      "***",
+      "When the text grows longer than a single page it continues onto the next one by itself, so you can simply keep writing. Add chapters, quotations and plates from the page list, and drag them into the order you want."
+    ].join("\n\n")
+  },
+  zh: {
+    dedication: "\u732e\u7ed9\u6240\u6709\u4ecd\u5728\u52a8\u624b\u521b\u9020\u7684\u4eba\u3002",
+    contents: "\u76ee\u5f55",
+    chapter: "\u65b0\u7684\u4e00\u7ae0",
+    part: "\u5377\u540d",
+    quote: "\u4e66\u662f\u4e00\u4e2a\u53ef\u4ee5\u4e00\u518d\u56de\u53bb\u7684\u5730\u65b9\u3002",
+    epigraph: "\u8bfb\u4e66\uff0c\u662f\u4e3a\u4e86\u77e5\u9053\u6211\u4eec\u5e76\u4e0d\u5b64\u5355\u3002",
+    poem: "\u4e00\u884c\u8bd7\n\u53c8\u4e00\u884c\uff0c\n\u6309\u4f60\u65ad\u53e5\u7684\u6837\u5b50\u7559\u5728\u7eb8\u4e0a\u3002",
+    firstChapter: "\u7a7a\u623f\u95f4",
+    secondChapter: "\u63a5\u4e0b\u6765",
+    firstQuote: "\u53bb\u505a\u90a3\u672c\u4f60\u5e0c\u671b\u5728\u4e66\u67b6\u4e0a\u9047\u89c1\u7684\u4e66\u3002",
+    opening: [
+      "\u6bcf\u4e00\u672c\u4e66\u90fd\u4ece\u4e00\u95f4\u7a7a\u623f\u95f4\u5f00\u59cb\u3002\u4e00\u5f20\u684c\u5b50\uff0c\u4e00\u6247\u7a97\uff0c\u8fd8\u6709\u4e00\u5207\u5c1a\u672a\u51b3\u5b9a\u4e4b\u524d\u90a3\u79cd\u7279\u522b\u7684\u5b89\u9759\u3002\u8fd9\u4e00\u9875\u5c31\u662f\u90a3\u95f4\u623f\u95f4\uff1a\u628a\u8fd9\u51e0\u884c\u5b57\u6362\u6210\u4f60\u81ea\u5df1\u7684\u3002",
+      "\u50cf\u5bf9\u4e00\u4f4d\u4e13\u5fc3\u7684\u8bfb\u8005\u8bf4\u8bdd\u90a3\u6837\u53bb\u5199\u3002\u957f\u7bc7\u7684\u89e3\u91ca\u7559\u7ed9\u540e\u9762\u7684\u7ae0\u8282\uff0c\u5f00\u5934\u7684\u51e0\u6bb5\u53ea\u505a\u5f00\u5934\u8be5\u505a\u7684\u4e8b\u2014\u2014\u63a8\u5f00\u95e8\uff0c\u8ba9\u4eba\u613f\u610f\u8d70\u8fdb\u6765\u3002",
+      "***",
+      "\u6587\u5b57\u8d85\u8fc7\u4e00\u9875\u65f6\u4f1a\u81ea\u52a8\u7eed\u5230\u4e0b\u4e00\u9875\uff0c\u6240\u4ee5\u53ea\u7ba1\u5199\u4e0b\u53bb\u3002\u5728\u9875\u9762\u5217\u8868\u91cc\u6dfb\u52a0\u7ae0\u8282\u3001\u5f15\u6587\u548c\u56fe\u7248\uff0c\u518d\u62d6\u52a8\u5b83\u4eec\u6392\u6210\u4f60\u60f3\u8981\u7684\u987a\u5e8f\u3002"
+    ].join("\n\n")
+  }
+};
+const words = () => WORDS[getLang()] || WORDS.en;
+
 const PAGE_DEFAULTS = {
   halftitle: () => ({}),
   title: () => ({ imprint: "" }),
-  dedication: () => ({ text: "For those who keep making." }),
-  contents: () => ({ heading: "Contents" }),
-  chapter: () => ({ title: "A New Chapter", text: "" }),
+  dedication: () => ({ text: words().dedication }),
+  epigraph: () => ({ text: words().epigraph, attribution: "" }),
+  contents: () => ({ heading: words().contents }),
+  part: () => ({ title: words().part, text: "" }),
+  chapter: () => ({ title: words().chapter, text: "" }),
   body: () => ({ heading: "", text: "" }),
-  quote: () => ({ text: "A book is a place you can return to.", attribution: "" }),
-  plate: () => ({ image: null, motif: "", caption: "" }),
+  poem: () => ({ title: "", text: words().poem }),
+  quote: () => ({ text: words().quote, attribution: "" }),
+  plate: () => ({ image: null, motif: "", caption: "", bleed: false }),
   colophon: () => ({ text: "" }),
   blank: () => ({})
 };
@@ -40,13 +88,8 @@ export function createPage(type, fields = {}) {
   return { id: uid("pg"), type: PAGE_DEFAULTS[type] ? type : "blank", ...make(), ...fields };
 }
 
-const OPENING_TEXT = [
-  "Every book begins as an empty room. There is a table, a window, and the particular quiet that comes before anything has been decided. This page is that room: replace these lines with your own.",
-  "Write the way you would speak to one attentive reader. Leave the long explanations for later chapters, and let the first paragraphs do only what first paragraphs must — open the door, and make it easy to step inside.",
-  "When the text grows longer than a single page it continues onto the next one by itself, so you can simply keep writing. Add chapters, quotations and plates from the page list, and drag them into the order you want."
-].join("\n\n");
-
 export function defaultPages() {
+  const w = words();
   return [
     createPage("halftitle"),
     createPage("blank"),
@@ -54,9 +97,9 @@ export function defaultPages() {
     createPage("dedication"),
     createPage("contents"),
     createPage("blank"),
-    createPage("chapter", { title: "The Empty Room", text: OPENING_TEXT }),
-    createPage("quote", { text: "Make the thing you wish you had found on the shelf.", attribution: "" }),
-    createPage("chapter", { title: "What Comes Next", text: "" }),
+    createPage("chapter", { title: w.firstChapter, text: w.opening }),
+    createPage("quote", { text: w.firstQuote, attribution: "" }),
+    createPage("chapter", { title: w.secondChapter, text: "" }),
     createPage("colophon")
   ];
 }
@@ -68,11 +111,15 @@ function resolveFoil(foil) {
       preset: foil.preset || "custom",
       color: foil.color || base.color,
       metalness: foil.metalness ?? base.metalness,
-      roughness: foil.roughness ?? base.roughness
+      roughness: foil.roughness ?? base.roughness,
+      iridescence: foil.iridescence ?? base.iridescence ?? 0
     };
   }
   const base = getFoil(foil);
-  return { preset: base.id, color: base.color, metalness: base.metalness, roughness: base.roughness };
+  return {
+    preset: base.id, color: base.color, metalness: base.metalness, roughness: base.roughness,
+    iridescence: base.iridescence || 0
+  };
 }
 
 /** Printed (non-foil) elements need a colour that reads on the cloth. */
@@ -87,11 +134,11 @@ function buildFront(layoutId, preset, color) {
   front.motif.key = preset.motif || "none";
   front.image = null;
   const ink = contrastInk(color);
-  if (layoutId !== "panel") {
-    front.border.color = ink;
-    front.texts.forEach((layer) => { layer.color = ink; });
-  }
+  // Layouts that print on a pasted label bring their own ink colours.
+  if (front.border.finish !== "ink") front.border.color = ink;
+  front.texts.forEach((layer) => { if (layer.finish !== "ink") layer.color = ink; });
   front.motif.color = ink;
+  if (preset.border) front.border.style = preset.border;
   if (preset.blank) {
     front.border.style = "none";
     front.texts.forEach((layer) => { layer.show = false; });
@@ -103,22 +150,23 @@ function buildSpine(preset, color) {
   const ink = contrastInk(color);
   return {
     style: preset.blank ? "none" : preset.spine || "frame",
-    emblem: preset.blank ? "none" : "ring",
+    emblem: preset.blank || preset.stitched ? "none" : "ring",
     finish: "foil",
     color: ink,
+    label: { show: false, color: mixHex(color, luminance(color) < 0.2 ? "#7a1f2b" : "#1d1813", 0.82) },
     texts: [
       {
-        id: "spine-title", source: "title", text: "", show: !preset.blank,
+        id: "spine-title", source: "title", text: "", show: !preset.blank && !preset.stitched,
         font: "cormorant", size: 66, weight: 500, italic: false, tracking: 0.01, upper: false,
         orient: "vertical", y: 0.5, finish: "foil", color: ink
       },
       {
-        id: "spine-author", source: "author", text: "", show: !preset.blank,
+        id: "spine-author", source: "author", text: "", show: !preset.blank && !preset.stitched,
         font: "inter", size: 19, weight: 500, italic: false, tracking: 0.2, upper: true,
         orient: "vertical", y: 0.8, finish: "foil", color: ink
       },
       {
-        id: "spine-mark", source: "custom", text: "I", show: !preset.blank,
+        id: "spine-mark", source: "custom", text: "I", show: !preset.blank && !preset.stitched,
         font: "inter", size: 24, weight: 500, italic: false, tracking: 0.2, upper: true,
         orient: "horizontal", y: 0.077, finish: "foil", color: ink
       }
@@ -162,22 +210,41 @@ function buildBack(preset, color) {
 function buildDetails(preset, color, foil) {
   return {
     edge: preset.edge ? { ...preset.edge } : { style: "plain", color: "#c6532f" },
-    endpaper: { color: mixHex(color, "#efe6d4", 0.72), pattern: "grid" },
-    ribbon: { show: true, color: mixHex(foil.color, color, 0.28) },
-    headband: { color: mixHex(foil.color, "#c6a66d", 0.5) }
+    endpaper: { color: mixHex(color, "#efe6d4", 0.72), pattern: preset.endpaper || "grid" },
+    ribbon: { show: true, color: mixHex(foil.color, color, 0.28), double: false, second: mixHex(foil.color, "#f3ece0", 0.4) },
+    headband: { color: mixHex(foil.color, "#c6a66d", 0.5), striped: false, second: "#f3ece0" },
+    corners: { style: preset.corners || "none" },
+    stitch: { show: Boolean(preset.stitched), color: "#f3ece0", holes: 4 }
+  };
+}
+
+function buildPattern(preset, color) {
+  return {
+    key: "none",
+    scale: 1,
+    finish: "blind",
+    color: contrastInk(color),
+    opacity: 0.6,
+    spine: false,
+    ...(preset.pattern || {})
   };
 }
 
 function buildInterior() {
   return {
-    bodyFont: "garamond",
-    headingFont: "cormorant",
+    bodyFont: getLang() === "zh" ? "notoserifsc" : "garamond",
+    headingFont: getLang() === "zh" ? "notoserifsc" : "cormorant",
     paper: "cream",
     scale: 1,
+    leading: 1.5,
     runningHead: true,
     folios: true,
+    folioPlace: "outer",
     dropCap: true,
-    justify: true
+    justify: true,
+    chapterStyle: "classic",
+    ink: "black",
+    labels: getLang()
   };
 }
 
@@ -197,7 +264,13 @@ export function applyPreset(book, presetId) {
     return next;
   };
   book.preset = preset.id;
-  book.material = { kind: preset.material.kind, color };
+  book.material = {
+    kind: preset.material.kind,
+    color,
+    binding: preset.material.binding || "full",
+    second: preset.material.second || mixHex(color, "#1d1813", 0.55)
+  };
+  book.pattern = buildPattern(preset, color);
   book.foil = foil;
   book.palette = preset.palette ? { ...preset.palette } : null;
   const image = book.front?.image || null;
@@ -250,7 +323,7 @@ export function duplicateBook(source) {
   book.id = uid("book");
   book.createdAt = Date.now();
   book.updatedAt = book.createdAt;
-  book.title = `${source.title} (copy)`;
+  book.title = t("{title} (copy)", { title: source.title });
   book.pages.forEach((page) => { page.id = uid("pg"); });
   return book;
 }
@@ -267,11 +340,15 @@ export function bookPalette(book) {
   return book.palette || derivePalette(book.material.color, book.foil.color);
 }
 
-/** One-line description of the binding, e.g. "Ultramarine cloth · copper foil". */
+/** One-line description of the binding, e.g. "Bookcloth \u00b7 copper foil". */
 export function bindingLabel(book) {
-  const material = { cloth: "Bookcloth", linen: "Linen", leather: "Leather", paper: "Paper", velvet: "Velvet" }[book.material.kind] || "Cloth";
+  const material = MATERIALS.find((candidate) => candidate.id === book.material.kind) || MATERIALS[0];
   const foil = FOILS.find((candidate) => candidate.id === book.foil.preset);
-  return `${material} · ${foil && foil.id !== "custom" ? foil.label.toLowerCase() : "custom foil"}`;
+  const foilName = foil && foil.id !== "custom" ? t(foil.label) : t("Custom foil");
+  const prefix = { quarter: t("Quarter") + " ", half: t("Half") + " " }[book.material.binding] || "";
+  return getLang() === "zh"
+    ? `${prefix.trim()}${t(material.label)} \u00b7 ${foilName}`
+    : `${prefix}${prefix ? material.label.toLowerCase() : material.label} \u00b7 ${foilName.toLowerCase()}`;
 }
 
 /** Collect every styled run in a book, for font preloading. */
@@ -285,6 +362,9 @@ export function coverFontRuns(book) {
   });
   if (book.front?.motif?.key === "monogram") {
     runs.push({ font: "cormorant", weight: 500, text: (book.title || "A").slice(0, 1) });
+  }
+  if (book.front?.motif?.key === "seal") {
+    runs.push({ font: "notoserifsc", weight: 700, text: [...(book.title || "A")][0] });
   }
   return runs;
 }
@@ -301,12 +381,20 @@ export function normalizeBook(value) {
   book.id = typeof value.id === "string" && value.id ? value.id : base.id;
   book.material = { ...base.material, ...(value.material || {}) };
   book.foil = { ...base.foil, ...(value.foil || {}) };
-  book.interior = { ...base.interior, ...(value.interior || {}) };
+  // A foil stored before iridescence existed keeps its plain look.
+  if (value.foil && value.foil.iridescence === undefined) book.foil.iridescence = 0;
+  book.pattern = { ...base.pattern, ...(value.pattern || {}) };
+  if (!value.pattern) book.pattern.key = "none";
+  // Books made before these options existed keep the look they had.
+  book.interior = { ...base.interior, labels: "en", ...(value.interior || {}) };
+  const stored = value.details || {};
   book.details = {
-    edge: { ...base.details.edge, ...(value.details?.edge || {}) },
-    endpaper: { ...base.details.endpaper, ...(value.details?.endpaper || {}) },
-    ribbon: { ...base.details.ribbon, ...(value.details?.ribbon || {}) },
-    headband: { ...base.details.headband, ...(value.details?.headband || {}) }
+    edge: { ...base.details.edge, ...(stored.edge || {}) },
+    endpaper: { ...base.details.endpaper, ...(stored.endpaper || {}) },
+    ribbon: { ...base.details.ribbon, ...(stored.ribbon || {}) },
+    headband: { ...base.details.headband, ...(stored.headband || {}) },
+    corners: { style: "none", ...(stored.corners || {}) },
+    stitch: { ...base.details.stitch, show: false, ...(stored.stitch || {}) }
   };
   ["front", "back"].forEach((face) => {
     const stored = value[face] || {};
@@ -316,13 +404,14 @@ export function normalizeBook(value) {
       border: { ...base[face].border, ...(stored.border || {}) },
       motif: { ...base[face].motif, ...(stored.motif || {}) },
       texts: Array.isArray(stored.texts) && stored.texts.length
-        ? stored.texts.map((layer) => ({ ...base[face].texts[0], ...layer }))
+        ? stored.texts.map((layer) => ({ ...base[face].texts[0], vertical: false, ...layer }))
         : base[face].texts
     };
   });
   book.spine = {
     ...base.spine,
     ...(value.spine || {}),
+    label: { ...base.spine.label, show: false, ...(value.spine?.label || {}) },
     texts: Array.isArray(value.spine?.texts) && value.spine.texts.length
       ? value.spine.texts.map((layer) => ({ ...base.spine.texts[0], ...layer }))
       : base.spine.texts

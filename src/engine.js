@@ -18,6 +18,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { createBookRig, createMesh, HIT_LAYER, PRINTED_LEAVES } from "./book/rig.js";
 import { ensureFonts } from "./data/fonts.js";
 import { detectQuality, lowerQuality } from "./scene/quality.js";
+import { t } from "./i18n.js";
 import { bookPalette, coverFontRuns } from "./state/schema.js";
 import { bindRenderer } from "./textures/gl.js";
 import { pageFontRuns, paginate } from "./textures/pages.js";
@@ -421,7 +422,7 @@ function updateSelection(index, shouldAnnounce = false) {
   const book = books[selectedIndex] || null;
   emit("onSelect", selectedIndex, book);
   if (shouldAnnounce && book) {
-    announce(`Selected ${book.title}, book ${selectedIndex + 1} of ${count}.`);
+    announce(t("Selected {title}, book {n} of {count}.", { title: book.title, n: selectedIndex + 1, count }));
   }
 }
 
@@ -668,8 +669,8 @@ function emitPageState(shouldAnnounce = false) {
   const state = pageState();
   emit("onPageState", state);
   if (shouldAnnounce && activeBook && readingOpen) {
-    const label = state.right?.label || state.left?.label || "End of book";
-    announce(`Spread ${state.spread + 1} of ${state.spreads}: ${label}.`);
+    const label = state.right?.label || state.left?.label || t("End of the book");
+    announce(t("Spread {n} of {count}: {label}.", { n: state.spread + 1, count: state.spreads, label }));
   }
 }
 
@@ -688,8 +689,8 @@ function setReadingOpen(open, shouldAnnounce = true) {
 
   if (shouldAnnounce && activeBook) {
     announce(readingOpen
-      ? `${activeBook.data.title} opened. Drag a page or use the arrow keys to read.`
-      : `${activeBook.data.title} closed.`);
+      ? t("{title} opened. Drag a page or use the arrow keys to read.", { title: activeBook.data.title })
+      : t("{title} closed.", { title: activeBook.data.title }));
   }
   requestFrame();
 }
@@ -846,7 +847,7 @@ function setHovered(index) {
   hoveredIndex = index;
   canvas.classList.toggle("has-book-hover", index >= 0);
   if (index >= 0 && books[index]) {
-    pointerLabelIndex.textContent = index === selectedIndex ? "Open in the atelier" : `Volume ${pad(index + 1)}`;
+    pointerLabelIndex.textContent = index === selectedIndex ? t("Open in the atelier") : t("Volume {n}", { n: pad(index + 1) });
     pointerLabelTitle.textContent = books[index].title;
     pointerLabel.setAttribute("aria-hidden", "false");
   } else {
@@ -940,7 +941,7 @@ function openDetail(origin = null) {
   activeBook.root.scale.copy(openingBookScale);
   applyDetailViewOffset();
   controls.enabled = false;
-  announce(`${activeBook.data.title} taken to the atelier.`);
+  announce(t("{title} taken to the atelier.", { title: activeBook.data.title }));
 
   if (reducedMotion) {
     finishOpening();
@@ -1010,7 +1011,7 @@ function closeDetail() {
   experience.classList.remove("mode-detail");
   emit("onMode", mode, activeBook.data);
   emitPageState(false);
-  announce(`Returning ${activeBook.data.title} to the shelf.`);
+  announce(t("Returning {title} to the shelf.", { title: activeBook.data.title }));
   if (reducedMotion) {
     finishClosing();
   }
@@ -1034,7 +1035,7 @@ function finishClosing() {
   const book = activeBook.data;
   activeBook = null;
   emit("onMode", mode, book);
-  announce(`${book.title} returned to the shelf.`);
+  announce(t("{title} returned to the shelf.", { title: book.title }));
   requestAnimationFrame(() => focusReturnTarget?.focus?.({ preventScroll: true }));
 }
 
@@ -1095,7 +1096,7 @@ function updateViewTween(delta) {
 function resetInspectionView() {
   if (mode !== "detail") return;
   focusView("front");
-  announce("View reset.");
+  announce(t("View reset."));
 }
 
 /* ------------------------------------------------------------------ */
@@ -1320,7 +1321,7 @@ function handleContextLost(event) {
   suspended = true;
   if (rafId) cancelAnimationFrame(rafId);
   rafId = 0;
-  showFallback("The 3D view paused after losing its graphics context. Your books are saved; reload to continue.");
+  showFallback(t("The 3D view paused after losing its graphics context. Your books are saved; reload to continue."));
 }
 
 function disposeExperience() {
@@ -1354,7 +1355,7 @@ async function initialize(options) {
       powerPreference: "high-performance"
     });
   } catch (error) {
-    showFallback("WebGL is unavailable in this browser, so the 3D atelier cannot open here.");
+    showFallback(t("WebGL is unavailable in this browser, so the 3D atelier cannot open here."));
     return false;
   }
 

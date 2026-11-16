@@ -17,8 +17,16 @@ export const FONTS = [
   { id: "jost", label: "Jost", stack: `"Jost", ${CJK_SANS_FALLBACK}`, kind: "sans", weights: [300, 400, 500, 600], italic: true },
   { id: "grotesk", label: "Space Grotesk", stack: `"Space Grotesk", ${CJK_SANS_FALLBACK}`, kind: "sans", weights: [400, 500, 600, 700], italic: false },
   { id: "plexmono", label: "IBM Plex Mono", stack: `"IBM Plex Mono", ${CJK_SANS_FALLBACK}`, kind: "mono", weights: [400, 500, 600], italic: true },
+  { id: "bodoni", label: "Bodoni Moda", stack: `"Bodoni Moda", ${CJK_FALLBACK}`, kind: "serif", weights: [400, 500, 600, 700], italic: true },
+  { id: "fraunces", label: "Fraunces", stack: `"Fraunces", ${CJK_FALLBACK}`, kind: "serif", weights: [400, 500, 600, 700], italic: true },
+  { id: "marcellus", label: "Marcellus", stack: `"Marcellus", ${CJK_FALLBACK}`, kind: "display", weights: [400], italic: false },
+  { id: "pinyon", label: "Pinyon Script", stack: `"Pinyon Script", ${CJK_FALLBACK}`, kind: "display", weights: [400], italic: false },
+  { id: "elite", label: "Special Elite", stack: `"Special Elite", ${CJK_SANS_FALLBACK}`, kind: "mono", weights: [400], italic: false },
   { id: "notoserifsc", label: "Noto Serif SC · 思源宋体", stack: CJK_FALLBACK, kind: "cjk", weights: [400, 500, 600, 700], italic: false },
-  { id: "notosanssc", label: "Noto Sans SC · 思源黑体", stack: CJK_SANS_FALLBACK, kind: "cjk", weights: [400, 500, 700], italic: false }
+  { id: "notosanssc", label: "Noto Sans SC · 思源黑体", stack: CJK_SANS_FALLBACK, kind: "cjk", weights: [400, 500, 700], italic: false },
+  { id: "xiaowei", label: "ZCOOL XiaoWei · 站酷小薇", stack: `"ZCOOL XiaoWei", ${CJK_FALLBACK}`, kind: "cjk", weights: [400], italic: false },
+  { id: "mashan", label: "Ma Shan Zheng · 马善政楷书", stack: `"Ma Shan Zheng", ${CJK_FALLBACK}`, kind: "cjk", weights: [400], italic: false },
+  { id: "longcang", label: "Long Cang · 龙藏体", stack: `"Long Cang", ${CJK_FALLBACK}`, kind: "cjk", weights: [400], italic: false }
 ];
 
 const FONT_BY_ID = new Map(FONTS.map((font) => [font.id, font]));
