@@ -1046,6 +1046,10 @@ export function createStudioUi({ store, engine, audio }) {
   }
 
   function hide() {
+    // Move focus out before the panel is hidden from assistive technology.
+    if (panel.contains(document.activeElement) || readerBar.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
     panel.inert = true;
     panel.setAttribute("aria-hidden", "true");
     readerBar.inert = true;

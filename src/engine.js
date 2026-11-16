@@ -11,8 +11,13 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
-import { createBookRig, createMesh, PRINTED_LEAVES } from "./book/rig.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { createBookRig, createMesh, HIT_LAYER, PRINTED_LEAVES } from "./book/rig.js";
 import { ensureFonts } from "./data/fonts.js";
+import { detectQuality, lowerQuality } from "./scene/quality.js";
 import { bookPalette, coverFontRuns } from "./state/schema.js";
 import { bindRenderer } from "./textures/gl.js";
 import { pageFontRuns, paginate } from "./textures/pages.js";
@@ -45,14 +50,12 @@ const smootherstep = (value) => (
 );
 const pad = (value) => String(value).padStart(2, "0");
 
-// Texture resolution multipliers (1 = 768 px wide cover).
-const quality = {
-  shelf: 0.75,
-  detail: 2,
-  page: 2,
-  pixelRatio: 2,
-  shadow: 4096
-};
+// Texture resolutions, shadow size and post-processing for this device.
+let quality = detectQuality();
+let composer = null;
+const frameBudget = { time: 0, frames: 0, settled: false };
+// A short flourish on the open book when its whole binding changes.
+let rebindTime = 1;
 
 let audio = { playCue() {}, unlock() {}, handleVisibility() {}, dispose() {} };
 let hooks = {};
@@ -163,6 +166,7 @@ const viewTween = {
 };
 
 const raycaster = new THREE.Raycaster();
+raycaster.layers.enable(HIT_LAYER);
 const shelfCameraPosition = new THREE.Vector3();
 const shelfCameraTarget = new THREE.Vector3();
 const inspectPosition = new THREE.Vector3();
@@ -357,7 +361,10 @@ function addBook(book, index = bookRigs.length) {
   snapRigToShelfSlot(rig, index);
   // A new binding settles onto the shelf from just above it.
   if (!reducedMotion) {
-    rig.root.position.y += 0.55;
+    rig.root.position.y += 0.62;
+    rig.root.rotation.z += 0.16;
+    rig.root.rotation.y -= 0.5;
+    rig.root.scale.multiplyScalar(0.9);
     rig.opacity = 0;
     rig.fadeMaterials.forEach((material) => { material.opacity = 0; });
   }
@@ -386,6 +393,7 @@ function refreshBook(book, dirty = ["all"]) {
   if (!rig) return;
   repaintRig(rig, dirty);
   if (books[selectedIndex] === book) applySelectedTheme();
+  if (rig === activeBook && dirty.includes("all") && mode === "detail" && !reducedMotion) rebindTime = 0;
   if (rig === activeBook) {
     const touchesPages = dirty.some((key) => (
       key === "all" || key === "pages" || key === "interior" || key === "meta"
@@ -799,7 +807,7 @@ function updatePaginatedBook(rig, delta, openAmount = 1) {
     pagePivot.rotation.z = damp(pagePivot.rotation.z, pageTwistTarget * amount, speed, delta);
     const turnProgress = clamp(Math.abs(pagePivot.rotation.y) / Math.PI, 0, 1);
     const curveTarget = amount > 0
-      ? amount * (0.004 + Math.sin(Math.PI * turnProgress) * 0.082 + dragCurveBoost)
+      ? amount * (0.011 + Math.sin(Math.PI * turnProgress) * 0.078 + dragCurveBoost)
       : 0;
     updateFlexiblePage(pagePivot, curveTarget, delta, false, flexTwistTarget * amount);
   });
@@ -905,6 +913,7 @@ function openDetail(origin = null) {
   activeBook.fadeMaterials.forEach((material) => { material.opacity = 1; });
   activeBook.leafBase = 0;
   activeBook.setResolution(quality.detail);
+  activeBook.setLeafShadows(quality.leafShadows);
   preparePages();
   experience.classList.add("mode-detail", "is-opening");
   pointerLabel.setAttribute("aria-hidden", "true");
@@ -1016,6 +1025,8 @@ function finishClosing() {
   snapRigToShelfSlot(activeBook, index);
   activeBook.contactShadow.visible = true;
   activeBook.clearLeaves();
+  activeBook.setLeafShadows(false);
+  activeBook.motion.scale.setScalar(1);
   activeBook.setResolution(quality.shelf);
   controls.target.copy(shelfCameraTarget);
   mode = "hero";
@@ -1110,9 +1121,10 @@ function frame(time) {
     if (viewTween.active) updateViewTween(delta);
     else controls.update();
     updatePaginatedBook(activeBook, delta, getDetailOpenAmount());
+    updateRebind(delta);
   }
 
-  renderer.render(scene, camera);
+  renderFrame(delta);
 
   const shelfMoving = Math.abs(position - targetPosition) > 0.0005 || wheelIdle > 0;
   const shouldContinue = !reducedMotion
@@ -1124,12 +1136,92 @@ function frame(time) {
   if (shouldContinue && !suspended) requestFrame();
 }
 
+function updateRebind(delta) {
+  if (rebindTime >= 1 || !activeBook) return;
+  rebindTime = Math.min(1, rebindTime + delta / 0.62);
+  const swing = Math.sin(Math.PI * rebindTime) * (1 - rebindTime);
+  activeBook.motion.rotation.y = swing * 0.42;
+  activeBook.motion.scale.setScalar(1 - Math.sin(Math.PI * rebindTime) * 0.035);
+  if (rebindTime >= 1) {
+    activeBook.motion.rotation.y = 0;
+    activeBook.motion.scale.setScalar(1);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Rendering and post-processing                                       */
+/* ------------------------------------------------------------------ */
+
+function buildComposer() {
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  const target = new THREE.WebGLRenderTarget(size.x, size.y, {
+    type: THREE.HalfFloatType,
+    samples: 4
+  });
+  composer = new EffectComposer(renderer, target);
+  composer.addPass(new RenderPass(scene, camera));
+
+  // Ambient occlusion: the gutter, the hinge, books against the shelf.
+  const occlusion = new GTAOPass(scene, camera, size.x, size.y);
+  occlusion.updateGtaoMaterial({ radius: 0.2, distanceExponent: 1.4, thickness: 1.2, scale: 1.05, samples: 12 });
+  occlusion.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+  occlusion.blendIntensity = 0.82;
+  composer.addPass(occlusion);
+
+  // Bloom and depth of field were tried here and removed: both soften the
+  // printed page, and a book you are typesetting has to stay sharp.
+  composer.addPass(new OutputPass());
+}
+
+function renderFrame(delta) {
+  if (composer) composer.render(delta);
+  else renderer.render(scene, camera);
+  watchFrameBudget(delta);
+}
+
+/** If the opening seconds run below ~30 fps, step down one quality tier. */
+function watchFrameBudget(delta) {
+  if (frameBudget.settled || delta <= 0 || delta >= 0.05) return;
+  frameBudget.time += delta;
+  frameBudget.frames += 1;
+  if (frameBudget.frames < 150) return;
+  const average = frameBudget.time / frameBudget.frames;
+  frameBudget.time = 0;
+  frameBudget.frames = 0;
+  if (average < 1 / 34) {
+    frameBudget.settled = true;
+    return;
+  }
+  const next = lowerQuality(quality);
+  if (!next) {
+    frameBudget.settled = true;
+    return;
+  }
+  quality = next;
+  if (!quality.post && composer) {
+    composer.dispose();
+    composer = null;
+  }
+  if (roomLights.key) {
+    roomLights.key.shadow.mapSize.set(quality.shadow, quality.shadow);
+    roomLights.key.shadow.map?.dispose();
+    roomLights.key.shadow.map = null;
+  }
+  activeBook?.setLeafShadows(quality.leafShadows);
+  resize();
+}
+
 function resize() {
   viewWidth = window.innerWidth;
   viewHeight = window.innerHeight;
   configureResponsiveTargets();
   renderer.setSize(viewWidth, viewHeight, false);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, viewWidth < 820 ? 1.5 : quality.pixelRatio));
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, viewWidth < 820 ? 1.5 : quality.pixelRatio);
+  renderer.setPixelRatio(pixelRatio);
+  if (composer) {
+    composer.setPixelRatio(pixelRatio);
+    composer.setSize(viewWidth, viewHeight);
+  }
   camera.aspect = viewWidth / viewHeight;
   camera.updateProjectionMatrix();
 
@@ -1239,6 +1331,7 @@ function disposeExperience() {
   controls?.dispose();
   bookRigs.forEach((rig) => rig.dispose());
   environmentTarget?.dispose();
+  composer?.dispose();
   renderer?.dispose();
 }
 
@@ -1265,16 +1358,6 @@ async function initialize(options) {
     return false;
   }
 
-  const coarse = window.matchMedia("(pointer: coarse)").matches;
-  const lowMemory = (navigator.deviceMemory || 8) <= 4;
-  if (coarse || lowMemory) {
-    quality.shelf = 0.5;
-    quality.detail = 1.5;
-    quality.page = 1.5;
-    quality.pixelRatio = 1.5;
-    quality.shadow = 2048;
-  }
-
   bindRenderer(renderer);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1285,6 +1368,8 @@ async function initialize(options) {
 
   scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0xe9dfcb, 0.027);
+  // Looking past the back wall shows the room colour, never a black void.
+  scene.background = scene.fog.color;
   const pmremGenerator = new THREE.PMREMGenerator(renderer);
   environmentTarget = pmremGenerator.fromScene(new RoomEnvironment(), 0.04);
   scene.environment = environmentTarget.texture;
@@ -1357,7 +1442,15 @@ async function initialize(options) {
   window.addEventListener("keydown", onFirstAudioKeydown, true);
   window.addEventListener("beforeunload", disposeExperience, { once: true });
 
-  renderer.render(scene, camera);
+  if (quality.post) {
+    try {
+      buildComposer();
+      resize();
+    } catch (error) {
+      composer = null;
+    }
+  }
+  renderFrame(0);
   loading.hidden = true;
   experience.classList.add("webgl-ready");
   requestFrame();
@@ -1388,6 +1481,7 @@ export const engine = {
   resize,
   showFallback,
   get mode() { return mode; },
+  get quality() { return quality.name; },
   get selectedIndex() { return selectedIndex; },
   get activeBookId() { return activeBook?.data.id || null; },
   get pageState() { return pageState(); },

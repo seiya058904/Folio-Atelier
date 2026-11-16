@@ -35,7 +35,8 @@ assets/               Walnut texture, ambient score and Foley
 src/
   main.js             Start-up; connects store, engine and interface
   engine.js           Room, shelf, cameras, shelf <-> studio state machine, page interaction
-  book/rig.js         The hardcover: boards, spine, hinges, leaves, edges, foil layers
+  book/rig.js         The hardcover: boards, rounded spine, hinges, leaves, edges, foil layers
+  scene/quality.js    Rendering tiers
   textures/           Procedural painters: materials, covers, ornaments, typesetting, pages
   state/              BookSpec schema, store with undo, IndexedDB, images
   data/               Presets, layouts, foils, ornaments, typefaces
@@ -44,6 +45,18 @@ src/
 ```
 
 Each book is one serialisable `BookSpec` (`src/state/schema.js`). The rig paints every surface from that spec onto canvases — a base layer for dyed material and print, and a white mask that the metallic foil material uses — so any edit repaints only the surfaces it touches while the model stays on screen. Only four leaves carry printed pages; as you read through a longer book, the leaf at the bottom of one pile is moved under the other and printed with the pages about to come into view.
+
+### Rendering quality
+
+Three tiers, chosen from the device and stepped down automatically if the first seconds run below about 30 fps. Force one with `?quality=high`, `?quality=balanced` or `?quality=lite`.
+
+| Tier | Textures | Shadows | Extras |
+| --- | --- | --- | --- |
+| `high` | 2× covers and pages | 4096 | Ambient occlusion, 4× MSAA, page-turn shadows |
+| `balanced` | 1.5× | 2048 | Page-turn shadows |
+| `lite` | 1× | 1024 | — |
+
+Bloom and depth of field were tried and removed: both softened printed text.
 
 Books are stored only in the browser that made them. Export a `.folio` file to back one up or move it.
 

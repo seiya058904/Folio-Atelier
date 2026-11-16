@@ -18,6 +18,8 @@ import {
 } from "../textures/surface.js";
 
 export const PRINTED_LEAVES = 4;
+/** Pointer hit volumes are raycast only, never rendered. */
+export const HIT_LAYER = 1;
 export const FLEXIBLE_PAGE_SEGMENTS = 18;
 export const FLEXIBLE_PAGE_VERTICAL_SEGMENTS = 8;
 
@@ -85,6 +87,73 @@ function createPageBlockGeometry(width, height, depth, radius) {
   return geometry;
 }
 
+/**
+ * A rounded spine: a shallow arc across the thickness of the book, extruded
+ * along its height. `x = 0` is where the arc meets the boards and the curve
+ * swells towards -x. With `shell` the piece has thickness and end caps;
+ * without, it is just the outer skin (used for the foil layer).
+ */
+function createSpineGeometry(span, height, bulge, thickness, shell = true, segments = 20) {
+  const positions = [];
+  const uvs = [];
+  const half = height * 0.5;
+  const arc = (index) => {
+    const t = index / segments;
+    const z = (t - 0.5) * span;
+    const k = (2 * z) / span;
+    return { t, z, x: -bulge * (1 - k * k) };
+  };
+  const quad = (a, b, c, d, uvA, uvB, uvC, uvD) => {
+    positions.push(...a, ...b, ...c, ...b, ...d, ...c);
+    uvs.push(...uvA, ...uvB, ...uvC, ...uvB, ...uvD, ...uvC);
+  };
+  const edge = [0.03, 0.5];
+  for (let index = 0; index < segments; index += 1) {
+    const p = arc(index);
+    const q = arc(index + 1);
+    // Outer skin, facing away from the book.
+    quad(
+      [p.x, -half, p.z], [q.x, -half, q.z], [p.x, half, p.z], [q.x, half, q.z],
+      [p.t, 0], [q.t, 0], [p.t, 1], [q.t, 1]
+    );
+    if (!shell) continue;
+    const pi = p.x + thickness;
+    const qi = q.x + thickness;
+    // Inner skin, then the head and tail caps.
+    quad([qi, -half, q.z], [pi, -half, p.z], [qi, half, q.z], [pi, half, p.z], edge, edge, edge, edge);
+    quad([p.x, half, p.z], [q.x, half, q.z], [pi, half, p.z], [qi, half, q.z], edge, edge, edge, edge);
+    quad([q.x, -half, q.z], [p.x, -half, p.z], [qi, -half, q.z], [pi, -half, p.z], edge, edge, edge, edge);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.computeVertexNormals();
+  // Smooth the shading across the arc: facets share no vertices, so set the
+  // outer normals analytically from the curve.
+  if (!shell) {
+    const normal = geometry.getAttribute("normal");
+    const position = geometry.getAttribute("position");
+    for (let index = 0; index < position.count; index += 1) {
+      const k = (2 * position.getZ(index)) / span;
+      const slope = (4 * bulge * k) / span;
+      const length = Math.hypot(1, slope);
+      normal.setXYZ(index, -1 / length, 0, -slope / length);
+    }
+  } else {
+    const normal = geometry.getAttribute("normal");
+    const position = geometry.getAttribute("position");
+    for (let index = 0; index < position.count; index += 1) {
+      if (Math.abs(normal.getY(index)) > 0.5) continue;
+      const k = (2 * position.getZ(index)) / span;
+      const slope = (4 * bulge * k) / span;
+      const length = Math.hypot(1, slope);
+      const sign = normal.getX(index) < 0 ? 1 : -1;
+      normal.setXYZ(index, (-1 / length) * sign, 0, (-slope / length) * sign);
+    }
+  }
+  return geometry;
+}
+
 // One trim size for every book, so the heavy geometry is built once and shared.
 const DIM = (() => {
   const { width, height, depth } = BOOK_FORMAT;
@@ -99,6 +168,7 @@ const DIM = (() => {
     pageRadius: 0.0025,
     spineRadius: 0.0015,
     spineBoardThickness: 0.014,
+    spineBulge: 0.024,
     spineWidth,
     pageWidth: width - 0.074,
     pageHeight: height - 0.068,
@@ -114,7 +184,8 @@ function sharedGeometry() {
     pageBlock: createPageBlockGeometry(d.pageWidth, d.pageHeight, d.pageDepth, d.pageRadius),
     coverSurface: createRoundedPlaneGeometry(d.width - 0.007, d.height - 0.007, 0.0035),
     endpaper: createRoundedPlaneGeometry(d.width - 0.045, d.height - 0.045, 0.003),
-    spine: new RoundedBoxGeometry(d.spineBoardThickness, d.height - 0.012, d.depth + d.board * 1.88, 1, d.spineRadius),
+    spine: createSpineGeometry(d.depth + d.board * 1.94, d.height - 0.008, d.spineBulge, d.spineBoardThickness, true),
+    spineFoil: createSpineGeometry(d.depth + d.board * 1.94, d.height - 0.008, d.spineBulge, 0, false),
     spineLining: new RoundedBoxGeometry(d.spineWidth * 0.68, d.height - 0.056, Math.max(0.045, d.pageDepth - 0.008), 1, 0.0015),
     headband: new THREE.CylinderGeometry(0.012, 0.012, d.pageDepth * 0.88, 12, 1, false),
     ribbon: createRoundedPlaneGeometry(0.034, d.pageHeight * 0.76, 0.002)
@@ -329,13 +400,11 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
   leaves.forEach((pivot) => { pivot.position.z = pivot.userData.restZ; });
 
   /* ----- spine, headbands, ribbon, edges ----- */
-  const spine = createMesh(g.spine, spineArt, "flat-spine");
-  spine.position.x = -d.width * 0.5 - d.spineBoardThickness * 0.35;
+  const spine = createMesh(g.spine, spineArt, "rounded-spine");
+  spine.position.x = -d.width * 0.5 - 0.003;
   motion.add(spine);
-  const spineFoil = createMesh(shared.plane, spineFoilArt, "spine-foil", false, false);
-  spineFoil.scale.set(d.depth + d.board * 1.82, d.height - 0.018, 1);
-  spineFoil.rotation.y = -Math.PI * 0.5;
-  spineFoil.position.set(spine.position.x - d.spineBoardThickness * 0.505, 0, 0);
+  const spineFoil = createMesh(g.spineFoil, spineFoilArt, "spine-foil", false, false);
+  spineFoil.position.x = spine.position.x - 0.0007;
   motion.add(spineFoil);
   const spineLining = createMesh(g.spineLining, endpaperMaterial, "spine-lining");
   spineLining.position.set(-d.width * 0.5 + d.spineWidth * 0.38, 0, 0);
@@ -386,6 +455,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
   const hit = createMesh(shared.box, hitMaterial, "hit-target", false, false);
   hit.scale.set(d.width * 1.34, d.height * 1.2, Math.max(d.depth * 4, 1));
   hit.position.set(-d.spineWidth * 0.18, 0, 0.12);
+  hit.layers.set(HIT_LAYER);
   motion.add(hit);
 
   const contactShadowMaterial = new THREE.MeshBasicMaterial({
@@ -447,6 +517,10 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
       // Leaf catches more of the room than cloth does, and never goes fully
       // dark when it faces away from the lights.
       material.envMapIntensity = metallic ? 2.1 : 1;
+      // Rolled leaf has a faint grain that stretches its highlights.
+      const anisotropy = metallic ? 0.34 : 0;
+      if ((material.anisotropy > 0) !== (anisotropy > 0)) material.needsUpdate = true;
+      material.anisotropy = anisotropy;
       material.emissive.copy(foilColor);
       material.emissiveIntensity = metallic ? 0.2 : 0.06;
     });
@@ -526,6 +600,13 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
     face.material.map = face.target.texture;
   }
 
+  /** Turning leaves throw real shadows on the pages beneath (inspection only). */
+  function setLeafShadows(enabled) {
+    leaves.forEach((pivot) => pivot.userData.faces.forEach((face) => {
+      face.mesh.castShadow = enabled && pivot.userData.printed;
+    }));
+  }
+
   /** Free every printed page texture (when the book goes back on the shelf). */
   function clearLeaves() {
     leaves.forEach((pivot) => {
@@ -572,6 +653,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
     repaint,
     setResolution,
     setLeafPage,
+    setLeafShadows,
     clearLeaves,
     dispose
   };

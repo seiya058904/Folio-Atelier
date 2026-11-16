@@ -18,7 +18,12 @@ node --input-type=module --check < src/engine.js   # syntax check any module
 
 There is no test framework. Verify in a real browser: empty shelf on first visit, create a book, edit each studio tab and watch the model update, open and turn pages, reload to confirm it persisted. The console must stay free of errors.
 
-When driving the page with Playwright, call `page.bringToFront()` first — an occluded window throttles `requestAnimationFrame` to about 2 fps and transitions appear stuck.
+When driving the page with Playwright:
+
+- Call `page.bringToFront()` first — an occluded window throttles `requestAnimationFrame` to about 2 fps and transitions appear stuck.
+- `python -m http.server` lets the browser reuse stale modules after an edit. Add `await page.route('http://127.0.0.1:4173/**', r => r.continue())` to disable the cache.
+- File pickers: the app calls `input.click()`. Stub it for file inputs in the page, click the button, then `page.setInputFiles('#image-file' | '#import-file', …)`.
+- Compare rendering tiers with `?quality=high` and `?quality=balanced`.
 
 ## Architecture rules
 
@@ -26,4 +31,6 @@ When driving the page with Playwright, call `page.bringToFront()` first — an o
 - Adding a spec field: give it a default in `schema.js` and make sure `normalizeBook` fills it for stored books.
 - Painters in `src/textures/` draw on logical canvases (768 × 1152 covers, 320 × 1536 spine, 512 × 768 pages) and must not depend on canvas pixel size.
 - Foil is a white-on-transparent mask; print and blind stamping go on the base layer (`withFinish` in `faces.js`).
+- Post-processing is ambient occlusion only (`buildComposer` in `engine.js`). Bloom and depth of field were tried and removed because they blur printed pages; do not re-add them without a side-by-side check.
+- Pointer hit volumes sit on `HIT_LAYER` so they are raycast but never rendered.
 - `engine.js` is one module with shared mutable state on purpose: the interaction and transition code is carried over from the original and relies on it.

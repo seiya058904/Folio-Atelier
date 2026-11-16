@@ -13,7 +13,8 @@ function decode(blob) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob);
     const image = new Image();
-    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    // The object URL is kept: the interface shows the same image as a thumbnail.
+    image.onload = () => resolve(image);
     image.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
     image.src = url;
   });
@@ -82,6 +83,8 @@ export async function restoreImage(id, blob) {
 }
 
 export function removeImage(id) {
+  const cached = cache.get(id);
+  if (cached && cached !== "loading") URL.revokeObjectURL(cached.src);
   cache.delete(id);
   return deleteImage(id);
 }
