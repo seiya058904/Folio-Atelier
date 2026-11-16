@@ -50,7 +50,8 @@ const quality = {
   shelf: 0.75,
   detail: 2,
   page: 2,
-  pixelRatio: 2
+  pixelRatio: 2,
+  shadow: 4096
 };
 
 let audio = { playCue() {}, unlock() {}, handleVisibility() {}, dispose() {} };
@@ -233,9 +234,10 @@ function configureResponsiveTargets() {
   shelfCameraPosition.set(0, narrow ? 2.02 : 1.92, narrow ? 8.7 : 8.1);
   shelfCameraTarget.set(0, narrow ? 1.57 : 1.55, 0);
   inspectPosition.set(narrow ? 0 : -2.25, narrow ? 2.42 : 1.56, narrow ? 0.15 : 0);
-  inspectCameraPosition.set(narrow ? 0 : -0.52, narrow ? 2.1 : 1.78, narrow ? 6.4 : 5.25);
+  inspectCameraPosition.set(narrow ? 0 : -0.52, narrow ? 1.7 : 1.78, narrow ? 7.4 : 5.25);
   inspectCameraTarget.copy(inspectPosition);
-  if (narrow) inspectCameraTarget.y -= 0.5;
+  // On phones the workbench covers the lower half, so aim below the book.
+  if (narrow) inspectCameraTarget.y -= 1.05;
 
   if (narrow) {
     detailViewOffsetX = 0;
@@ -1033,9 +1035,9 @@ function finishClosing() {
 // view: `turn` swings around the book, `tilt` raises (-) or lowers (+) the eye.
 const VIEWS = {
   front: { turn: 0, tilt: 0, zoom: 1 },
-  spine: { turn: -1.36, tilt: 0, zoom: 0.92 },
+  spine: { turn: -1.74, tilt: 0, zoom: 0.94 },
   back: { turn: Math.PI - 0.42, tilt: 0, zoom: 1 },
-  details: { turn: 0.94, tilt: -0.5, zoom: 0.82 },
+  details: { turn: 1.02, tilt: -0.36, zoom: 1.06 },
   pages: { turn: -0.2, tilt: -0.1, zoom: 1.08 }
 };
 
@@ -1270,6 +1272,7 @@ async function initialize(options) {
     quality.detail = 1.5;
     quality.page = 1.5;
     quality.pixelRatio = 1.5;
+    quality.shadow = 2048;
   }
 
   bindRenderer(renderer);
@@ -2080,7 +2083,7 @@ function addLights() {
   key.name = "shadow-key";
   key.position.set(-4.6, 7.4, 5.8);
   key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.mapSize.set(quality.shadow, quality.shadow);
   key.shadow.camera.left = -6;
   key.shadow.camera.right = 6;
   key.shadow.camera.top = 6;

@@ -155,9 +155,9 @@ export const MATERIAL_LOOK = {
     clearcoat: 0, clearcoatRoughness: 0.7, thread: "slub"
   },
   leather: {
-    repeat: [3, 4.6], normal: 0.86, slope: 2.4, roughBase: 0.42, roughRange: 0.3,
+    repeat: [5, 7.5], normal: 0.4, slope: 2.0, roughBase: 0.5, roughRange: 0.2,
     roughness: 0.74, metalness: 0, sheen: 0.08, sheenRoughness: 0.6, sheenFromFoil: false,
-    clearcoat: 0.32, clearcoatRoughness: 0.46, thread: "none"
+    clearcoat: 0.16, clearcoatRoughness: 0.5, thread: "none"
   },
   paper: {
     repeat: [2, 3], normal: 0.22, slope: 1.2, roughBase: 0.82, roughRange: 0.14,
@@ -290,7 +290,7 @@ export function paintMaterialBase(ctx, width, height, color, kind, seed, { spine
       const radius = 40 + random() * 150;
       const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
       const tone = random() > 0.5 ? "255,255,255" : "0,0,0";
-      gradient.addColorStop(0, `rgba(${tone},${0.02 + random() * 0.035})`);
+      gradient.addColorStop(0, `rgba(${tone},${0.01 + random() * 0.018})`);
       gradient.addColorStop(1, `rgba(${tone},0)`);
       ctx.fillStyle = gradient;
       ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
