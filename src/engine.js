@@ -1623,6 +1623,51 @@ function renderFrame() {
   if (perf.syncGpu) renderer.getContext().finish();
 }
 
+/* ----- sharing: a still of the view, and a turntable of the open book ----- */
+
+/** The view as it is now, as a PNG. */
+function capturePicture() {
+  if (!renderer) return Promise.resolve(null);
+  shadowHold = Math.max(shadowHold, 1);
+  renderFrame();
+  // The drawing buffer is read in the same task as the render.
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+/**
+ * The open book turning once round its own axis: `frames` square RGBA
+ * frames of `size` pixels, cropped round the book. Rendered in one go and
+ * then put back exactly as it was.
+ */
+function captureTurntable({ frames = 36, size = 360 } = {}) {
+  if (!activeBook || mode !== "detail" || !renderer) return [];
+  const rig = activeBook;
+  const start = rig.root.rotation.y;
+  const centre = new THREE.Vector3();
+  rig.root.getWorldPosition(centre);
+  centre.y += 0.05;
+  centre.project(camera);
+  const side = Math.min(canvas.height * 0.94, canvas.width * 0.7);
+  const sx = clamp((centre.x + 1) * 0.5 * canvas.width - side / 2, 0, canvas.width - side);
+  const sy = clamp((1 - centre.y) * 0.5 * canvas.height - side / 2, 0, canvas.height - side);
+  const out = document.createElement("canvas");
+  out.width = size;
+  out.height = size;
+  const ctx = out.getContext("2d", { willReadFrequently: true });
+  const result = [];
+  for (let index = 0; index < frames; index += 1) {
+    rig.root.rotation.y = start + (index / frames) * Math.PI * 2;
+    shadowHold = 1;
+    renderFrame();
+    ctx.drawImage(canvas, sx, sy, side, side, 0, 0, size, size);
+    result.push(ctx.getImageData(0, 0, size, size));
+  }
+  rig.root.rotation.y = start;
+  shadowHold = 3;
+  requestFrame();
+  return result;
+}
+
 /** Resolution used for this frame: reduced while moving if the machine needs it. */
 function applyRenderScale(next) {
   if (next === renderScale || !renderer) return;
@@ -1993,6 +2038,8 @@ async function initialize(options) {
 
 export const engine = {
   init: initialize,
+  capturePicture,
+  captureTurntable,
   setRoom,
   get room() { return { ...room }; },
   addBook,

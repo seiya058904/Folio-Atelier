@@ -31,7 +31,8 @@ import {
   createPage,
   layerText
 } from "../state/schema.js";
-import { PAGE_INKS } from "../textures/pages.js";
+import { PAGE_INKS, PAGE_SIZE, paintPage } from "../textures/pages.js";
+import { buildPdf, encodeGif } from "../share.js";
 import { patternMask } from "../textures/patterns.js";
 import { PAPER_STOCKS, paintMaterialBase } from "../textures/surface.js";
 import { deepClone, uid } from "../util.js";
@@ -47,7 +48,7 @@ import {
   tiles,
   toggle
 } from "./controls.js";
-import { ICONS, h, icon, pickFile, toast } from "./dom.js";
+import { ICONS, downloadBlob, h, icon, pickFile, toast } from "./dom.js";
 import { coverThumbKey, drawCoverThumb, drawMotifGlyph } from "./thumbs.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -736,6 +737,13 @@ export function createStudioUi({ store, engine, audio }) {
           onChange: (value) => edit(() => { book().foil.texture = value; }, ["foil"])
         })
       ),
+      group("Share", "Keep a picture of the book, a turntable to send, or its pages to print.",
+        h("div", { class: "share-actions" },
+          h("button", { class: "pill-button", type: "button", text: t("Save a picture"), onclick: sharePicture }),
+          h("button", { class: "pill-button", type: "button", text: t("Turntable GIF"), onclick: shareTurntable }),
+          h("button", { class: "pill-button", type: "button", text: t("Pages as PDF"), onclick: sharePdf })
+        )
+      ),
       group("Age", "A well-loved copy: corners and edges rubbed, colour faded by the sun, foil worn thin.",
         row(
           slider({
@@ -828,6 +836,69 @@ export function createStudioUi({ store, engine, audio }) {
       ),
       letteringGroup("front", "Each line can use the book's shared words or its own text.")
     ];
+  }
+
+  /* ----- sharing ----- */
+
+  const fileName = (suffix) => `${(book().title || "book").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "book"}${suffix}`;
+  let sharing = false;
+
+  /** Run one export at a time, with a word while it works. */
+  async function share(message, work) {
+    if (sharing) return;
+    sharing = true;
+    toast(t(message));
+    // Let the toast paint before the heavy work starts.
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 30)));
+    try {
+      await work();
+    } catch (error) {
+      console.warn(error);
+      toast(t("That did not work. Please try again."));
+    } finally {
+      sharing = false;
+    }
+  }
+
+  function sharePicture() {
+    share("Taking the picture…", async () => {
+      const blob = await engine.capturePicture();
+      if (!blob) throw new Error("no picture");
+      downloadBlob(blob, fileName(".png"));
+      toast(t("Saved {name}", { name: fileName(".png") }));
+    });
+  }
+
+  function shareTurntable() {
+    share("Turning the book…", async () => {
+      const frames = engine.captureTurntable({ frames: 36, size: 360 });
+      if (!frames.length) throw new Error("no frames");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      downloadBlob(encodeGif(frames, { delay: 6 }), fileName(".gif"));
+      toast(t("Saved {name}", { name: fileName(".gif") }));
+    });
+  }
+
+  function sharePdf() {
+    share("Printing the pages…", async () => {
+      const current = book();
+      const flat = engine.pagination;
+      const width = PAGE_SIZE.width * 2;
+      const height = PAGE_SIZE.height * 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const target = { canvas, context: canvas.getContext("2d"), commit() {} };
+      const pages = [];
+      for (let index = 0; index < flat.length; index += 1) {
+        paintPage(current, flat[index], index, target, () => {});
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+        pages.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), width, height });
+      }
+      if (!pages.length) throw new Error("no pages");
+      downloadBlob(buildPdf(pages, { title: current.title }), fileName(".pdf"));
+      toast(t("Saved {name}", { name: fileName(".pdf") }));
+    });
   }
 
   /** A contrasting piece of leather on the front board. */

@@ -2049,3 +2049,11 @@ canvas.is-fresh {
     animation: none;
   }
 }
+
+/* ---------- share actions (Phase F) ---------- */
+
+.share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

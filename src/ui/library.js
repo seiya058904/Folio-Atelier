@@ -219,18 +219,34 @@ export function createLibraryUi({ store, engine, audio }) {
     reader.readAsDataURL(blob);
   });
 
-  async function exportSelected() {
-    const book = store.books[engine.selectedIndex];
-    if (!book) return;
+  /** A book and the pictures it uses, as data URLs. */
+  async function packImages(book) {
     const images = {};
     for (const id of bookImageIds(book)) {
       const blob = await getImageBlob(id).catch(() => null);
       if (blob) images[id] = await blobToDataUrl(blob);
     }
+    return images;
+  }
+
+  async function exportSelected() {
+    const book = store.books[engine.selectedIndex];
+    if (!book) return;
+    const images = await packImages(book);
     const payload = { format: "folio-atelier", version: 1, exportedAt: new Date().toISOString(), book, images };
     const name = (book.title || "book").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "book";
     downloadBlob(new Blob([JSON.stringify(payload)], { type: "application/json" }), `${name}.folio`);
     toast(t("Exported {name}.folio", { name }));
+  }
+
+  /** The whole library in one file: every book, its pictures and the room. */
+  async function exportLibrary() {
+    if (!store.books.length) return;
+    const books = [];
+    for (const book of store.books) books.push({ book, images: await packImages(book) });
+    const payload = { format: "folio-atelier-library", version: 3, exportedAt: new Date().toISOString(), room: engine.room, books };
+    downloadBlob(new Blob([JSON.stringify(payload)], { type: "application/json" }), "folio-library.folio");
+    toast(t("Exported {count} books.", { count: books.length }));
   }
 
   async function importBook() {
@@ -239,32 +255,56 @@ export function createLibraryUi({ store, engine, audio }) {
     if (!file) return;
     try {
       const payload = JSON.parse(await file.text());
+      if (payload?.format === "folio-atelier-library" && Array.isArray(payload.books)) {
+        let count = 0;
+        for (const entry of payload.books) {
+          const book = await unpackBook(entry?.book, entry?.images);
+          if (book) {
+            addToShelf(book);
+            count += 1;
+          }
+        }
+        if (!count) throw new Error("no books");
+        if (payload.room) {
+          engine.setRoom(payload.room);
+          saveRoom();
+        }
+        toast(t("Imported {count} books.", { count }));
+        return;
+      }
       const source = payload?.format === "folio-atelier" ? payload.book : payload;
-      const book = normalizeBook(source);
+      const book = await unpackBook(source, payload.images);
       if (!book) throw new Error("not a book");
-      // Imported books get a fresh identity so they never overwrite an existing one.
-      book.id = uid("book");
-      book.createdAt = Date.now();
-      const remap = new Map();
-      for (const [id, dataUrl] of Object.entries(payload.images || {})) {
-        if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) continue;
-        const blob = await (await fetch(dataUrl)).blob();
-        const nextId = uid("img");
-        await restoreImage(nextId, blob);
-        remap.set(id, nextId);
-      }
-      if (book.front.image?.id) {
-        if (remap.has(book.front.image.id)) book.front.image.id = remap.get(book.front.image.id);
-        else book.front.image = null;
-      }
-      book.pages.forEach((page) => {
-        if (page.image) page.image = remap.get(page.image) || null;
-      });
       addToShelf(book);
       toast(t("Imported “{title}”.", { title: book.title }));
     } catch (error) {
       toast(t("That file is not a Folio Atelier book."));
     }
+  }
+
+  /** Validate an imported book and restore its pictures under fresh ids. */
+  async function unpackBook(source, images = {}) {
+    const book = normalizeBook(source);
+    if (!book) return null;
+    // Imported books get a fresh identity so they never overwrite an existing one.
+    book.id = uid("book");
+    book.createdAt = Date.now();
+    const remap = new Map();
+    for (const [id, dataUrl] of Object.entries(images || {})) {
+      if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) continue;
+      const blob = await (await fetch(dataUrl)).blob();
+      const nextId = uid("img");
+      await restoreImage(nextId, blob);
+      remap.set(id, nextId);
+    }
+    if (book.front.image?.id) {
+      if (remap.has(book.front.image.id)) book.front.image.id = remap.get(book.front.image.id);
+      else book.front.image = null;
+    }
+    book.pages.forEach((page) => {
+      if (page.image) page.image = remap.get(page.image) || null;
+    });
+    return book;
   }
 
   /* ----- the room: shelf and light, kept for this library ----- */
@@ -326,6 +366,7 @@ export function createLibraryUi({ store, engine, audio }) {
   $("#new-book").addEventListener("click", openNewBookDialog);
   $("#import-first").addEventListener("click", importBook);
   $("#import-book").addEventListener("click", importBook);
+  $("#export-library").addEventListener("click", exportLibrary);
   $("#duplicate-book").addEventListener("click", duplicateSelected);
   $("#delete-book").addEventListener("click", deleteSelected);
   $("#export-book").addEventListener("click", exportSelected);
