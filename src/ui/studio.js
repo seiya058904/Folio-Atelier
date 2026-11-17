@@ -370,6 +370,11 @@ export function createStudioUi({ store, engine, audio }) {
         return;
       }
       const mask = patternMask(key, size, size, { width: 150, height: 150 }, { unit: 46, lineWidth: 2, seed: 3 });
+      // Some endpaper papers are painted, not masked: no glyph for those.
+      if (!mask) {
+        drawMotifGlyph(canvas, "none", ink);
+        return;
+      }
       ctx.drawImage(mask, 0, 0);
       ctx.globalCompositeOperation = "source-in";
       ctx.fillStyle = ink;

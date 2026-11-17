@@ -95,11 +95,11 @@ The first visit shows an empty walnut shelf and one invitation: create your firs
 <a id="the-cover"></a>
 ## 🏷️ The Cover, Spine and Back
 
-Eight cover layouts (two set the title vertically), seventeen border styles — among them hand-tooled fillets, a leaf roll and corner fleurons — and thirty-three ornaments. Lay a contrasting piece of leather on the board (an **onlay**, standing proud) or set it flush (an **inlay**). Bring your own artwork as a full cover or an inset plate, and add lettering lines with typeface, size, weight, tracking, position, direction and finish. Twenty-one typefaces are included, five of them Chinese. The spine and back are composed with the same tools, including tooled compartments between raised bands.
+Eight cover layouts (two set the title vertically), seventeen border styles — among them hand-tooled fillets, a leaf roll and corner fleurons — and thirty-three ornaments. Lay a contrasting piece of leather on the board (an **onlay**, standing proud) or set it flush (an **inlay**). Bring your own artwork as a full cover or an inset plate, printed as a photograph, a **duotone**, a **halftone** dot screen or an **engraving**, and press a **wax seal** with a letter on the board. Add lettering lines with typeface, size, weight, tracking, position, direction and finish. Twenty-one typefaces are included, five of them Chinese. The spine and back are composed with the same tools, including tooled compartments between raised bands.
 
 ## 📐 The Structure
 
-Four trim sizes — pocket, crown octavo, standard and large — and a thickness control for the text block. Add an **elastic closure band**, which slips off when the book opens, and a **pen loop** on the back board.
+Four trim sizes — pocket, crown octavo, standard and large — and a thickness control for the text block; the boards keep their thickness whatever the size. Square or **rounded corners**. Add an **elastic closure band** or a **metal clasp** (brass, silver or blackened iron), which are undone as the book opens, a **pen loop** stitched to the back board, a paper **pocket** inside the front board, and a **slipcase** with a printed label that the book slides out of on its way to the studio.
 
 <a id="the-inside"></a>
 ## 📄 The Inside
@@ -150,7 +150,7 @@ Each book also chooses the language of its own printed labels, so a book can say
 
 Books save automatically in your browser (IndexedDB). Duplicate or delete a volume, **export** it — or **export all** the books, their pictures and the room in one `.folio` file — and **import** it on another device or browser. Nothing is uploaded anywhere.
 
-The **Room** panel on the shelf sets the scene for the whole library: a walnut, oak, painted, black-steel or floating-ledge shelf, in studio, morning, golden-hour or night light.
+The **Room** panel on the shelf sets the scene for the whole library: a walnut, oak, painted, black-steel or floating-ledge shelf, in studio, morning, golden-hour or night light (with a desk lamp, and a darker interface). The room keeps its colours whichever book you look at, unless you ask it to **follow the book**. **Drag a book** along the shelf, or press Alt and an arrow key, to put your library in order; the order is kept.
 
 ## 📤 Share a Book
 
