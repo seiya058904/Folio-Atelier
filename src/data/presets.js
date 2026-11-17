@@ -56,6 +56,9 @@ export const BORDERS = [
   { id: "scallop", label: "Scalloped" },
   { id: "lozenge", label: "Lozenge" },
   { id: "arch", label: "Arch" },
+  { id: "fillets", label: "Tooled fillets" },
+  { id: "roll", label: "Leaf roll" },
+  { id: "fleurons", label: "Corner fleurons" },
   { id: "panel", label: "Title panel" },
   { id: "slip", label: "Title slip" }
 ];
@@ -124,6 +127,7 @@ export const SPINE_STYLES = [
   { id: "double", label: "Double frame" },
   { id: "bands", label: "Raised bands" },
   { id: "panels", label: "Panelled" },
+  { id: "compartments", label: "Tooled compartments" },
   { id: "rules", label: "Head & tail rules" },
   { id: "none", label: "Plain" }
 ];

@@ -112,13 +112,15 @@ function resolveFoil(foil) {
       color: foil.color || base.color,
       metalness: foil.metalness ?? base.metalness,
       roughness: foil.roughness ?? base.roughness,
-      iridescence: foil.iridescence ?? base.iridescence ?? 0
+      iridescence: foil.iridescence ?? base.iridescence ?? 0,
+      texture: foil.texture || "polished"
     };
   }
   const base = getFoil(foil);
   return {
     preset: base.id, color: base.color, metalness: base.metalness, roughness: base.roughness,
-    iridescence: base.iridescence || 0
+    iridescence: base.iridescence || 0,
+    texture: "polished"
   };
 }
 
@@ -312,7 +314,10 @@ export function createBook({ presetId = "ultramarine", title = "", author = "", 
     author: author.trim(),
     series: "",
     interior: buildInterior(),
-    pages: defaultPages()
+    pages: defaultPages(),
+    // Foil and blind stamps: pressed into the board ("deboss"), raised from
+    // it ("emboss") or left flat; `depth` runs from 0 to 1.
+    stamp: { relief: "deboss", depth: 0.5 }
   };
   applyPreset(book, presetId);
   return book;
@@ -383,6 +388,11 @@ export function normalizeBook(value) {
   book.foil = { ...base.foil, ...(value.foil || {}) };
   // A foil stored before iridescence existed keeps its plain look.
   if (value.foil && value.foil.iridescence === undefined) book.foil.iridescence = 0;
+  if (!["polished", "matte", "brushed"].includes(book.foil.texture)) book.foil.texture = "polished";
+  // Books made before stamping depth existed keep their flat boards.
+  book.stamp = { relief: "flat", depth: 0.5, ...(value.stamp || {}) };
+  if (!["deboss", "emboss", "flat"].includes(book.stamp.relief)) book.stamp.relief = "flat";
+  book.stamp.depth = Math.min(1, Math.max(0, Number(book.stamp.depth) || 0));
   book.pattern = { ...base.pattern, ...(value.pattern || {}) };
   if (!value.pattern) book.pattern.key = "none";
   // Books made before these options existed keep the look they had.

@@ -1927,7 +1927,8 @@ export const engine = {
     get renderScale() { return renderScale; },
     get motionScale() { return motionScale; },
     set motionScale(value) { if (RENDER_SCALES.includes(value)) motionScale = value; },
-    stepQualityDown: () => stepQualityDown()
+    stepQualityDown: () => stepQualityDown(),
+    get activeRig() { return activeBook; }
   }
 };
 

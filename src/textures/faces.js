@@ -1,6 +1,8 @@
-// Cover painters. Each board is two layers:
-//   base — the dyed material plus anything printed or blind-stamped into it
-//   foil — a white-on-transparent mask that the metallic foil material uses
+// Cover painters. Each board is two layers, plus an optional third:
+//   base   — the dyed material plus anything printed or blind-stamped into it
+//   foil   — a white-on-transparent mask that the metallic foil material uses
+//   relief — a height map for stamping depth: mid grey is the board, darker
+//            is pressed in, lighter stands proud (see `stampTone`)
 // Layouts are authored on a logical 768 × 1152 board (320 × 1536 for the spine)
 // and scaled to whatever resolution the rig asks for.
 
@@ -31,6 +33,22 @@ function begin(target, logical) {
   return ctx;
 }
 
+/** A height-map layer: everything starts at the level of the board. */
+function beginRelief(target, logical) {
+  if (!target) return null;
+  const ctx = begin(target, logical);
+  ctx.fillStyle = RELIEF_LEVEL;
+  ctx.fillRect(0, 0, logical.width, logical.height);
+  return ctx;
+}
+
+const RELIEF_LEVEL = "#808080";
+
+/** The height a stamp leaves in the relief layer. */
+function stampTone(book) {
+  return book.stamp?.relief === "emboss" ? "#ffffff" : "#000000";
+}
+
 /**
  * Route a drawing routine to the right layer for its finish.
  * foil  → white on the foil mask
@@ -50,6 +68,8 @@ function withFinish(layers, finish, color, draw) {
   } else {
     draw(layers.base, color);
   }
+  // Foil and blind stamps are pressed with a heated die; print lies flat.
+  if (layers.relief && finish !== "ink") draw(layers.relief, layers.tone);
 }
 
 /* ---------- boards: material, two-tone binding, all-over pattern ---------- */
@@ -93,6 +113,7 @@ function stampFinish(layers, mask, width, height, finish, color, opacity) {
   } else {
     stampPattern(layers.base, mask, width, height, color, opacity);
   }
+  if (layers.relief && finish !== "ink") stampPattern(layers.relief, mask, width, height, layers.tone, opacity);
 }
 
 function paintBoard(layers, target, book, face, width, height) {
@@ -413,6 +434,52 @@ function drawBorder(ctx, color, style, inset, width, height) {
       ctx.closePath();
       ctx.fill();
     });
+  } else if (style === "fillets") {
+    // Gold-tooled fillets: a thick and a thin line with a dotted roll between.
+    rect(0, 3.2);
+    rect(9, 1.2);
+    rect(30, 1.2);
+    sides(19.5, 11, (a, pitch, at) => {
+      const [x, y] = at(a + pitch / 2, 0);
+      ctx.beginPath();
+      ctx.arc(x, y, 1.9, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  } else if (style === "roll") {
+    // A decorative roll: a running leaf-and-berry band between two fillets.
+    rect(0, 1.8);
+    rect(30, 1.8);
+    ctx.lineWidth = 1.3;
+    sides(15, 24, (a, pitch, at) => {
+      const [x0, y0] = at(a, 0);
+      const [cx, cy] = at(a + pitch * 0.5, -7);
+      const [x1, y1] = at(a + pitch, 0);
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.quadraticCurveTo(cx, cy, x1, y1);
+      ctx.stroke();
+      const [lx, ly] = at(a + pitch * 0.5, 5);
+      ctx.beginPath();
+      ctx.ellipse(lx, ly, 4.2, 2, Math.atan2(y1 - y0, x1 - x0), 0, Math.PI * 2);
+      ctx.fill();
+      const [bx, by] = at(a, 0);
+      ctx.beginPath();
+      ctx.arc(bx, by, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  } else if (style === "fleurons") {
+    // A panel frame of two fillets with a fleuron tooled into each corner.
+    rect(0, 2.4);
+    rect(10, 1.1);
+    const reach = width * 0.07;
+    CORNERS(m + 10, width, height).forEach(([x, y, dx, dy]) => {
+      ctx.save();
+      ctx.translate(x + dx * reach, y + dy * reach);
+      // Each fleuron points into its corner.
+      ctx.rotate(Math.atan2(dy, dx) - Math.PI / 2);
+      drawMotif(ctx, "fleur", { cx: 0, cy: 0, size: reach * 0.62, color, alpha: 1, lineWidth: 1.6, text: "" });
+      ctx.restore();
+    });
   } else if (style === "arch") {
     const left = m;
     const right = width - m;
@@ -603,9 +670,14 @@ function commitLayers(baseTarget, foilTarget, commit) {
   if (!commit || commit.foil) foilTarget.commit();
 }
 
-export function paintFront(book, baseTarget, foilTarget, onAsset, commit) {
+export function paintFront(book, baseTarget, foilTarget, onAsset, commit, reliefTarget = null) {
   const { width, height } = FACE_SIZE.front;
-  const layers = { base: begin(baseTarget, FACE_SIZE.front), foil: begin(foilTarget, FACE_SIZE.front) };
+  const layers = {
+    base: begin(baseTarget, FACE_SIZE.front),
+    foil: begin(foilTarget, FACE_SIZE.front),
+    relief: beginRelief(reliefTarget, FACE_SIZE.front),
+    tone: stampTone(book)
+  };
   const front = book.front;
   paintBoard(layers, baseTarget, book, "front", width, height);
 
@@ -650,11 +722,17 @@ export function paintFront(book, baseTarget, foilTarget, onAsset, commit) {
   front.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
   drawCorners(layers.foil, book.details.corners?.style, width, height, "left");
   commitLayers(baseTarget, foilTarget, commit);
+  reliefTarget?.commit();
 }
 
-export function paintBack(book, baseTarget, foilTarget, onAsset, commit) {
+export function paintBack(book, baseTarget, foilTarget, onAsset, commit, reliefTarget = null) {
   const { width, height } = FACE_SIZE.back;
-  const layers = { base: begin(baseTarget, FACE_SIZE.back), foil: begin(foilTarget, FACE_SIZE.back) };
+  const layers = {
+    base: begin(baseTarget, FACE_SIZE.back),
+    foil: begin(foilTarget, FACE_SIZE.back),
+    relief: beginRelief(reliefTarget, FACE_SIZE.back),
+    tone: stampTone(book)
+  };
   const back = book.back;
   paintBoard(layers, baseTarget, book, "back", width, height);
 
@@ -667,6 +745,7 @@ export function paintBack(book, baseTarget, foilTarget, onAsset, commit) {
   back.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
   drawCorners(layers.foil, book.details.corners?.style, width, height, "right");
   commitLayers(baseTarget, foilTarget, commit);
+  reliefTarget?.commit();
 }
 
 function drawSpineText(layers, book, layer, width, height, room) {
@@ -701,10 +780,16 @@ function drawSpineText(layers, book, layer, width, height, room) {
 }
 
 const BAND_POSITIONS = [0.135, 0.3, 0.7, 0.865];
+const BANDED = new Set(["bands", "panels", "compartments"]);
 
-export function paintSpine(book, baseTarget, foilTarget, onAsset, commit) {
+export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, reliefTarget = null) {
   const { width, height } = FACE_SIZE.spine;
-  const layers = { base: begin(baseTarget, FACE_SIZE.spine), foil: begin(foilTarget, FACE_SIZE.spine) };
+  const layers = {
+    base: begin(baseTarget, FACE_SIZE.spine),
+    foil: begin(foilTarget, FACE_SIZE.spine),
+    relief: beginRelief(reliefTarget, FACE_SIZE.spine),
+    tone: stampTone(book)
+  };
   const spine = book.spine;
   const material = book.material;
   const twoTone = material.binding === "quarter" || material.binding === "half";
@@ -773,13 +858,36 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit) {
       [44, 60, height - 60, height - 44].forEach((y, index) => {
         ctx.fillRect(26, y, width - 52, index === 0 || index === 3 ? 4 : 1.6);
       });
-    } else if (spine.style === "bands" || spine.style === "panels") {
+    } else if (BANDED.has(spine.style)) {
       BAND_POSITIONS.forEach((position) => {
         const y = position * height;
         ctx.fillRect(18, y - 9, width - 36, 2);
         ctx.fillRect(18, y + 7, width - 36, 2);
       });
       [36, height - 36].forEach((y) => ctx.fillRect(18, y - 2, width - 36, 4));
+      if (spine.style === "compartments") {
+        // Tooled compartments: a fillet round each one and a fleuron in
+        // those that carry no lettering.
+        const stops = [36 / height, ...BAND_POSITIONS, 1 - 36 / height];
+        const lettered = spine.texts
+          .filter((layer) => layer.show && layerText(book, layer).trim())
+          .map((layer) => layer.y);
+        ctx.lineWidth = 1.1;
+        for (let index = 0; index < stops.length - 1; index += 1) {
+          const top = stops[index] * height + 18;
+          const bottom = stops[index + 1] * height - 18;
+          if (bottom - top < 40) continue;
+          ctx.strokeRect(28, top, width - 56, bottom - top);
+          ctx.strokeRect(36, top + 8, width - 72, bottom - top - 16);
+          const occupied = lettered.some((y) => y > stops[index] && y < stops[index + 1])
+            || (labelled && title.y > stops[index] && title.y < stops[index + 1]);
+          if (occupied) continue;
+          drawMotif(ctx, "fleur", {
+            cx: width / 2, cy: (top + bottom) / 2, size: Math.min(34, (bottom - top) * 0.3),
+            color, alpha: 1, lineWidth: 1.6, text: ""
+          });
+        }
+      }
       if (spine.style === "panels") {
         const stops = [36 / height, ...BAND_POSITIONS, 1 - 36 / height];
         ctx.lineWidth = 1.2;
@@ -848,7 +956,7 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit) {
     });
   }
 
-  if (spine.style === "bands" || spine.style === "panels") {
+  if (BANDED.has(spine.style)) {
     // Raised bands: a soft shadow under each cord so the bump reads in the dye too.
     const ctx = layers.base;
     BAND_POSITIONS.forEach((position) => {
@@ -860,6 +968,15 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit) {
       shade.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = shade;
       ctx.fillRect(0, y - 16, width, 36);
+      // The cord under the leather stands proud of the spine.
+      if (layers.relief) {
+        const cord = layers.relief.createLinearGradient(0, y - 12, 0, y + 12);
+        cord.addColorStop(0, RELIEF_LEVEL);
+        cord.addColorStop(0.5, "#f0f0f0");
+        cord.addColorStop(1, RELIEF_LEVEL);
+        layers.relief.fillStyle = cord;
+        layers.relief.fillRect(0, y - 12, width, 24);
+      }
     });
   }
 
@@ -868,6 +985,7 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit) {
     drawSpineText(layers, book, layer, width, height, room);
   });
   commitLayers(baseTarget, foilTarget, commit);
+  reliefTarget?.commit();
 }
 
 /* ---------- signatures ---------- */
@@ -879,6 +997,8 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit) {
 
 const split = (finish, value, parts) => {
   (finish === "foil" ? parts.foil : parts.base).push(value);
+  // Foil and blind stamps also leave their shape in the relief layer.
+  if (finish !== "ink") parts.relief.push(value);
 };
 
 function textParts(book, layers, parts) {
@@ -897,7 +1017,7 @@ function motifFontToken(key, title) {
 }
 
 export function faceSignatures(book, face) {
-  const parts = { base: [], foil: [] };
+  const parts = { base: [], foil: [], relief: [book.stamp?.relief] };
   const { material, pattern, details } = book;
   const twoTone = material.binding === "quarter" || material.binding === "half";
   parts.base.push(material, book.seed, details.stitch);
@@ -908,6 +1028,7 @@ export function faceSignatures(book, face) {
     const motif = spine.emblem === "motif" ? [book.front.motif.key, book.title] : null;
     parts.base.push(label, spine.style);
     parts.foil.push(label);
+    parts.relief.push(label, BANDED.has(spine.style), spine.texts.map((layer) => [layer.show, layer.y]));
     if (!twoTone && pattern?.spine && hasPattern(pattern.key)) split(pattern.finish, pattern, parts);
     split(spine.finish, [spine.style, spine.emblem, spine.color, motif], parts);
     textParts(book, spine.texts, parts);
@@ -922,7 +1043,7 @@ export function faceSignatures(book, face) {
     textParts(book, side.texts, parts);
     parts.foil.push(details.corners);
   }
-  return { base: JSON.stringify(parts.base), foil: JSON.stringify(parts.foil) };
+  return { base: JSON.stringify(parts.base), foil: JSON.stringify(parts.foil), relief: JSON.stringify(parts.relief) };
 }
 
 export function endpaperSignature(book) {

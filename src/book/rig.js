@@ -228,6 +228,50 @@ function addTurnIns(pivot, side, insideZ, material) {
 
 const physical = (parameters) => new THREE.MeshPhysicalMaterial({ transparent: true, ...parameters });
 
+// Stamping depth. The painted boards carry a cloth normal map, and Three
+// ignores a bump map once a normal map is set, so the relief layer is added
+// on top of the normal map here. Every board shares one shader program; the
+// relief texture and depth are per material.
+const RELIEF_PARS = `
+uniform sampler2D reliefMap;
+uniform float reliefScale;
+vec3 reliefNormal( vec3 surfPos, vec3 surfNorm, vec2 uv, float faceDir ) {
+  vec2 du = dFdx( uv );
+  vec2 dv = dFdy( uv );
+  float h = texture2D( reliefMap, uv ).x;
+  float bx = reliefScale * ( texture2D( reliefMap, uv + du ).x - h );
+  float by = reliefScale * ( texture2D( reliefMap, uv + dv ).x - h );
+  vec3 sx = normalize( dFdx( surfPos ) );
+  vec3 sy = normalize( dFdy( surfPos ) );
+  vec3 r1 = cross( sy, surfNorm );
+  vec3 r2 = cross( surfNorm, sx );
+  float det = dot( sx, r1 ) * faceDir;
+  vec3 grad = sign( det ) * ( bx * r1 + by * r2 );
+  return normalize( abs( det ) * surfNorm - grad );
+}
+`;
+
+function compileRelief(shader) {
+  shader.uniforms.reliefMap = this.userData.relief.map;
+  shader.uniforms.reliefScale = this.userData.relief.scale;
+  shader.fragmentShader = shader.fragmentShader
+    .replace("#include <bumpmap_pars_fragment>", `#include <bumpmap_pars_fragment>\n${RELIEF_PARS}`)
+    .replace(
+      "#include <normal_fragment_maps>",
+      "#include <normal_fragment_maps>\nif ( reliefScale != 0.0 ) normal = reliefNormal( - vViewPosition, normal, vMapUv, faceDirection );"
+    );
+}
+
+function withRelief(material) {
+  material.userData.relief = { map: { value: null }, scale: { value: 0 } };
+  material.onBeforeCompile = compileRelief;
+  return material;
+}
+
+// Height of a full stamp at depth 1. The height map steps over a texel or two,
+// so it needs a much larger scale than a soft bump map.
+const RELIEF_STRENGTH = 12;
+
 /**
  * Build a complete book from a spec.
  * `resolution` scales every painted texture (1 = 768 px wide covers).
@@ -253,14 +297,27 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     backFoil: createPaintTexture(...sized("back")),
     endpaper: createPaintTexture(384, 576)
   };
+  const stampDepth = () => clamp(rig.data.stamp?.depth ?? 0.5, 0, 1);
+  const stampSign = () => (rig.data.stamp?.relief === "deboss" ? -1 : 1);
+  const reliefOn = () => (rig.data.stamp?.relief ?? "flat") !== "flat" && stampDepth() > 0;
+  // Relief maps are made only for books that use them, at half size: a
+  // height map needs less detail than the picture on top of it.
+  const reliefTarget = (face, wanted) => {
+    const key = `${face}Relief`;
+    const [width, height] = sized(face, wanted * 0.5);
+    if (!targets[key]) targets[key] = createPaintTexture(width, height, { color: false, anisotropy: 4 });
+    else targets[key].resize(width, height);
+    return targets[key];
+  };
   const paperFace = getPaperFaceTexture(book.interior.paper);
   const edges = getPageEdgeTextures();
 
   /* ----- materials ----- */
   const cloth = physical({ color: book.material.color });
-  const coverArt = physical({ map: targets.front.texture });
-  const spineArt = physical({ map: targets.spine.texture, side: THREE.DoubleSide });
-  const backArt = physical({ map: targets.back.texture, side: THREE.DoubleSide });
+  const coverArt = withRelief(physical({ map: targets.front.texture }));
+  const spineArt = withRelief(physical({ map: targets.spine.texture, side: THREE.DoubleSide }));
+  const backArt = withRelief(physical({ map: targets.back.texture, side: THREE.DoubleSide }));
+  const artFor = { front: coverArt, spine: spineArt, back: backArt };
   const foilParameters = (target, side) => ({
     map: target.texture,
     bumpMap: target.texture,
@@ -531,15 +588,18 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
       material.color.copy(foilColor);
       material.metalness = spec.foil.metalness;
       material.roughness = spec.foil.roughness;
-      // Pigment foils sit flat; metallic foils are pressed deeper.
+      // Pigment foils sit flat; metallic foils are pressed deeper. Debossed
+      // foil sits below the board, embossed foil stands above it.
       const metallic = spec.foil.metalness > 0.5;
-      material.bumpScale = metallic ? 0.017 : 0.008;
-      material.clearcoat = metallic ? 0.18 : 0.04;
+      const texture = spec.foil.texture || "polished";
+      material.bumpScale = (metallic ? 0.017 : 0.008) * stampDepth() * 2 * stampSign();
+      material.roughness = Math.min(1, spec.foil.roughness + (texture === "matte" ? 0.34 : texture === "brushed" ? 0.06 : 0));
+      material.clearcoat = texture === "matte" ? 0 : metallic ? 0.18 : 0.04;
       // Leaf catches more of the room than cloth does, and never goes fully
       // dark when it faces away from the lights.
-      material.envMapIntensity = metallic ? 2.1 : 1;
+      material.envMapIntensity = (metallic ? 2.1 : 1) * (texture === "matte" ? 0.62 : 1);
       // Rolled leaf has a faint grain that stretches its highlights.
-      const anisotropy = metallic ? 0.34 : 0;
+      const anisotropy = texture === "matte" ? 0 : texture === "brushed" ? 0.9 : metallic ? 0.34 : 0;
       if ((material.anisotropy > 0) !== (anisotropy > 0)) material.needsUpdate = true;
       material.anisotropy = anisotropy;
       material.emissive.copy(foilColor);
@@ -554,6 +614,13 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
       material.userData.rest = { emissive: material.emissiveIntensity, environment: material.envMapIntensity };
     });
     if (glint > 0) setGlint(glint);
+
+    const reliefScale = reliefOn() ? stampDepth() * RELIEF_STRENGTH : 0;
+    Object.entries(artFor).forEach(([face, material]) => {
+      const target = targets[`${face}Relief`];
+      material.userData.relief.map.value = target ? target.texture : null;
+      material.userData.relief.scale.value = target && !shown[face].reliefStale ? reliefScale : 0;
+    });
 
     const edge = spec.details.edge;
     const baked = edge.style === "sprinkled" || edge.style === "ombre";
@@ -608,8 +675,13 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   /** Paint one board if needed. Returns true if it still owes a full-size pass. */
   function repaintFace(face, signature, { force, draft, draftScale, hidden }) {
     const state = shown[face];
-    const changed = { base: force || state.base !== signature.base, foil: force || state.foil !== signature.foil };
-    const content = changed.base || changed.foil;
+    const relief = reliefOn();
+    const changed = {
+      base: force || state.base !== signature.base,
+      foil: force || state.foil !== signature.foil,
+      relief: relief && (force || state.relief !== signature.relief || Boolean(state.reliefStale))
+    };
+    const content = changed.base || changed.foil || changed.relief;
     // A board turned away from the camera is left for the full-size pass.
     if (draft && content && hidden) return true;
     // Edits made while dragging are painted small; the full-size pass follows
@@ -624,17 +696,23 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
       foil.resize(...sized(face, wanted));
       changed.base = true;
       changed.foil = true;
+      changed.relief = relief;
     }
+    // While dragging, a board whose stamps move lies flat; its relief is
+    // pressed again in the full-size pass (cheaper, and never out of step).
+    const reliefLayer = changed.relief && !draft ? reliefTarget(face, wanted) : null;
+    if (changed.relief) state.reliefStale = !reliefLayer;
     setFastGrain(wanted < scale);
     try {
-      perf.paint(face, () => PAINTERS[face](rig.data, base, foil, onAsset, changed));
+      perf.paint(face, () => PAINTERS[face](rig.data, base, foil, onAsset, changed, reliefLayer));
     } finally {
       setFastGrain(false);
     }
     state.base = signature.base;
     state.foil = signature.foil;
+    if (reliefLayer) state.relief = signature.relief;
     state.scale = wanted;
-    return wanted < scale;
+    return wanted < scale || Boolean(state.reliefStale);
   }
 
   function repaintEndpaper(force, defer) {
@@ -665,7 +743,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     // Several boards at once (a colour, a material) get a smaller draft.
     const busy = signatures.filter((signature, index) => {
       const state = shown[faces[index]];
-      return !hidden?.[faces[index]] && (state.base !== signature.base || state.foil !== signature.foil);
+      return !hidden?.[faces[index]] && (state.base !== signature.base || state.foil !== signature.foil
+        || (reliefOn() && state.relief !== signature.relief));
     }).length;
     const draftScale = busy > 1 ? DRAFT_SCALE_MANY : DRAFT_SCALE;
     let pending = false;

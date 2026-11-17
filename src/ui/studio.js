@@ -705,7 +705,7 @@ export function createStudioUi({ store, engine, audio }) {
               const foil = getFoil(value);
               target.foil = {
                 preset: foil.id, color: foil.color, metalness: foil.metalness, roughness: foil.roughness,
-                iridescence: foil.iridescence || 0
+                iridescence: foil.iridescence || 0, texture: target.foil.texture || "polished"
               };
             }
           }, ["foil"], { key: custom ? "foil-color" : null, rerender: !custom })
@@ -723,7 +723,31 @@ export function createStudioUi({ store, engine, audio }) {
             label: "Iridescence", value: current.foil.iridescence || 0, min: 0, max: 1, step: 0.01, format: percent,
             onInput: (value) => edit(() => { book().foil.iridescence = value; }, ["foil"], { key: "foil-iridescence" })
           })
-        )
+        ),
+        segmented({
+          label: "Leaf finish", value: current.foil.texture || "polished",
+          options: [
+            { id: "polished", label: "Polished" },
+            { id: "matte", label: "Matte" },
+            { id: "brushed", label: "Brushed" }
+          ],
+          onChange: (value) => edit(() => { book().foil.texture = value; }, ["foil"])
+        })
+      ),
+      group("Stamping", "How deep the die presses foil and blind stamps into the boards. Print lies flat.",
+        segmented({
+          label: "Impression", value: current.stamp.relief,
+          options: [
+            { id: "deboss", label: "Debossed" },
+            { id: "flat", label: "Flat" },
+            { id: "emboss", label: "Embossed" }
+          ],
+          onChange: (value) => edit(() => { book().stamp.relief = value; }, ["foil"])
+        }),
+        slider({
+          label: "Depth", value: current.stamp.depth, min: 0, max: 1, step: 0.01, format: percent,
+          onInput: (value) => edit(() => { book().stamp.depth = value; }, ["foil"], { key: "stamp-depth" })
+        })
       )
     ];
   }
