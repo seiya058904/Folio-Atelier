@@ -194,6 +194,8 @@ const ZH = {
   "Metal": "金属感", "Polish": "抛光", "Iridescence": "幻彩",
   "Leaf finish": "箔面", "Polished": "亮面", "Matte": "哑光", "Brushed": "拉丝",
   "Stamping": "压印",
+  "Room": "房间", "Shelf": "书架", "Walnut": "胡桃木", "Oak": "橡木", "Painted": "白漆", "Steel": "黑钢", "Ledge": "浮板",
+  "Lighting": "光线", "Studio": "工作室", "Morning": "清晨", "Golden hour": "黄昏金光", "Night": "夜晚台灯",
   "Format": "开本", "The size of the book and the thickness of its text block.": "书的尺寸和书芯的厚度。",
   "Trim size": "成品尺寸", "Pocket": "口袋本", "Fits a coat pocket": "能放进外套口袋", "Crown octavo": "小开本", "A slim novel": "轻薄的小说",
   "Standard": "标准", "A5-ish, the default": "接近 A5，默认", "Large": "大开本", "Royal octavo, a generous hardback": "皇家八开，宽大的精装",

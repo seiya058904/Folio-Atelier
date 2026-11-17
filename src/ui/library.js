@@ -13,6 +13,7 @@ import {
   normalizeBook
 } from "../state/schema.js";
 import { pad, uid } from "../util.js";
+import { segmented } from "./controls.js";
 import { confirmDialog, downloadBlob, h, pickFile, toast } from "./dom.js";
 import { drawCoverThumb } from "./thumbs.js";
 
@@ -266,6 +267,57 @@ export function createLibraryUi({ store, engine, audio }) {
     }
   }
 
+  /* ----- the room: shelf and light, kept for this library ----- */
+
+  const ROOM_KEY = "folio-atelier-room";
+  const roomButton = $("#room-button");
+  const roomPanel = $("#room-panel");
+  const readRoom = () => {
+    try { return JSON.parse(localStorage.getItem(ROOM_KEY)) || {}; } catch (error) { return {}; }
+  };
+  const saveRoom = () => {
+    try { localStorage.setItem(ROOM_KEY, JSON.stringify(engine.room)); } catch (error) { /* private mode */ }
+  };
+  engine.setRoom(readRoom());
+
+  function renderRoomPanel() {
+    roomPanel.replaceChildren(
+      segmented({
+        label: "Shelf", value: engine.room.shelf,
+        options: [
+          { id: "walnut", label: "Walnut" }, { id: "oak", label: "Oak" }, { id: "white", label: "Painted" },
+          { id: "steel", label: "Steel" }, { id: "ledge", label: "Ledge" }
+        ],
+        onChange: (value) => { engine.setRoom({ shelf: value }); saveRoom(); }
+      }),
+      segmented({
+        label: "Lighting", value: engine.room.light,
+        options: [
+          { id: "studio", label: "Studio" }, { id: "morning", label: "Morning" },
+          { id: "golden", label: "Golden hour" }, { id: "night", label: "Night" }
+        ],
+        onChange: (value) => { engine.setRoom({ light: value }); saveRoom(); }
+      })
+    );
+  }
+
+  function setRoomPanel(open) {
+    roomPanel.hidden = !open;
+    roomButton.setAttribute("aria-expanded", String(open));
+    if (open) renderRoomPanel();
+  }
+
+  roomButton.addEventListener("click", () => setRoomPanel(roomPanel.hidden));
+  document.addEventListener("pointerdown", (event) => {
+    if (!roomPanel.hidden && !roomPanel.contains(event.target) && event.target !== roomButton) setRoomPanel(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !roomPanel.hidden) {
+      setRoomPanel(false);
+      roomButton.focus();
+    }
+  });
+
   /* ----- wiring ----- */
 
   buildPresetGrid();
@@ -300,6 +352,7 @@ export function createLibraryUi({ store, engine, audio }) {
     refresh,
     renderSelection,
     relocalize() {
+      if (!roomPanel.hidden) renderRoomPanel();
       buildPresetGrid();
       choosePreset(chosenPreset);
       refresh();

@@ -2024,3 +2024,28 @@ canvas.is-fresh {
     scale: none;
   }
 }
+
+/* ---------- room panel (Phase E) ---------- */
+
+.room-panel {
+  display: grid;
+  width: min(92vw, 380px);
+  gap: 12px;
+  padding: 16px 18px 18px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  box-shadow: 0 18px 44px rgba(20, 12, 6, 0.22);
+  animation: pane-in var(--duration-base) var(--ease-out) both;
+  backdrop-filter: blur(8px);
+}
+
+.room-panel[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-panel {
+    animation: none;
+  }
+}

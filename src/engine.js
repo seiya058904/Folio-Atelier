@@ -379,12 +379,103 @@ function applyTheme(palette, accent) {
   themeTargets.fill.set(palette.fill);
   themeTargets.rim.set(accent);
 
+  applyRoomToTargets();
+
   if (!themeInitialized || reducedMotion) {
     themeInitialized = true;
     setThemeColorsImmediately();
   } else {
     themeMoving = true;
   }
+  requestFrame();
+}
+
+/* ------------------------------------------------------------------ */
+/* The room: shelf style and light, chosen for the whole library       */
+/* ------------------------------------------------------------------ */
+
+// Each book still tints the room with its palette; these settle on top.
+const SHELF_STYLES = {
+  walnut: {},
+  oak: { tint: "#b98a5b", darkTint: "#8a6440", mix: 0.72 },
+  white: { tint: "#ece6db", darkTint: "#d5ccbe", mix: 0.92, plain: true, roughness: 0.62 },
+  steel: { tint: "#2d2e31", darkTint: "#17181a", mix: 0.94, plain: true, roughness: 0.36, metalness: 0.6 },
+  ledge: { frameless: true }
+};
+
+const LIGHT_PRESETS = {
+  studio: {},
+  morning: { key: "#fff4e4", mix: 0.55, wall: "#f3eee6", wallMix: 0.3, intensity: { key: 1.08, hemisphere: 1.25, fill: 1.8, softKey: 0.95 } },
+  golden: { key: "#ffad62", mix: 0.62, wall: "#e9b57f", wallMix: 0.28, rim: "#ff9a4a", intensity: { key: 1.15, hemisphere: 0.8, rim: 1.6, fill: 0.5 } },
+  // Night: the room light is down and the softbox, warmed, plays the lamp.
+  // No light is added: a new light would recompile every material.
+  night: {
+    key: "#ffbf73", mix: 0.85, wall: "#1d1b24", wallMix: 0.72,
+    intensity: { key: 0.3, hemisphere: 0.28, fill: 0.2, softKey: 1.25, backFill: 0.3, rim: 0.7, spineRake: 0.8, pageRake: 0.7 }
+  }
+};
+
+let room = { shelf: "walnut", light: "studio" };
+const roomFrame = [];
+
+/** Bend the palette targets towards the chosen shelf and light. */
+function applyRoomToTargets() {
+  const shelf = SHELF_STYLES[room.shelf] || {};
+  if (shelf.tint) {
+    themeTargets.shelf.lerp(new THREE.Color(shelf.tint), shelf.mix);
+    themeTargets.shelfDark.lerp(new THREE.Color(shelf.darkTint), shelf.mix);
+    themeTargets.hemisphereGround.lerp(new THREE.Color(shelf.tint), shelf.mix * 0.5);
+  }
+  const light = LIGHT_PRESETS[room.light] || {};
+  if (light.key) {
+    const key = new THREE.Color(light.key);
+    themeTargets.key.lerp(key, light.mix);
+    themeTargets.hemisphere.lerp(key, light.mix * 0.5);
+  }
+  if (light.rim) themeTargets.rim.lerp(new THREE.Color(light.rim), 0.6);
+  if (light.wall) {
+    const wall = new THREE.Color(light.wall);
+    themeTargets.wall.lerp(wall, light.wallMix);
+    themeTargets.fog.lerp(wall, light.wallMix);
+    themeTargets.floor.lerp(wall, light.wallMix * 0.8);
+  }
+}
+
+/** Light strengths, shelf surface and frame for the current room. */
+function applyRoomSettings() {
+  const light = LIGHT_PRESETS[room.light] || {};
+  Object.entries(roomLights).forEach(([name, source]) => {
+    if (!source || source.userData.base === undefined) return;
+    source.intensity = source.userData.base * (light.intensity?.[name] ?? 1);
+  });
+  const shelf = SHELF_STYLES[room.shelf] || {};
+  [shared.walnut, shared.walnutDark].forEach((material) => {
+    const wantMap = !shelf.plain;
+    if (wantMap && !material.map && material.userData.woodMap) {
+      material.map = material.userData.woodMap;
+      material.needsUpdate = true;
+    } else if (!wantMap && material.map) {
+      material.userData.woodMap = material.map;
+      material.map = null;
+      material.needsUpdate = true;
+    }
+    material.roughness = shelf.roughness ?? material.userData.baseRoughness ?? material.roughness;
+    material.metalness = shelf.metalness ?? material.userData.baseMetalness ?? material.metalness;
+  });
+  roomFrame.forEach((mesh) => { mesh.visible = !shelf.frameless; });
+  shadowHold = 4;
+}
+
+/** Choose the shelf style and light for the room. */
+function setRoom(next = {}) {
+  room = {
+    shelf: SHELF_STYLES[next.shelf] ? next.shelf : room.shelf,
+    light: LIGHT_PRESETS[next.light] ? next.light : room.light
+  };
+  if (!scene) return;
+  applyRoomSettings();
+  themeKey = "";
+  applySelectedTheme();
   requestFrame();
 }
 
@@ -1902,6 +1993,8 @@ async function initialize(options) {
 
 export const engine = {
   init: initialize,
+  setRoom,
+  get room() { return { ...room }; },
   addBook,
   removeBook,
   refreshBook,
@@ -2540,6 +2633,8 @@ function createWoodTexture(repeatX, repeatY, rotation = 0) {
 
 function applyWoodTexture() {
   if (!woodTextureReady || !renderer) return;
+  // A painted or steel shelf keeps the grain aside until wood comes back.
+  const plain = Boolean(SHELF_STYLES[room.shelf]?.plain);
 
   const woodMap = createWoodTexture(7, 1.65, Math.PI * 0.5);
   const darkWoodMap = woodMap?.clone() || null;
@@ -2549,9 +2644,11 @@ function applyWoodTexture() {
     darkWoodMap.needsUpdate = true;
   }
 
-  shared.walnut.map = woodMap;
+  shared.walnut.userData.woodMap = woodMap;
+  shared.walnutDark.userData.woodMap = darkWoodMap;
+  shared.walnut.map = plain ? null : woodMap;
   shared.walnut.needsUpdate = true;
-  shared.walnutDark.map = darkWoodMap;
+  shared.walnutDark.map = plain ? null : darkWoodMap;
   shared.walnutDark.needsUpdate = true;
   requestFrame();
 }
@@ -2596,7 +2693,9 @@ function addRoom() {
     upright.scale.set(0.2, 3.8, 0.72);
     upright.position.set(x, 2.05, -0.28);
     shelfStage.add(upright);
+    roomFrame.push(upright);
   });
+  roomFrame.push(backRail);
 
   const shadowStrip = createMesh(shared.plane, new THREE.MeshBasicMaterial({
     color: 0x2f1d13,
@@ -2678,6 +2777,12 @@ function addLights() {
   pageRake.lookAt(0.65, 1.55, 0);
   scene.add(pageRake);
   roomLights.pageRake = pageRake;
+  Object.values(roomLights).forEach((source) => { if (source) source.userData.base = source.intensity; });
+  [shared.walnut, shared.walnutDark].forEach((material) => {
+    material.userData.baseRoughness = material.roughness;
+    material.userData.baseMetalness = material.metalness;
+  });
+  applyRoomSettings();
 }
 
 function addDust() {
