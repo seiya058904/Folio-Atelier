@@ -734,6 +734,18 @@ export function createStudioUi({ store, engine, audio }) {
           onChange: (value) => edit(() => { book().foil.texture = value; }, ["foil"])
         })
       ),
+      group("Age", "A well-loved copy: corners and edges rubbed, colour faded by the sun, foil worn thin.",
+        row(
+          slider({
+            label: "Wear", value: current.wear.scuff, min: 0, max: 1, step: 0.01, format: percent,
+            onInput: (value) => edit(() => { book().wear.scuff = value; }, ["front", "spine", "back"], { key: "wear-scuff" })
+          }),
+          slider({
+            label: "Sun-fading", value: current.wear.fade, min: 0, max: 1, step: 0.01, format: percent,
+            onInput: (value) => edit(() => { book().wear.fade = value; }, ["front", "spine", "back"], { key: "wear-fade" })
+          })
+        )
+      ),
       group("Stamping", "How deep the die presses foil and blind stamps into the boards. Print lies flat.",
         segmented({
           label: "Impression", value: current.stamp.relief,

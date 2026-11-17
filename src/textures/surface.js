@@ -178,6 +178,84 @@ const HEIGHT_FIELDS = {
       }
     }
   },
+  canvas(field) {
+    // Coarse plain weave of thick, uneven yarns.
+    const slub = valueNoise(16, 271);
+    const pitch = 16;
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        const across = Math.sin((Math.PI * (x % pitch + 0.5)) / pitch);
+        const along = Math.sin((Math.PI * (y % pitch + 0.5)) / pitch);
+        const warpOnTop = (Math.floor(x / pitch) + Math.floor(y / pitch)) % 2 === 0;
+        const crown = warpOnTop ? Math.pow(across, 0.5) * (0.6 + 0.4 * along) : Math.pow(along, 0.5) * (0.6 + 0.4 * across);
+        field[y * SIZE + x] = 0.12 + crown * 0.72 + (slub(x / SIZE, (y / SIZE) * 3) - 0.5) * 0.26;
+      }
+    }
+  },
+  denim(field) {
+    // 3/1 twill: diagonal wales running up to the right (period divides SIZE).
+    const slub = valueNoise(24, 389);
+    const pitch = 8;
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        const wale = Math.sin((((x + y) % (pitch * 2)) / (pitch * 2)) * Math.PI);
+        const thread = Math.sin((Math.PI * (y % pitch + 0.5)) / pitch);
+        field[y * SIZE + x] = 0.2 + wale * 0.48 + thread * 0.14 + (slub(x / SIZE, (y / SIZE) * 4) - 0.5) * 0.2;
+      }
+    }
+  },
+  cork(field) {
+    // Granules of bark pressed together, with dark pits between them.
+    const grains = worley(40, 5101);
+    const fine = valueNoise(96, 13);
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        const u = x / SIZE;
+        const v = y / SIZE;
+        const [near, second] = grains(u, v);
+        const pit = clamp((second - near) * 6, 0, 1);
+        field[y * SIZE + x] = 0.22 + Math.pow(pit, 0.4) * 0.5 + (fine(u, v) - 0.5) * 0.26;
+      }
+    }
+  },
+  snakeskin(field) {
+    // Overlapping scales in offset rows, each a little domed.
+    const soft = valueNoise(12, 641);
+    const across = 16;
+    const down = 16;
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        const row = Math.floor(y / down);
+        const shift = row % 2 ? across * 0.5 : 0;
+        const u = ((x + shift) % across) / across - 0.5;
+        const v = (y % down) / down - 0.5;
+        const dome = clamp(1 - Math.hypot(u * 1.3, v * 1.1) * 1.8, 0, 1);
+        field[y * SIZE + x] = 0.16 + Math.sqrt(dome) * 0.6 + (soft(x / SIZE, y / SIZE) - 0.5) * 0.12;
+      }
+    }
+  },
+  wood(field) {
+    // Sliced veneer: long, gently wandering growth lines and fine pores.
+    const drift = valueNoise(4, 1777);
+    const pores = valueNoise(128, 59);
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        const u = x / SIZE;
+        const v = y / SIZE;
+        const line = Math.sin(((x + (drift(u, v) - 0.5) * 40) * Math.PI * 2) / 16);
+        field[y * SIZE + x] = 0.5 + line * 0.14 + (pores(u, v) - 0.5) * 0.18;
+      }
+    }
+  },
+  acrylic(field) {
+    // Cast sheet: almost perfectly smooth, with the faintest ripple.
+    const ripple = valueNoise(4, 2003);
+    for (let y = 0; y < SIZE; y += 1) {
+      for (let x = 0; x < SIZE; x += 1) {
+        field[y * SIZE + x] = 0.5 + (ripple(x / SIZE, y / SIZE) - 0.5) * 0.04;
+      }
+    }
+  },
   velvet(field) {
     const a = valueNoise(128, 211);
     const nap = valueNoise(12, 19);
@@ -232,6 +310,36 @@ export const MATERIAL_LOOK = {
     repeat: [1.6, 2.4], normal: 0.2, slope: 1.6, roughBase: 0.42, roughRange: 0.22,
     roughness: 0.62, metalness: 0, sheen: 0.05, sheenRoughness: 0.6, sheenFromFoil: false,
     clearcoat: 0.22, clearcoatRoughness: 0.42, thread: "none"
+  },
+  canvas: {
+    repeat: [3, 4.5], normal: 1, slope: 1.7, roughBase: 0.84, roughRange: 0.16,
+    roughness: 1, metalness: 0, sheen: 0.12, sheenRoughness: 0.9, sheenFromFoil: false,
+    clearcoat: 0, clearcoatRoughness: 0.7, thread: "slub"
+  },
+  denim: {
+    repeat: [5, 7.5], normal: 0.8, slope: 1.6, roughBase: 0.82, roughRange: 0.16,
+    roughness: 1, metalness: 0, sheen: 0.18, sheenRoughness: 0.85, sheenFromFoil: false,
+    clearcoat: 0, clearcoatRoughness: 0.7, thread: "twill"
+  },
+  cork: {
+    repeat: [2.4, 3.6], normal: 0.9, slope: 1.8, roughBase: 0.86, roughRange: 0.12,
+    roughness: 1, metalness: 0, sheen: 0.04, sheenRoughness: 1, sheenFromFoil: false,
+    clearcoat: 0, clearcoatRoughness: 0.7, thread: "speckle"
+  },
+  snakeskin: {
+    repeat: [4, 6], normal: 0.7, slope: 2.2, roughBase: 0.42, roughRange: 0.3,
+    roughness: 0.66, metalness: 0.02, sheen: 0.12, sheenRoughness: 0.5, sheenFromFoil: false,
+    clearcoat: 0.3, clearcoatRoughness: 0.36, thread: "scales"
+  },
+  wood: {
+    repeat: [1, 1.5], normal: 0.26, slope: 1.4, roughBase: 0.5, roughRange: 0.2,
+    roughness: 0.7, metalness: 0, sheen: 0, sheenRoughness: 1, sheenFromFoil: false,
+    clearcoat: 0.34, clearcoatRoughness: 0.32, thread: "wood"
+  },
+  acrylic: {
+    repeat: [1, 1.5], normal: 0.05, slope: 1, roughBase: 0.06, roughRange: 0.04,
+    roughness: 0.12, metalness: 0, sheen: 0, sheenRoughness: 1, sheenFromFoil: false,
+    clearcoat: 1, clearcoatRoughness: 0.04, thread: "none"
   },
   velvet: {
     repeat: [6, 9], normal: 0.3, slope: 1.3, roughBase: 0.9, roughRange: 0.1,
@@ -390,6 +498,63 @@ function paintGrain(ctx, width, height, kind, seed, spine, flip) {
       ctx.beginPath();
       ctx.moveTo(x, y);
       ctx.lineTo(x + 60 + random() * 260, y + (random() - 0.5) * 1.2);
+      ctx.stroke();
+    }
+  } else if (look.thread === "twill") {
+    // Denim shows pale weft between the dyed diagonal wales.
+    const count = Math.round(2600 * area);
+    for (let thread = 0; thread < count; thread += 1) {
+      const x = random() * width;
+      const y = random() * height;
+      const length = 6 + random() * 20;
+      ctx.strokeStyle = random() > 0.35
+        ? `rgba(255,255,255,${0.03 + random() * 0.05})`
+        : `rgba(0,0,0,${0.02 + random() * 0.03})`;
+      ctx.lineWidth = 0.5 + random() * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + length * 0.7, y - length * 0.7);
+      ctx.stroke();
+    }
+  } else if (look.thread === "speckle") {
+    // Cork: dark and light granules.
+    const count = Math.round(5200 * area);
+    for (let grain = 0; grain < count; grain += 1) {
+      const radius = 0.8 + random() * 3.2;
+      ctx.fillStyle = random() > 0.45
+        ? `rgba(40,20,5,${0.08 + random() * 0.16})`
+        : `rgba(255,236,200,${0.05 + random() * 0.1})`;
+      ctx.beginPath();
+      ctx.arc(random() * width, random() * height, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (look.thread === "scales") {
+    // Each scale is a little darker at its rim.
+    const across = 26;
+    const down = 34;
+    ctx.lineWidth = 1.4;
+    for (let row = 0; row * down < height + down; row += 1) {
+      for (let column = -1; column * across < width + across; column += 1) {
+        const x = column * across + (row % 2 ? across / 2 : 0);
+        ctx.strokeStyle = `rgba(0,0,0,${0.08 + random() * 0.08})`;
+        ctx.beginPath();
+        ctx.ellipse(x, row * down, across * 0.48, down * 0.42, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  } else if (look.thread === "wood") {
+    // Growth rings seen edge-on: long, wavy, darker lines.
+    for (let line = 0; line < width; line += 6 + random() * 14) {
+      ctx.strokeStyle = `rgba(60,30,10,${0.05 + random() * 0.1})`;
+      ctx.lineWidth = 0.8 + random() * 2.4;
+      ctx.beginPath();
+      const wave = 4 + random() * 10;
+      const phase = random() * Math.PI * 2;
+      for (let y = 0; y <= height; y += 24) {
+        const x = line + Math.sin(y / 140 + phase) * wave;
+        if (y) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
+      }
       ctx.stroke();
     }
   } else if (look.thread === "fibre") {

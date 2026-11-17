@@ -9,7 +9,7 @@
 import { fontString, fontToken } from "../data/fonts.js";
 import { getImage } from "../state/images.js";
 import { layerText } from "../state/schema.js";
-import { rgba } from "../util.js";
+import { hashSeed, rgba, seededRandom } from "../util.js";
 import { drawMotif, hasMotif } from "./motifs.js";
 import { hasPattern, patternMask, stampPattern } from "./patterns.js";
 import { paintMaterialBase } from "./surface.js";
@@ -738,6 +738,88 @@ function drawCoverImage(ctx, image, x, y, w, h) {
   );
 }
 
+/* ---------- wear ---------- */
+
+/**
+ * Age: rubbed corners and edges, sun-fading, and foil worn away where hands
+ * hold the book. `outer` is the side away from the hinge ("right" on the
+ * front board, "left" on the back); the spine wears at head and tail.
+ */
+function applyWear(layers, book, width, height, face) {
+  const wear = book.wear;
+  if (!wear || (!wear.scuff && !wear.fade)) return;
+  const ctx = layers.base;
+  const random = seededRandom(hashSeed(`wear-${book.seed}-${face}`));
+  ctx.save();
+  if (wear.fade > 0) {
+    // Light bleaches the dye: strongest along the top, and on the whole spine.
+    ctx.globalCompositeOperation = "saturation";
+    ctx.fillStyle = `rgba(128,128,128,${wear.fade * 0.55})`;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalCompositeOperation = "screen";
+    const fade = ctx.createLinearGradient(0, 0, 0, height);
+    const top = wear.fade * (face === "spine" ? 0.34 : 0.24);
+    fade.addColorStop(0, `rgba(255,244,222,${top})`);
+    fade.addColorStop(face === "spine" ? 1 : 0.55, `rgba(255,244,222,${face === "spine" ? top * 0.6 : 0})`);
+    ctx.fillStyle = fade;
+    ctx.fillRect(0, 0, width, height);
+  }
+  if (wear.scuff > 0) {
+    ctx.globalCompositeOperation = "screen";
+    const rub = (x, y, radius, strength) => {
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
+      glow.addColorStop(0, `rgba(235,220,196,${strength})`);
+      glow.addColorStop(1, "rgba(235,220,196,0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    };
+    const s = wear.scuff;
+    if (face === "spine") {
+      [0, height].forEach((y) => rub(width / 2, y, width * 0.9, s * 0.4));
+    } else {
+      const x = face === "front" ? width : 0;
+      [0, height].forEach((y) => rub(x, y, width * 0.16, s * 0.55));
+      // The fore-edge is rubbed along its whole length.
+      const edge = ctx.createLinearGradient(x, 0, face === "front" ? width - 26 : 26, 0);
+      edge.addColorStop(0, `rgba(235,220,196,${s * 0.28})`);
+      edge.addColorStop(1, "rgba(235,220,196,0)");
+      ctx.fillStyle = edge;
+      ctx.fillRect(face === "front" ? width - 26 : 0, 0, 26, height);
+    }
+    // Small scratches and specks across the board.
+    ctx.globalCompositeOperation = "source-over";
+    const count = Math.round(s * (face === "spine" ? 60 : 140));
+    for (let index = 0; index < count; index += 1) {
+      ctx.strokeStyle = random() > 0.5 ? `rgba(255,240,215,${0.06 + random() * 0.1})` : `rgba(0,0,0,${0.05 + random() * 0.08})`;
+      ctx.lineWidth = 0.6 + random();
+      const x = random() * width;
+      const y = random() * height;
+      const angle = random() * Math.PI;
+      const length = 3 + random() * 18;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length);
+      ctx.stroke();
+    }
+    // Foil flakes away, most where the book is handled.
+    const foil = layers.foil;
+    foil.save();
+    foil.globalCompositeOperation = "destination-out";
+    const flakes = Math.round(s * s * (face === "spine" ? 900 : 1600));
+    for (let index = 0; index < flakes; index += 1) {
+      const edgeBias = random() < 0.5;
+      const x = edgeBias && face !== "spine" ? (face === "front" ? width - random() * width * 0.3 : random() * width * 0.3) : random() * width;
+      const y = edgeBias && face === "spine" ? (random() < 0.5 ? random() * height * 0.15 : height - random() * height * 0.15) : random() * height;
+      foil.fillStyle = `rgba(0,0,0,${0.4 + random() * 0.6})`;
+      foil.beginPath();
+      foil.arc(x, y, 0.8 + random() * 2.6, 0, Math.PI * 2);
+      foil.fill();
+    }
+    foil.restore();
+  }
+  ctx.restore();
+}
+
 /* ---------- boards ---------- */
 
 /** Hand the layers named in `commit` to the GPU (both when it is omitted). */
@@ -798,6 +880,7 @@ export function paintFront(book, baseTarget, foilTarget, onAsset, commit, relief
   drawMotifLayer(layers, book, front.motif, width, height);
   front.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
   drawCorners(layers.foil, book.details.corners?.style, width, height, "left");
+  applyWear(layers, book, width, height, "front");
   commitLayers(baseTarget, foilTarget, commit);
   reliefTarget?.commit();
 }
@@ -821,6 +904,7 @@ export function paintBack(book, baseTarget, foilTarget, onAsset, commit, reliefT
   drawMotifLayer(layers, book, back.motif, width, height);
   back.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
   drawCorners(layers.foil, book.details.corners?.style, width, height, "right");
+  applyWear(layers, book, width, height, "back");
   commitLayers(baseTarget, foilTarget, commit);
   reliefTarget?.commit();
 }
@@ -1061,6 +1145,7 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
     const room = labelled && layer.id === "spine-title" ? labelHalf * 2 - 44 : height * 0.56;
     drawSpineText(layers, book, layer, width, height, room);
   });
+  applyWear(layers, book, width, height, "spine");
   commitLayers(baseTarget, foilTarget, commit);
   reliefTarget?.commit();
 }
@@ -1097,7 +1182,8 @@ export function faceSignatures(book, face) {
   const parts = { base: [], foil: [], relief: [book.stamp?.relief] };
   const { material, pattern, details } = book;
   const twoTone = material.binding === "quarter" || material.binding === "half";
-  parts.base.push(material, book.seed, details.stitch);
+  parts.base.push(material, book.seed, details.stitch, book.wear);
+  if (book.wear?.scuff) parts.foil.push(book.wear.scuff);
   if (face === "spine") {
     const spine = book.spine;
     const title = spine.texts.find((layer) => layer.id === "spine-title");

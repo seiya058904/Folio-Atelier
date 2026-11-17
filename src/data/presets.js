@@ -13,7 +13,13 @@ export const MATERIALS = [
   { id: "suede", label: "Suede", note: "Brushed nap, no shine" },
   { id: "vellum", label: "Vellum", note: "Smooth, faintly veined skin" },
   { id: "paper", label: "Paper", note: "Uncoated laid stock" },
-  { id: "velvet", label: "Velvet", note: "Deep pile, strong sheen" }
+  { id: "velvet", label: "Velvet", note: "Deep pile, strong sheen" },
+  { id: "canvas", label: "Canvas", note: "Thick, uneven cotton duck" },
+  { id: "denim", label: "Denim", note: "Diagonal twill, pale weft showing" },
+  { id: "cork", label: "Cork", note: "Pressed granules, warm and matte" },
+  { id: "snakeskin", label: "Snakeskin", note: "Domed scales with a soft gloss" },
+  { id: "wood", label: "Wood veneer", note: "Sliced grain under a satin lacquer" },
+  { id: "acrylic", label: "Acrylic", note: "Smooth cast sheet, high gloss" }
 ];
 
 export const BINDING_STYLES = [

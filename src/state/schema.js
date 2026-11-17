@@ -325,7 +325,9 @@ export function createBook({ presetId = "ultramarine", title = "", author = "", 
     pages: defaultPages(),
     // Foil and blind stamps: pressed into the board ("deboss"), raised from
     // it ("emboss") or left flat; `depth` runs from 0 to 1.
-    stamp: { relief: "deboss", depth: 0.5 }
+    stamp: { relief: "deboss", depth: 0.5 },
+    // Age: rubbed corners and edges (`scuff`) and sun-fading (`fade`), 0 to 1.
+    wear: { scuff: 0, fade: 0 }
   };
   applyPreset(book, presetId);
   return book;
@@ -401,6 +403,7 @@ export function normalizeBook(value) {
   book.stamp = { relief: "flat", depth: 0.5, ...(value.stamp || {}) };
   if (!["deboss", "emboss", "flat"].includes(book.stamp.relief)) book.stamp.relief = "flat";
   book.stamp.depth = Math.min(1, Math.max(0, Number(book.stamp.depth) || 0));
+  book.wear = { scuff: 0, fade: 0, ...(value.wear || {}) };
   book.pattern = { ...base.pattern, ...(value.pattern || {}) };
   if (!value.pattern) book.pattern.key = "none";
   // Books made before these options existed keep the look they had.
