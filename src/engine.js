@@ -1872,6 +1872,8 @@ function renderFrame() {
 
 /* ----- sharing: a still of the view, and a turntable of the open book ----- */
 
+let lastCapture = null;
+
 /** The view as it is now, as a PNG. */
 function capturePicture() {
   if (!renderer) return Promise.resolve(null);
@@ -1909,7 +1911,7 @@ function captureTurntable({ frames = 36, size = 360 } = {}) {
   const savedCamera = camera.position.clone();
   const forward = camera.getWorldDirection(new THREE.Vector3());
   const halfFov = THREE.MathUtils.degToRad(camera.fov * 0.5);
-  const fit = (reach * 1.12) / Math.tan(Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect))) + swing;
+  const fit = (reach * 1.12) / Math.tan(Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect))) + swing * 2;
   const distance = camera.position.distanceTo(centre);
   if (fit > distance) {
     camera.position.copy(centre).addScaledVector(forward, -fit);
@@ -1917,9 +1919,13 @@ function captureTurntable({ frames = 36, size = 360 } = {}) {
   }
   const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(reach);
   const edge = centre.clone().add(right).project(camera);
+  // The near side of the turning book is closer to the camera, so larger.
+  const away = camera.position.distanceTo(centre);
+  const nearer = away / Math.max(0.1, away - swing);
   centre.project(camera);
-  const radius = Math.abs(edge.x - centre.x) * 0.5 * canvas.width;
+  const radius = Math.abs(edge.x - centre.x) * 0.5 * canvas.width * nearer;
   const side = clamp(radius * 2.08, 64, Math.min(canvas.width, canvas.height));
+  lastCapture = { reach, swing, fit, distance, radius, side, fov: camera.fov, zoom: camera.zoom, height: canvas.height };
   const sx = clamp((centre.x + 1) * 0.5 * canvas.width - side / 2, 0, canvas.width - side);
   const sy = clamp((1 - centre.y) * 0.5 * canvas.height - side / 2, 0, canvas.height - side);
   const out = document.createElement("canvas");
@@ -2350,7 +2356,9 @@ export const engine = {
     get activeRig() { return activeBook; },
     get rigs() { return bookRigs; },
     get scene() { return scene; },
-    get renderer() { return renderer; }
+    get renderer() { return renderer; },
+    get lastCapture() { return lastCapture; },
+    get camera() { return camera; }
   }
 };
 

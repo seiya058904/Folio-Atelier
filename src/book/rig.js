@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { BOOK_FORMAT, bookPalette, trimScale } from "../state/schema.js";
 import { perf } from "../perf.js";
-import { clamp } from "../util.js";
+import { clamp, mixHex } from "../util.js";
 import {
   FACE_SIZE,
   endpaperSignature,
@@ -75,6 +75,30 @@ function createRoundedPlaneGeometry(width, height, radius) {
   for (let index = 0; index < position.count; index += 1) {
     uv[index * 2] = (position.getX(index) + halfWidth) / width;
     uv[index * 2 + 1] = (position.getY(index) + halfHeight) / height;
+  }
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** A ribbon marker, its hanging end cut in a swallow tail. */
+function createRibbonGeometry(width, length) {
+  const halfWidth = width * 0.5;
+  const halfLength = length * 0.5;
+  const notch = width * 0.62;
+  const shape = new THREE.Shape();
+  shape.moveTo(-halfWidth, -halfLength);
+  shape.lineTo(0, -halfLength + notch);
+  shape.lineTo(halfWidth, -halfLength);
+  shape.lineTo(halfWidth, halfLength);
+  shape.lineTo(-halfWidth, halfLength);
+  shape.closePath();
+  const geometry = new THREE.ShapeGeometry(shape);
+  const position = geometry.getAttribute("position");
+  const uv = new Float32Array(position.count * 2);
+  for (let index = 0; index < position.count; index += 1) {
+    uv[index * 2] = (position.getX(index) + halfWidth) / width;
+    uv[index * 2 + 1] = (position.getY(index) + halfLength) / length;
   }
   geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   geometry.computeVertexNormals();
@@ -169,6 +193,137 @@ function createSpineGeometry(span, height, bulge, thickness, shell = true, segme
   return geometry;
 }
 
+/**
+ * The head join of the closure band: a strip of rounded section (`width`
+ * across, `thick` deep) running up the front board from `halfHeight - reach`,
+ * round the edge with a radius, over the head of the book and down the back
+ * board. `outer` is the z of the strip's centre line on the boards. Mirror it
+ * in y for the tail.
+ */
+function createBandJoin(width, thick, halfHeight, outer, reach) {
+  const top = halfHeight + thick * 0.5;
+  const radius = Math.min(0.011, outer * 0.9);
+  const path = [];
+  const add = (y, z) => path.push([y, z]);
+  add(halfHeight - reach, outer);
+  add(top - radius, outer);
+  const arc = (cy, cz, from, to) => {
+    for (let index = 1; index <= 8; index += 1) {
+      const angle = from + ((to - from) * index) / 8;
+      add(cy + Math.sin(angle) * radius, cz + Math.cos(angle) * radius);
+    }
+  };
+  arc(top - radius, outer - radius, 0, Math.PI * 0.5);
+  add(top, -outer + radius);
+  arc(top - radius, -outer + radius, Math.PI * 0.5, Math.PI);
+  add(halfHeight - reach, -outer);
+
+  // A rounded rectangle for the section (a superellipse).
+  const RING = 16;
+  const section = [];
+  for (let index = 0; index < RING; index += 1) {
+    const angle = (index / RING) * Math.PI * 2;
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    section.push([
+      Math.sign(c) * Math.pow(Math.abs(c), 0.4) * width * 0.5,
+      Math.sign(s) * Math.pow(Math.abs(s), 0.4) * thick * 0.5
+    ]);
+  }
+  const positions = [];
+  const uvs = [];
+  let travelled = 0;
+  path.forEach(([y, z], index) => {
+    const previous = path[Math.max(0, index - 1)];
+    const next = path[Math.min(path.length - 1, index + 1)];
+    const ty = next[0] - previous[0];
+    const tz = next[1] - previous[1];
+    const length = Math.hypot(ty, tz) || 1;
+    // Outward normal in the y-z plane (away from the book).
+    const ny = -tz / length;
+    const nz = ty / length;
+    if (index > 0) travelled += Math.hypot(y - path[index - 1][0], z - path[index - 1][1]);
+    section.forEach(([sx, sn], ring) => {
+      positions.push(sx, y + ny * sn, z + nz * sn);
+      uvs.push(ring / RING, travelled / 0.08);
+    });
+  });
+  const indices = [];
+  for (let index = 0; index < path.length - 1; index += 1) {
+    for (let ring = 0; ring < RING; ring += 1) {
+      const a = index * RING + ring;
+      const b = index * RING + ((ring + 1) % RING);
+      const c = a + RING;
+      const e = b + RING;
+      indices.push(a, c, b, b, c, e);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** Fine woven ribs (light grey, tinted by the material colour): elastic and tape. */
+function getWeaveTexture() {
+  if (shared.weave) return shared.weave;
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, 64, 64);
+  for (let y = 0; y < 64; y += 4) {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.13)";
+    ctx.fillRect(0, y, 64, 1.2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.fillRect(0, y + 2, 64, 0.8);
+  }
+  for (let x = 0; x < 64; x += 2) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.03 + ((x * 7) % 5) * 0.012})`;
+    ctx.fillRect(x, 0, 1, 64);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = 4;
+  shared.weave = texture;
+  return texture;
+}
+
+/** A cloth tab with a line of stitches round its edge. */
+function getStitchTexture() {
+  if (shared.stitch) return shared.stitch;
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, 128, 256);
+  for (let y = 0; y < 256; y += 3) {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.07)";
+    ctx.fillRect(0, y, 128, 1);
+  }
+  // Stitches: short dashes with a shadow, a thread's width in from the edge.
+  ctx.lineCap = "round";
+  ctx.setLineDash([7, 5]);
+  const stitch = (offset, colour) => {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = 2.2;
+    ctx.strokeRect(13 + offset, 13 + offset, 128 - 26, 256 - 26);
+  };
+  stitch(0.8, "rgba(0, 0, 0, 0.35)");
+  stitch(0, "rgba(255, 255, 255, 0.55)");
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  shared.stitch = texture;
+  return texture;
+}
+
 // One trim size for every book, so the heavy geometry is built once and shared.
 const DIM = (() => {
   const { width, height, depth } = BOOK_FORMAT;
@@ -203,7 +358,7 @@ function sharedGeometry() {
     spineFoil: createSpineGeometry(d.depth + d.board * 1.94, d.height - 0.008, d.spineBulge, 0, false),
     spineLining: new RoundedBoxGeometry(d.spineWidth * 0.68, d.height - 0.056, Math.max(0.045, d.pageDepth - 0.008), 1, 0.0015),
     headband: new THREE.CylinderGeometry(0.012, 0.012, d.pageDepth * 0.88, 12, 1, false),
-    ribbon: createRoundedPlaneGeometry(0.034, d.pageHeight * 0.76, 0.002)
+    ribbon: createRibbonGeometry(0.034, d.pageHeight * 0.76)
   };
   return shared.geometry;
 }
@@ -285,10 +440,17 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   const motion = new THREE.Group();
   motion.name = "book-motion";
   root.add(motion);
-  // The book itself, scaled to its trim size and bulk (see applyStructure).
+  // The book itself. `body` takes the trim size (width and height only), so
+  // the boards and the leaves, which turn, are never scaled unevenly and
+  // never thicken; `block` inside it takes the bulk, in depth only: the
+  // page block, spine, headbands and edges (see applyStructure).
   const body = new THREE.Group();
   body.name = "book-body";
   motion.add(body);
+  const block = new THREE.Group();
+  block.name = "book-block";
+  body.add(block);
+  let bulk = 1;
 
   /* ----- paint targets ----- */
   let scale = resolution;
@@ -366,7 +528,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   /* ----- page block and boards ----- */
   const pageBlock = createMesh(g.pageBlock, pageMaterial, "page-block");
   pageBlock.position.x = 0.018;
-  body.add(pageBlock);
+  block.add(pageBlock);
 
   const backPivot = new THREE.Group();
   backPivot.name = "back-cover-pivot";
@@ -417,51 +579,97 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   body.add(frontPivot);
 
   /* ----- closure band and pen loop ----- */
-  // A vertical elastic band near the fore-edge: a strip on each board joined
-  // round the head and the tail. It is slipped off while the book is open.
-  const bandMaterial = physical({ roughness: 0.62, metalness: 0, sheen: 0.4, sheenRoughness: 0.5 });
+  // A vertical elastic band near the fore-edge, of rounded section: a strip
+  // on each board, joined round the head and the tail with a radius at each
+  // edge (the joins are rebuilt when the bulk changes). The back strip is
+  // stitched under the back board; the band slips off as the book opens.
+  const bandMaterial = physical({ roughness: 0.58, metalness: 0, sheen: 0.55, sheenRoughness: 0.42, map: getWeaveTexture(), clearcoat: 0 });
   const band = new THREE.Group();
   band.name = "closure-band";
   const bandX = d.width * 0.84;
-  const bandWidth = 0.034;
-  const bandFront = createMesh(shared.box, bandMaterial, "band-front", true, false);
-  bandFront.scale.set(bandWidth, d.height + 0.006, 0.0045);
-  bandFront.position.set(bandX, 0, d.board * 0.5 + 0.0028);
+  const BAND_WIDTH = 0.03;
+  const BAND_THICK = 0.0042;
+  const BAND_REACH = 0.05; // how far each join runs down a board
+  const bandStripLength = d.height - BAND_REACH * 2;
+  if (!shared.bandStrip) {
+    shared.bandStrip = new RoundedBoxGeometry(BAND_WIDTH, bandStripLength, BAND_THICK, 2, BAND_THICK * 0.45);
+    // The weave repeats every 8 cm, as on the joins.
+    const uv = shared.bandStrip.getAttribute("uv");
+    for (let index = 0; index < uv.count; index += 1) uv.setY(index, uv.getY(index) * (bandStripLength / 0.08));
+  }
+  const bandFront = createMesh(shared.bandStrip, bandMaterial, "band-front", true, false);
+  bandFront.position.set(bandX, 0, d.board * 0.5 + BAND_THICK * 0.5);
   frontPivot.add(bandFront);
-  const bandBack = createMesh(shared.box, bandMaterial, "band-back", true, false);
-  bandBack.scale.set(bandWidth, d.height + 0.006, 0.0045);
-  bandBack.position.set(bandX, 0, -d.board * 0.5 - 0.0028);
+  const bandBack = createMesh(shared.bandStrip, bandMaterial, "band-back", true, false);
+  bandBack.position.set(bandX, 0, -d.board * 0.5 - BAND_THICK * 0.5);
   backPivot.add(bandBack);
-  const bandSpan = d.depth + d.board * 2 + 0.011;
-  [1, -1].forEach((side) => {
-    const wrap = createMesh(shared.box, bandMaterial, "band-wrap", true, false);
-    wrap.scale.set(bandWidth, 0.0045, bandSpan);
-    wrap.position.set(-d.width * 0.5 + bandX, side * (d.height * 0.5 + 0.0028), 0);
+  const bandWraps = [1, -1].map((side) => {
+    const wrap = createMesh(new THREE.BufferGeometry(), bandMaterial, "band-wrap", true, false);
+    wrap.position.x = -d.width * 0.5 + bandX;
+    wrap.scale.y = side;
     band.add(wrap);
+    return wrap;
   });
+  let bandBulk = 0;
+  function shapeBandWraps() {
+    if (bandBulk === bulk) return;
+    bandBulk = bulk;
+    const outer = (d.depth * bulk) * 0.5 + d.board + BAND_THICK * 0.5;
+    const geometry = createBandJoin(BAND_WIDTH, BAND_THICK, d.height * 0.5, outer, BAND_REACH);
+    bandWraps.forEach((wrap) => {
+      wrap.geometry.dispose();
+      wrap.geometry = geometry;
+    });
+  }
   body.add(band);
   const bandParts = [bandFront, bandBack, band];
 
-  const penLoopMaterial = physical({ roughness: 0.7, metalness: 0, sheen: 0.3, sheenRoughness: 0.6, side: THREE.DoubleSide });
-  if (!shared.penLoop) shared.penLoop = new THREE.CylinderGeometry(0.024, 0.024, 0.2, 18, 1, true);
-  const penLoop = createMesh(shared.penLoop, penLoopMaterial, "pen-loop", true, false);
-  penLoop.position.set(d.width * 0.5 + 0.022, d.height * 0.16, -d.depth * 0.5 - d.board * 0.5);
+  // The pen loop: a flattened fabric tube on a cloth tab, stitched to the
+  // back board and standing just off the fore-edge.
+  const penLoopMaterial = physical({ roughness: 0.74, metalness: 0, sheen: 0.35, sheenRoughness: 0.6, side: THREE.DoubleSide, map: getWeaveTexture() });
+  const penTabMaterial = physical({ roughness: 0.78, metalness: 0, sheen: 0.3, sheenRoughness: 0.6, map: getStitchTexture() });
+  if (!shared.penLoop) {
+    shared.penLoop = new THREE.CylinderGeometry(0.021, 0.021, 0.17, 24, 1, true);
+    shared.penTab = new RoundedBoxGeometry(0.075, 0.17, 0.0024, 2, 0.0011);
+  }
+  const penLoop = new THREE.Group();
+  penLoop.name = "pen-loop-group";
+  const penTube = createMesh(shared.penLoop, penLoopMaterial, "pen-loop", true, false);
+  penTube.scale.z = 0.62; // pressed flat against the board
+  penTube.position.set(d.width * 0.5 + 0.02, 0, -0.008);
+  const penTab = createMesh(shared.penTab, penTabMaterial, "pen-tab", true, true);
+  penTab.position.set(d.width * 0.5 - 0.016, 0, 0);
+  penLoop.add(penTube, penTab);
+  penLoop.position.y = d.height * 0.16;
   body.add(penLoop);
 
   /** Trim size, bulk, band and pen loop from the spec. */
   function applyStructure() {
     const structure = rig.data.structure || {};
     const size = trimScale(rig.data);
-    const bulk = structure.bulk || 1;
-    body.scale.set(size, size, size * bulk);
+    bulk = structure.bulk || 1;
+    body.scale.set(size, size, 1);
+    block.scale.set(1, 1, bulk);
     // Stand on the same shelf line whatever the height.
     body.position.y = -d.height * 0.5 * (1 - size);
-    contactShadow.scale.set(d.width * 1.22 * size, d.depth * 2.05 * size * bulk, 1);
+    // The boards keep their thickness and sit on the block, however thick.
+    const halfBlock = (d.depth * bulk) * 0.5;
+    frontPivot.position.z = halfBlock + d.board * 0.5;
+    backPivot.position.z = -halfBlock - d.board * 0.5;
+    // The spine spans the block and both boards.
+    const spineSpan = (d.depth * bulk + d.board * 1.94) / ((d.depth + d.board * 1.94) * bulk);
+    spine.scale.z = spineSpan;
+    spineFoil.scale.z = spineSpan;
+    assignLeafSlots();
+    contactShadow.scale.set(d.width * 1.22 * size, d.depth * 2.05 * bulk, 1);
+    shapeBandWraps();
     const showBand = Boolean(structure.band?.show);
     bandParts.forEach((part) => { part.userData.wanted = showBand; });
     bandMaterial.color.set(structure.band?.color || "#1d1813");
     penLoop.visible = Boolean(structure.penLoop?.show);
+    penLoop.position.z = -halfBlock - d.board - 0.0013;
     penLoopMaterial.color.set(structure.penLoop?.color || "#1d1813");
+    penTabMaterial.color.set(structure.penLoop?.color || "#1d1813");
     updateBand(1, { open: frontPivot.rotation.y < -0.02 });
   }
 
@@ -498,7 +706,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     bandBack.position.x = bandX + shift;
     band.position.x = shift;
     // The strips stand a hair proud of the boards when pulled.
-    bandFront.position.z = d.board * 0.5 + 0.0028 + bandState.tug * 0.003;
+    bandFront.position.z = d.board * 0.5 + BAND_THICK * 0.5 + bandState.tug * 0.003;
     const fade = 1 - clamp((eased - 0.3) / 0.7, 0, 1);
     bandMaterial.opacity = rig.opacity * fade;
     const shown = wanted && bandState.slide < 1;
@@ -558,8 +766,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     leaves.forEach((pivot, order) => {
       const stackIndex = count - 1 - order;
       pivot.userData.order = order;
-      pivot.userData.restZ = d.pageDepth * 0.5 + 0.0015 + stackIndex * 0.0015;
-      pivot.userData.turnedZ = d.depth * 0.5 + d.board + 0.004 + order * 0.0015;
+      pivot.userData.restZ = (d.pageDepth * bulk) * 0.5 + 0.0015 + stackIndex * 0.0015;
+      pivot.userData.turnedZ = (d.depth * bulk) * 0.5 + d.board + 0.004 + order * 0.0015;
       pivot.position.x = -d.width * 0.5 + d.spineWidth * 0.65;
     });
   }
@@ -569,19 +777,19 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   /* ----- spine, headbands, ribbon, edges ----- */
   const spine = createMesh(g.spine, spineArt, "rounded-spine");
   spine.position.x = -d.width * 0.5 - 0.003;
-  body.add(spine);
+  block.add(spine);
   const spineFoil = createMesh(g.spineFoil, spineFoilArt, "spine-foil", false, false);
   spineFoil.position.x = spine.position.x - 0.0007;
-  body.add(spineFoil);
+  block.add(spineFoil);
   const spineLining = createMesh(g.spineLining, endpaperMaterial, "spine-lining");
   spineLining.position.set(-d.width * 0.5 + d.spineWidth * 0.38, 0, 0);
-  body.add(spineLining);
+  block.add(spineLining);
 
   [-1, 1].forEach((direction) => {
     const headband = createMesh(g.headband, headbandMaterial, `headband-${direction}`);
     headband.rotation.x = Math.PI * 0.5;
     headband.position.set(-d.pageWidth * 0.5 + 0.046, direction * (d.pageHeight * 0.5 - 0.004), 0);
-    body.add(headband);
+    block.add(headband);
   });
 
   const ribbon = createMesh(g.ribbon, ribbonMaterial, "ribbon-bookmark", false, true);
@@ -591,12 +799,12 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     d.pageDepth * 0.5 + 0.003
   );
   ribbon.rotation.z = (book.seed % 2 ? -1 : 1) * 0.014;
-  body.add(ribbon);
+  block.add(ribbon);
   const secondRibbonMaterial = ribbonMaterial.clone();
   const secondRibbon = createMesh(g.ribbon, secondRibbonMaterial, "ribbon-bookmark-2", false, true);
   secondRibbon.position.set(ribbon.position.x + 0.058, ribbon.position.y - 0.03, ribbon.position.z + 0.0006);
   secondRibbon.rotation.z = -ribbon.rotation.z * 1.6;
-  body.add(secondRibbon);
+  block.add(secondRibbon);
 
   for (let index = 0; index < 6; index += 1) {
     const signature = createMesh(shared.box, signatureMaterial, `page-signature-${index + 1}`, false, true);
@@ -606,20 +814,20 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
       -d.pageHeight * 0.5 + ((index + 1) / 7) * d.pageHeight,
       0
     );
-    body.add(signature);
+    block.add(signature);
   }
 
   const foreEdge = createMesh(shared.plane, foreEdgeMaterial, "fore-edge", false, true);
   foreEdge.scale.set(d.pageDepth * 0.94, d.pageHeight - 0.028, 1);
   foreEdge.rotation.y = Math.PI * 0.5;
   foreEdge.position.set(0.018 + d.pageWidth * 0.5 + 0.002, 0, 0);
-  body.add(foreEdge);
+  block.add(foreEdge);
   [-1, 1].forEach((direction) => {
     const edge = createMesh(shared.plane, headTailEdgeMaterial, direction > 0 ? "head-edge" : "tail-edge", false, true);
     edge.scale.set(d.pageWidth - 0.035, d.pageDepth * 0.94, 1);
     edge.rotation.x = direction > 0 ? -Math.PI * 0.5 : Math.PI * 0.5;
     edge.position.set(0.018, direction * (d.pageHeight * 0.5 + 0.002), 0);
-    body.add(edge);
+    block.add(edge);
   });
 
   /* ----- hit target and contact shadow ----- */
@@ -647,7 +855,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     cloth, coverArt, foilArt, spineArt, spineFoilArt, backArt, backFoilArt,
     endpaperMaterial, foreEdgeMaterial, headTailEdgeMaterial, grooveMaterial,
     pageMaterial, ...sheetMaterials, headbandMaterial, signatureMaterial, ribbonMaterial,
-    secondRibbonMaterial, bandMaterial, penLoopMaterial
+    secondRibbonMaterial, bandMaterial, penLoopMaterial, penTabMaterial
   ];
 
   /* ----- look: everything that is a material parameter rather than paint ----- */
@@ -750,11 +958,13 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     secondRibbon.visible = ribbon.visible && Boolean(spec.details.ribbon.double);
     secondRibbonMaterial.color.set(spec.details.ribbon.second || spec.details.ribbon.color);
     const headband = spec.details.headband;
-    const stripes = headband.striped ? getHeadbandTexture(headband.color, headband.second || "#f3ece0") : null;
-    if (Boolean(headbandMaterial.map) !== Boolean(stripes)) headbandMaterial.needsUpdate = true;
+    // A headband is silk thread wound round a core: even a plain one shows
+    // its turns, a shade darker. (Always a map, so one shader serves both.)
+    const second = headband.striped ? headband.second || "#f3ece0" : mixHex(headband.color, "#000000", 0.22);
+    const stripes = getHeadbandTexture(headband.color, second);
+    if (!headbandMaterial.map) headbandMaterial.needsUpdate = true;
     headbandMaterial.map = stripes;
-    if (stripes) headbandMaterial.color.set(0xffffff);
-    else headbandMaterial.color.set(headband.color);
+    headbandMaterial.color.set(0xffffff);
     contactShadowMaterial.color.set(bookPalette(spec).shelfDark);
 
     const stock = getPaperFaceTexture(spec.interior.paper);

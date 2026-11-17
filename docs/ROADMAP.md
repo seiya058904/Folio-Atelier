@@ -4,7 +4,16 @@ Round 1 (Phases A–F: speed, motion, decoration, structure, rooms, sharing) is 
 
 This round has three sources: the user's review of the deployed build, the parts of round 1 left unfinished (C, D and E were partial), and our own code review. Work goes phase by phase in the order below. Each phase ends with its checks, a status note at the top of this file, and one scoped commit.
 
-**Status:** G and H done (2026-11-18); I next.
+**Status:** G, H and I done (2026-11-18); J next.
+
+- **I — done.**
+  - The book is split into `body` (trim size, in width and height) and `block` (bulk, in depth). Trim size no longer thickens the boards, and a thick book's cover no longer stretches as it opens. The cause: it turned inside a parent scaled unevenly, and at 160% bulk it stretched to 1.6× its length half-way open.
+  - The elastic band has a rounded section and bends round the head and tail with a radius; it is rebuilt for each bulk, with a woven texture and sheen.
+  - The pen loop is a flattened woven tube on a cloth tab stitched to the back board.
+  - Headbands always show their wound thread, and ribbons end in a swallow tail.
+  - The turntable GIF framing now allows for perspective, so large books fit.
+  - The sweep and `?bench` are unchanged.
+  - Left over: a faint seam where the band's straight strip meets its join; board corners and turn-ins are unchanged.
 
 - **H — done.**
   - Every native `<select>` is replaced by `select()` in `controls.js`: a select-only combobox (keyboard, type-ahead, screen-reader roles) with an animated popover list. Typeface lists set each name in its own face; Frame shows each cover's corner; onlay Shape, Material, endpaper Pattern and page Ornament show their glyphs. It opens in 12 ms, with the first preview at 18 ms.
