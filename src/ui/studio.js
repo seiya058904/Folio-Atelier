@@ -147,19 +147,42 @@ export function createStudioUi({ store, engine, audio }) {
   /* Header, tabs                                                       */
   /* ---------------------------------------------------------------- */
 
-  function renderTabs() {
-    tabsElement.replaceChildren(...TABS.map((entry) => h("button", {
-      class: "tab",
-      type: "button",
-      role: "tab",
-      id: `tab-${entry.id}`,
-      "aria-selected": String(entry.id === tab),
-      tabIndex: entry.id === tab ? 0 : -1,
-      text: t(entry.label),
-      onclick: () => setTab(entry.id)
-    })));
+  // One underline slides between the tabs, so the tabs are built once (and
+  // again only when the language changes) and then just marked.
+  const tabIndicator = h("span", { class: "tabs__indicator", "aria-hidden": "true" });
+
+  function renderTabs(rebuild = false) {
+    if (rebuild || !tabsElement.querySelector(".tab")) {
+      tabsElement.replaceChildren(tabIndicator, ...TABS.map((entry) => h("button", {
+        class: "tab",
+        type: "button",
+        role: "tab",
+        id: `tab-${entry.id}`,
+        text: t(entry.label),
+        onclick: () => setTab(entry.id)
+      })));
+    }
+    tabsElement.querySelectorAll(".tab").forEach((button) => {
+      const selected = button.id === `tab-${tab}`;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
     body.setAttribute("aria-labelledby", `tab-${tab}`);
+    requestAnimationFrame(placeTabIndicator);
   }
+
+  function placeTabIndicator() {
+    const selected = tabsElement.querySelector(".tab[aria-selected='true']");
+    if (!selected || !selected.offsetWidth) return;
+    tabsElement.style.setProperty("--tab-x", `${selected.offsetLeft + 8}px`);
+    tabsElement.style.setProperty("--tab-w", `${Math.max(0, selected.offsetWidth - 16)}px`);
+    if (!tabsElement.classList.contains("has-indicator")) {
+      tabsElement.classList.add("has-indicator");
+      // The first placement is instant; later ones slide.
+      requestAnimationFrame(() => tabsElement.classList.add("is-placed"));
+    }
+  }
+  new ResizeObserver(() => placeTabIndicator()).observe(tabsElement);
 
   function setTab(next, { focusView = true } = {}) {
     if (next === tab && currentPane) {
@@ -295,6 +318,30 @@ export function createStudioUi({ store, engine, audio }) {
     }, () => drawCoverThumb(canvas, sample, refreshThumbsSoon));
   }
 
+  /** A thumbnail for a select's popover list: painted by the same pump once it is shown. */
+  function listThumb(canvas) {
+    requestThumb(canvas.thumb);
+    return canvas;
+  }
+
+  /** A small outline of an onlay shape, for the Shape list. */
+  function shapeGlyph(shape) {
+    const canvas = h("canvas", { width: 60, height: 60 });
+    const ctx = canvas.getContext("2d");
+    ctx.strokeStyle = getComputedStyle(body).getPropertyValue("--ink-soft").trim() || "#5e5346";
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    if (shape === "oval") ctx.ellipse(30, 30, 17, 23, 0, 0, Math.PI * 2);
+    else if (shape === "diamond") {
+      ctx.moveTo(30, 6); ctx.lineTo(48, 30); ctx.lineTo(30, 54); ctx.lineTo(12, 30); ctx.closePath();
+    } else if (shape === "arch") {
+      ctx.moveTo(13, 54); ctx.lineTo(13, 24); ctx.arc(30, 24, 17, Math.PI, 0); ctx.lineTo(47, 54); ctx.closePath();
+    } else if (shape === "rounded") ctx.roundRect(13, 7, 34, 46, 9);
+    else ctx.rect(13, 7, 34, 46);
+    ctx.stroke();
+    return canvas;
+  }
+
   const glyphInk = () => getComputedStyle(body).getPropertyValue("--ink-soft").trim() || "#231d17";
   const glyphCanvas = () => h("canvas", { class: "tile__glyph", width: 96, height: 96 });
 
@@ -406,6 +453,16 @@ export function createStudioUi({ store, engine, audio }) {
       row(
         select({
           label: "Frame", value: border().style, options,
+          // The corner of a small cover, where the frame shows best.
+          preview: (option) => {
+            const canvas = listThumb(coverThumb(() => {
+              const sample = coverSample();
+              sample.front.border = { ...sample[face].border, style: option.id };
+              return sample;
+            }));
+            canvas.classList.add("is-corner");
+            return canvas;
+          },
           onChange: (value) => edit(() => {
             border().style = value;
             if (value === "panel" || value === "slip") { border().finish = "ink"; border().color = "#f1eadf"; }
@@ -517,7 +574,7 @@ export function createStudioUi({ store, engine, audio }) {
         customText,
         row(
           select({
-            label: "Typeface", value: current.font, options: FONTS,
+            label: "Typeface", value: current.font, options: FONTS, face: (option) => option.stack,
             onChange: (value) => edit(() => { layer().font = value; }, dirty, { rerender: true })
           }),
           select({
@@ -923,10 +980,12 @@ export function createStudioUi({ store, engine, audio }) {
             { id: "rect", label: "Rectangle" }, { id: "rounded", label: "Rounded" }, { id: "oval", label: "Oval" },
             { id: "diamond", label: "Diamond" }, { id: "arch", label: "Arch" }
           ],
+          preview: (option) => shapeGlyph(option.id),
           onChange: (value) => change((target) => { target.shape = value; })
         }),
         select({
           label: "Material", value: current.kind, options: MATERIALS,
+          preview: (option) => listThumb(materialThumb(option.id)),
           onChange: (value) => change((target) => { target.kind = value; })
         })
       ) : null,
@@ -1094,6 +1153,7 @@ export function createStudioUi({ store, engine, audio }) {
       group("Endpapers", "The sheets pasted inside the boards \u2014 open the cover to see them.",
         select({
           label: "Pattern", value: current.details.endpaper.pattern, options: ENDPAPER_PATTERNS,
+          preview: (option) => listThumb(patternThumb(option.id)),
           onChange: (value) => {
             edit(() => { details().endpaper.pattern = value; }, ["details"]);
             engine.setReadingOpen(true);
@@ -1264,6 +1324,7 @@ export function createStudioUi({ store, engine, audio }) {
         page.image ? null : select({
           label: "Ornament", value: page.motif || "",
           options: [{ id: "", label: "Same as the cover" }, ...MOTIFS.slice(1)],
+          preview: (option) => listThumb(motifThumb(option.id || book().front.motif.key)),
           onChange: set("motif")
         }),
         textField({ label: "Caption", value: page.caption, placeholder: "Optional", onInput: set("caption", { later: true }) })
@@ -1431,11 +1492,11 @@ export function createStudioUi({ store, engine, audio }) {
       group("Typography", "Applies to every page in the book.",
         row(
           select({
-            label: "Text face", value: current.interior.bodyFont, options: textFonts,
+            label: "Text face", value: current.interior.bodyFont, options: textFonts, face: (option) => option.stack,
             onChange: (value) => edit(() => { interior().bodyFont = value; }, ["interior"])
           }),
           select({
-            label: "Heading face", value: current.interior.headingFont, options: FONTS,
+            label: "Heading face", value: current.interior.headingFont, options: FONTS, face: (option) => option.stack,
             onChange: (value) => edit(() => { interior().headingFont = value; }, ["interior"])
           })
         ),
@@ -1734,7 +1795,7 @@ export function createStudioUi({ store, engine, audio }) {
     if (!bookId) return;
     saveStatus.textContent = t("Saved");
     markStale();
-    renderTabs();
+    renderTabs(true);
     renderBody({ keepScroll: true });
     renderPageState(engine.pageState);
   }

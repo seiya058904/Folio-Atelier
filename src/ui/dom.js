@@ -64,12 +64,20 @@ export function toast(message, duration = 2600) {
   const element = document.querySelector("#toast");
   if (!element) return;
   element.hidden = true;
+  element.classList.remove("is-leaving");
   // Restart the entry animation for back-to-back messages.
   void element.offsetWidth;
   element.textContent = message;
   element.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { element.hidden = true; }, duration);
+  // It fades away rather than vanishing.
+  toastTimer = setTimeout(() => {
+    element.classList.add("is-leaving");
+    toastTimer = setTimeout(() => {
+      element.hidden = true;
+      element.classList.remove("is-leaving");
+    }, 220);
+  }, duration);
 }
 
 /** Promise-based confirmation using the shared <dialog>. */

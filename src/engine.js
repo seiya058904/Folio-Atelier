@@ -2064,6 +2064,7 @@ function resize() {
 const isTyping = (target) => target instanceof HTMLElement && (
   target.isContentEditable
   || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)
+  || target.getAttribute("role") === "combobox"
 );
 
 function onKeyDown(event) {

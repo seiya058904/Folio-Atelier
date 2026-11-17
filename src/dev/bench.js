@@ -114,6 +114,27 @@ export async function runBench({ store, engine }) {
     }
   }
 
+  // The custom select: click to the list on screen, and to its first preview.
+  await tab("cover");
+  const frameSelect = field("Frame")?.querySelector("button.select");
+  if (frameSelect) {
+    const started = performance.now();
+    frameSelect.click();
+    await raf();
+    const toFrame = performance.now() - started;
+    let preview = 0;
+    while (performance.now() - started < 2000) {
+      await raf();
+      if (document.querySelector(".select__list canvas:not(.is-pending)")) {
+        preview = performance.now() - started;
+        break;
+      }
+    }
+    result.select = { toFrame: round(toFrame), firstPreview: round(preview) };
+    document.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    await wait(400);
+  }
+
   // Slider that only changes foil material parameters.
   await tab("design");
   result.foilSlider = await drive(90, (index) => slide(field("Metal").querySelector("input"), index, 90));

@@ -4,7 +4,14 @@ Round 1 (Phases A–F: speed, motion, decoration, structure, rooms, sharing) is 
 
 This round has three sources: the user's review of the deployed build, the parts of round 1 left unfinished (C, D and E were partial), and our own code review. Work goes phase by phase in the order below. Each phase ends with its checks, a status note at the top of this file, and one scoped commit.
 
-**Status:** G done (2026-11-17); H next.
+**Status:** G and H done (2026-11-18); I next.
+
+- **H — done.**
+  - Every native `<select>` is replaced by `select()` in `controls.js`: a select-only combobox (keyboard, type-ahead, screen-reader roles) with an animated popover list. Typeface lists set each name in its own face; Frame shows each cover's corner; onlay Shape, Material, endpaper Pattern and page Ornament show their glyphs. It opens in 12 ms, with the first preview at 18 ms.
+  - Presses give in 90 ms and spring back. One underline slides between the studio tabs and one pill between segments. Toggles slide on a spring.
+  - Dialogs, the room panel and toasts now animate out as well as in.
+  - Every CSS duration is a token (`--duration-press … --duration-entrance`).
+  - Every `?bench` measure is unchanged or better.
 
 - **G — done.** Measured on an RTX 3070 laptop, `?quality=high`, 1440 × 900, Playwright:
   - First pass along a freshly loaded shelf of 14 books: frame p95 60.6 → 12 ms, worst frame 231 → 13 ms. Cause: each book paid for its painting, its shader variants (100–200 ms each) and its texture uploads on the frame it first scrolled into view. Books now get ready in idle time, nearest first (about 1 s for 14 books).
