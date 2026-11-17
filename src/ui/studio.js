@@ -20,6 +20,7 @@ import {
   getFoil
 } from "../data/presets.js";
 import { t } from "../i18n.js";
+import { whenIdle } from "../motion.js";
 import { perf } from "../perf.js";
 import { addImage, getImage } from "../state/images.js";
 import {
@@ -255,7 +256,11 @@ export function createStudioUi({ store, engine, audio }) {
         if (thumbCache.size > THUMB_CACHE_LIMIT) thumbCache.delete(thumbCache.keys().next().value);
       }
       entry.shown = key;
-      canvas.classList.remove("is-pending");
+      if (canvas.classList.contains("is-pending")) {
+        // The first picture fades in over its placeholder.
+        canvas.classList.remove("is-pending");
+        canvas.classList.add("is-fresh");
+      }
     }
     if (thumbQueue.length) requestAnimationFrame(pumpThumbs);
     else thumbPumping = false;
@@ -1300,9 +1305,34 @@ export function createStudioUi({ store, engine, audio }) {
   }
 
   function activate(pane) {
-    if (currentPane && currentPane !== pane) currentPane.element.hidden = true;
+    const entering = currentPane !== pane;
+    if (currentPane && entering) currentPane.element.hidden = true;
     pane.element.hidden = false;
     currentPane = pane;
+    if (!entering) return;
+    // A tab coming into view settles in group by group (CSS; cheap: opacity
+    // and transform only). A rebuild of the open tab does not replay it.
+    pane.element.classList.remove("is-entering");
+    void pane.element.offsetWidth;
+    pane.element.classList.add("is-entering");
+    clearTimeout(pane.enterTimer);
+    pane.enterTimer = setTimeout(() => pane.element.classList.remove("is-entering"), 640);
+    prefetchNextTab();
+  }
+
+  // While the reader looks at one tab, build the next one in a quiet moment
+  // so that it opens at once.
+  let prefetchQueued = false;
+  function prefetchNextTab() {
+    if (prefetchQueued) return;
+    prefetchQueued = true;
+    whenIdle(() => {
+      prefetchQueued = false;
+      if (!book() || panel.inert) return;
+      const index = TABS.findIndex((entry) => entry.id === tab);
+      const next = paneFor(TABS[(index + 1) % TABS.length].id);
+      if (next !== currentPane && next.stale) buildPane(next);
+    }, 2000);
   }
 
   // Where the caret was, described by the control's label, so that it can be
@@ -1360,6 +1390,7 @@ export function createStudioUi({ store, engine, audio }) {
   /* Reader bar                                                         */
   /* ---------------------------------------------------------------- */
 
+  let followQueued = false;
   function renderPageState(state) {
     previousPage.disabled = state.locked || state.spread === 0;
     nextPage.disabled = state.locked || state.spread >= state.spreads - 1;
@@ -1382,7 +1413,14 @@ export function createStudioUi({ store, engine, audio }) {
       const visible = [state.right?.source, state.left?.source].filter(Boolean);
       if (visible.length && !visible.includes(selectedPageId)) {
         selectedPageId = visible[0];
-        renderBody({ keepScroll: true });
+        // Rebuild after the turn has started, and once for a quick run of turns.
+        if (!followQueued) {
+          followQueued = true;
+          whenIdle(() => {
+            followQueued = false;
+            if (tab === "pages" && book()) renderBody({ keepScroll: true });
+          }, 240);
+        }
       }
     }
   }

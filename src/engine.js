@@ -19,6 +19,7 @@ import { createBookRig, createMesh, HIT_LAYER, PRINTED_LEAVES } from "./book/rig
 import { ensureFonts, onFontsLoaded } from "./data/fonts.js";
 import { detectQuality, lowerQuality } from "./scene/quality.js";
 import { t } from "./i18n.js";
+import { ease, stepSpring, whenIdle } from "./motion.js";
 import { perf } from "./perf.js";
 import { bookPalette, coverFontRuns } from "./state/schema.js";
 import { bindRenderer } from "./textures/gl.js";
@@ -88,6 +89,17 @@ let ambient = 1;
 let ambientClock = 0;
 let shadowHold = 4;
 let dustPoints = null;
+
+// Books on their way off the shelf (deleted): they lift and fade, then go.
+const leavingRigs = [];
+const LEAVE_SECONDS = 0.44;
+// The cover swings on a spring so that it overshoots a little and settles.
+const coverSpring = { value: 0, velocity: 0 };
+// The ribbon marker swings when the book is handled.
+const ribbonSway = { value: 0, velocity: 0 };
+// A pass of light over the foil when the stamping changes.
+let glintTime = 1;
+const GLINT_SECONDS = 0.6;
 
 // Edits are merged per book and painted once per frame.
 const pendingRepaints = new Map();
@@ -442,15 +454,22 @@ function buildRig(book) {
   return rig;
 }
 
-function addBook(book, index = bookRigs.length) {
+function addBook(book, index = bookRigs.length, { from = null } = {}) {
   const rig = buildRig(book);
   bookRigs.splice(index, 0, rig);
   rebuildHitTargets();
   shelfStage.add(rig.root);
   snapRigToShelfSlot(rig, index);
   paintRig(rig);
-  // A new binding settles onto the shelf from just above it.
-  if (!reducedMotion) {
+  const source = from ? rigFor(from) : null;
+  if (source && source !== rig && !reducedMotion) {
+    // A copy slides out from behind the book it was made from.
+    rig.root.position.copy(source.root.position);
+    rig.root.position.z -= 0.06;
+    rig.root.rotation.copy(source.root.rotation);
+    rig.root.scale.copy(source.root.scale);
+  } else if (!reducedMotion) {
+    // A new binding settles onto the shelf from just above it.
     rig.root.position.y += 0.62;
     rig.root.rotation.z += 0.16;
     rig.root.rotation.y -= 0.5;
@@ -468,7 +487,15 @@ function removeBook(id) {
   const [rig] = bookRigs.splice(index, 1);
   pendingRepaints.delete(rig);
   draftRigs.delete(rig);
-  rig.dispose();
+  rig.hit.visible = false;
+  if (reducedMotion || mode !== "hero" || !rig.root.visible) {
+    rig.dispose();
+  } else {
+    // It lifts off the shelf and fades; its neighbours close the gap.
+    rig.leaving = 0;
+    rig.leaveFrom = rig.root.position.y;
+    leavingRigs.push(rig);
+  }
   rebuildHitTargets();
   hoveredIndex = -1;
   const shifted = selectedIndex > index ? selectedIndex - 1 : selectedIndex;
@@ -509,7 +536,12 @@ function flushRepaints() {
     }
     if (books[selectedIndex] === rig.data) applySelectedTheme();
     if (rig !== activeBook) return;
-    if (entry.dirty.has("all") && mode === "detail" && !reducedMotion) rebindTime = 0;
+    if (entry.dirty.has("all") && mode === "detail" && !reducedMotion) {
+      rebindTime = 0;
+      kickRibbon(0.7);
+    }
+    // A change made with one click (not a drag) is answered by the foil.
+    if (!entry.draft && (has("foil") || has("front") || has("spine") || has("back"))) startGlint();
     // The pages borrow the cover ornament and the cloth colour.
     const motifKey = rig.data.front.motif.key;
     const motifChanged = motifKey !== rig.pageMotif;
@@ -532,6 +564,7 @@ function settleDrafts() {
     if (bookRigs.includes(rig) && rig.painted) rig.repaint();
   });
   draftRigs.clear();
+  startGlint();
   requestFrame();
 }
 
@@ -735,24 +768,43 @@ function settleLeaf(pivot, turned) {
  * leaf at the bottom of one pile is quietly moved under the other pile and
  * printed with the pages that are about to come into view.
  */
+// A recycled leaf lies hidden under a pile, so its print can wait for a quiet
+// moment instead of holding up the click that turned the page.
+let deferredLeaf = null;
+
+function printDeferredLeaf() {
+  const job = deferredLeaf;
+  if (!job) return;
+  deferredLeaf = null;
+  if (job.rig.leaves.includes(job.pivot) && bookRigs.includes(job.rig)) printLeaf(job.rig, job.pivot, job.leaf);
+}
+
+function deferLeafPrint(rig, pivot, leaf) {
+  printDeferredLeaf();
+  deferredLeaf = { rig, pivot, leaf };
+  whenIdle(printDeferredLeaf, 260);
+}
+
 function syncLeafWindow(rig, force = false) {
   const base = leafBaseFor(rig, currentSpread);
   const shift = base - rig.leafBase;
   if (!force && shift === 0) return;
   rig.leafBase = base;
+  // Anything still owed is printed before the leaves move again.
+  printDeferredLeaf();
 
   if (!force && shift === 1) {
     const [pivot] = rig.leaves.splice(0, 1);
     rig.leaves.splice(PRINTED_LEAVES - 1, 0, pivot);
     rig.assignLeafSlots();
     settleLeaf(pivot, false);
-    printLeaf(rig, pivot, base + PRINTED_LEAVES - 1);
+    deferLeafPrint(rig, pivot, base + PRINTED_LEAVES - 1);
   } else if (!force && shift === -1) {
     const [pivot] = rig.leaves.splice(PRINTED_LEAVES - 1, 1);
     rig.leaves.unshift(pivot);
     rig.assignLeafSlots();
     settleLeaf(pivot, true);
-    printLeaf(rig, pivot, base);
+    deferLeafPrint(rig, pivot, base);
   } else {
     rig.assignLeafSlots();
     for (let order = 0; order < PRINTED_LEAVES; order += 1) {
@@ -864,6 +916,7 @@ function setReadingOpen(open, shouldAnnounce = true) {
   canvas.classList.remove("has-page-hover", "has-closed-book-hover");
   emitPageState(false);
   pointerDirty = true;
+  kickRibbon(readingOpen ? -0.9 : 0.6);
 
   if (shouldAnnounce && activeBook) {
     announce(readingOpen
@@ -880,6 +933,7 @@ function turnPage(direction) {
   currentSpread = nextSpread;
   syncLeafWindow(activeBook);
   audio.playCue("page", { rate: direction > 0 ? 1 : 0.93 });
+  kickRibbon(direction * -0.35);
   emitPageState(true);
   requestFrame();
 }
@@ -917,12 +971,22 @@ function updatePaginatedBook(rig, delta, openAmount = 1) {
     : hoverCrack;
   const localSpread = currentSpread - rig.leafBase;
 
-  rig.frontPivot.rotation.y = damp(
-    rig.frontPivot.rotation.y,
-    coverTarget,
-    speed,
-    delta
-  );
+  if (mode !== "detail" || reducedMotion || pageDrag.active) {
+    // Under the hand, and in transit, the cover simply follows.
+    rig.frontPivot.rotation.y = damp(rig.frontPivot.rotation.y, coverTarget, speed, delta);
+    coverSpring.velocity = 0;
+  } else {
+    coverSpring.value = rig.frontPivot.rotation.y;
+    if (coverSpring.value !== coverTarget || coverSpring.velocity !== 0) {
+      if (stepSpring(coverSpring, coverTarget, 132, 15.5, delta)) motion = true;
+      // The board cannot pass through the block, nor fold back on the spine.
+      if (coverSpring.value > 0 || coverSpring.value < -Math.PI + 0.012) {
+        coverSpring.value = clamp(coverSpring.value, -Math.PI + 0.012, 0);
+        coverSpring.velocity = 0;
+      }
+      rig.frontPivot.rotation.y = coverSpring.value;
+    }
+  }
 
   rig.leaves.forEach((pagePivot, leafOrder) => {
     let pageTarget = 0;
@@ -1141,6 +1205,8 @@ function finishOpening() {
   experience.classList.remove("is-opening");
   emit("onMode", mode, activeBook.data);
   emitPageState(false);
+  coverSpring.velocity = 0;
+  kickRibbon(0.8);
   if (pendingView) {
     const view = pendingView;
     pendingView = null;
@@ -1208,6 +1274,11 @@ function finishClosing() {
   activeBook.contactShadow.visible = true;
   activeBook.clearLeaves();
   activeBook.setLeafShadows(false);
+  activeBook.swayRibbon(0);
+  activeBook.setGlint(0);
+  ribbonSway.value = 0;
+  ribbonSway.velocity = 0;
+  glintTime = 1;
   activeBook.motion.scale.setScalar(1);
   activeBook.setResolution(quality.shelf);
   controls.target.copy(shelfCameraTarget);
@@ -1300,6 +1371,7 @@ function frame(time) {
   flushRepaints();
   if (pointerDirty) updateHover();
   updateShelfLayout(delta, ambientClock);
+  updateLeaving(delta);
   updateTransition(delta);
   updateDust();
   const themeIsMoving = updateTheme(delta);
@@ -1316,6 +1388,8 @@ function frame(time) {
     }
     updatePaginatedBook(activeBook, delta, getDetailOpenAmount());
     updateRebind(delta);
+    updateRibbon(delta);
+    updateGlint(delta);
   }
 
   const shelfMoving = Math.abs(position - targetPosition) > 0.0005 || wheelIdle > 0;
@@ -1328,6 +1402,8 @@ function frame(time) {
     || viewTween.active
     || pageDrag.active
     || rebindTime < 1
+    || glintTime < 1
+    || leavingRigs.length > 0
     || lazyPaintPending
     || pendingRepaints.size > 0;
   if (active) activeUntil = frameStarted + 160;
@@ -1352,6 +1428,50 @@ function frame(time) {
 
   // Something inside the frame may already have asked for the next one.
   if (keepGoing && !rafId) rafId = requestAnimationFrame(frame);
+}
+
+function updateLeaving(delta) {
+  for (let index = leavingRigs.length - 1; index >= 0; index -= 1) {
+    const rig = leavingRigs[index];
+    rig.leaving = Math.min(1, rig.leaving + delta / LEAVE_SECONDS);
+    const lift = ease.outCubic(rig.leaving);
+    const fade = 1 - ease.smooth(Math.max(0, rig.leaving * 1.25 - 0.25));
+    rig.root.position.y = rig.leaveFrom + lift * 0.42;
+    rig.root.rotation.z -= delta * 0.22;
+    rig.opacity = fade;
+    rig.fadeMaterials.forEach((material) => { material.opacity = fade; });
+    rig.contactShadow.material.opacity = fade * 0.24;
+    motion = true;
+    if (rig.leaving >= 1) {
+      leavingRigs.splice(index, 1);
+      rig.dispose();
+    }
+  }
+}
+
+/** Set the ribbon swinging; `strength` is an angular kick. */
+function kickRibbon(strength) {
+  if (reducedMotion) return;
+  ribbonSway.velocity += strength;
+  requestFrame();
+}
+
+function updateRibbon(delta) {
+  if (!activeBook || (ribbonSway.value === 0 && ribbonSway.velocity === 0)) return;
+  if (stepSpring(ribbonSway, 0, 58, 6.4, delta, 0.002)) motion = true;
+  activeBook.swayRibbon(ribbonSway.value);
+}
+
+function startGlint() {
+  if (reducedMotion || mode !== "detail") return;
+  glintTime = 0;
+  requestFrame();
+}
+
+function updateGlint(delta) {
+  if (glintTime >= 1 || !activeBook) return;
+  glintTime = Math.min(1, glintTime + delta / GLINT_SECONDS);
+  activeBook.setGlint(ease.pulse(glintTime));
 }
 
 function updateRebind(delta) {
@@ -1755,9 +1875,21 @@ async function initialize(options) {
     geometries: renderer.info.memory.geometries
   }));
   renderFrame();
-  loading.hidden = true;
-  experience.classList.add("webgl-ready");
-  requestFrame();
+  // Keep the loading mark up until the covers in view have their real type
+  // (briefly: a slow font must not hold the room back), then fade it away.
+  const coverRuns = bookRigs.filter((rig) => rig.painted).flatMap((rig) => coverFontRuns(rig.data));
+  Promise.race([
+    ensureFonts(coverRuns),
+    new Promise((resolve) => setTimeout(resolve, 1400))
+  ]).then(() => {
+    bookRigs.forEach((rig) => { if (rig.painted) rig.repaint(); });
+    shadowHold = 3;
+    if (!suspended) renderFrame();
+    experience.classList.add("webgl-ready");
+    loading.classList.add("is-done");
+    setTimeout(() => { loading.hidden = true; }, reducedMotion ? 0 : 560);
+    requestFrame();
+  });
 
   woodTexturePromise.then((ready) => {
     if (!ready || suspended || !renderer) return;
@@ -2097,6 +2229,8 @@ function onPagePointerDown(event) {
 
   event.preventDefault();
   event.stopImmediatePropagation();
+  // Lifting a leaf can show the one beneath: make sure it is printed.
+  printDeferredLeaf();
   pageDrag.active = true;
   pageDrag.pointerId = event.pointerId;
   pageDrag.startX = event.clientX;

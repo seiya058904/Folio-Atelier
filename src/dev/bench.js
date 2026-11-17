@@ -122,7 +122,7 @@ export async function runBench({ store, engine }) {
   // Colour picker: repaints all three boards.
   const colour = field("Colour").querySelector("input[type=color]");
   result.materialColour = await drive(90, (index) => {
-    const value = Math.round(40 + 60 * Math.sin(index / 9)).toString(16).padStart(2, "0");
+    const value = Math.round(100 + 60 * Math.sin(index / 9)).toString(16).padStart(2, "0");
     colour.value = `#${value}3a6b`;
     colour.dispatchEvent(new Event("input", { bubbles: true }));
   });

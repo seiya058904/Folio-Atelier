@@ -551,7 +551,9 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
       material.iridescenceIOR = 1.9;
       material.iridescenceThicknessRange = [180, 620];
       if (iridescence > 0) material.emissiveIntensity *= 1 - iridescence * 0.7;
+      material.userData.rest = { emissive: material.emissiveIntensity, environment: material.envMapIntensity };
     });
+    if (glint > 0) setGlint(glint);
 
     const edge = spec.details.edge;
     const baked = edge.style === "sprinkled" || edge.style === "ombre";
@@ -723,6 +725,27 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     face.material.map = face.target.texture;
   }
 
+  const ribbonRest = ribbon.rotation.z;
+  const secondRibbonRest = secondRibbon.rotation.z;
+
+  /** Swing the ribbon markers by `angle` radians from where they hang. */
+  function swayRibbon(angle) {
+    ribbon.rotation.z = ribbonRest + angle;
+    secondRibbon.rotation.z = secondRibbonRest - angle * 0.8;
+  }
+
+  // A pass of light over the foil: 0 is the resting look, 1 the brightest.
+  let glint = 0;
+  function setGlint(value) {
+    glint = value;
+    [foilArt, spineFoilArt, backFoilArt].forEach((material) => {
+      const base = material.userData.rest;
+      if (!base) return;
+      material.emissiveIntensity = base.emissive * (1 + glint * 2.4);
+      material.envMapIntensity = base.environment * (1 + glint * 0.9);
+    });
+  }
+
   /** Turning leaves throw real shadows on the pages beneath (inspection only). */
   function setLeafShadows(enabled) {
     leaves.forEach((pivot) => pivot.userData.faces.forEach((face) => {
@@ -780,6 +803,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     setResolution,
     setLeafPage,
     setLeafShadows,
+    swayRibbon,
+    setGlint,
     clearLeaves,
     dispose
   };

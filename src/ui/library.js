@@ -174,10 +174,10 @@ export function createLibraryUi({ store, engine, audio }) {
   }
 
   /** Put a book on the shelf next to the current one and select it. */
-  function addToShelf(book, { open = false } = {}) {
+  function addToShelf(book, { open = false, from = null } = {}) {
     const index = store.books.length ? engine.selectedIndex + 1 : 0;
     store.add(book, index);
-    engine.addBook(book, index);
+    engine.addBook(book, index, { from });
     refresh();
     engine.select(index);
     renderSelection();
@@ -190,7 +190,7 @@ export function createLibraryUi({ store, engine, audio }) {
   function duplicateSelected() {
     const book = store.books[engine.selectedIndex];
     if (!book || engine.mode !== "hero") return;
-    const copy = addToShelf(duplicateBook(book));
+    const copy = addToShelf(duplicateBook(book), { from: book.id });
     toast(t("Made a copy: {title}", { title: copy.title }));
   }
 
