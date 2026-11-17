@@ -13,7 +13,7 @@ import {
   normalizeBook
 } from "../state/schema.js";
 import { pad, uid } from "../util.js";
-import { segmented } from "./controls.js";
+import { segmented, toggle } from "./controls.js";
 import { confirmDialog, downloadBlob, h, pickFile, toast } from "./dom.js";
 import { drawCoverThumb } from "./thumbs.js";
 
@@ -337,7 +337,13 @@ export function createLibraryUi({ store, engine, audio }) {
           { id: "golden", label: "Golden hour" }, { id: "night", label: "Night" }
         ],
         onChange: (value) => { engine.setRoom({ light: value }); saveRoom(); }
-      })
+      }),
+      toggle({
+        label: "Follow the book",
+        value: engine.room.follow,
+        onChange: (value) => { engine.setRoom({ follow: value }); saveRoom(); }
+      }),
+      h("p", { class: "room-panel__hint", text: t("When on, the walls and the light take their colours from the book in view.") })
     );
   }
 

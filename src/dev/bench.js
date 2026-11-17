@@ -193,6 +193,33 @@ export async function runBench({ store, engine }) {
   result.finalIdleFrames2s = await idle(2000);
   const info = perf.snapshot();
   result.renderer = { calls: info.calls, triangles: info.triangles, textures: info.textures, tier: info.tier, pixelRatio: info.pixelRatio };
+
+  // The shelf, last so the numbers above stay comparable: a library of 14,
+  // wheeled through end to end (cold: books paint as they arrive; warm), then
+  // stepped book by book as with the arrow keys.
+  engine.closeDetail();
+  await until(() => engine.mode === "hero");
+  await wait(900);
+  const [{ createBook }, { PRESETS }] = await Promise.all([import("../state/schema.js"), import("../data/presets.js")]);
+  for (let index = store.books.length; index < 14; index += 1) {
+    const book = createBook({ presetId: PRESETS[index % PRESETS.length].id, title: `Shelf ${index + 1}` });
+    store.add(book, store.books.length);
+    engine.addBook(book, store.books.length - 1);
+  }
+  engine.select(0);
+  await wait(1600);
+  const experience = document.querySelector("#experience");
+  const wheel = (deltaY) => experience.dispatchEvent(new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true }));
+  const sweep = (index) => wheel(index < 120 ? 48 : -48);
+  result.shelfWheelCold = await drive(240, sweep);
+  await wait(900);
+  result.shelfWheelWarm = await drive(240, sweep);
+  await wait(900);
+  result.shelfStep = await drive(200, (index) => {
+    if (index % 14 === 0) engine.navigate(index < 100 ? 1 : -1);
+  });
+  await wait(900);
+  result.shelfIdleFrames2s = result.shelfIdleFrames2s ?? await idle(2000);
   window.__bench = result;
   const out = document.createElement("pre");
   out.id = "bench-result";

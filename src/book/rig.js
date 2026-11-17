@@ -294,13 +294,13 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   let scale = resolution;
   const sized = (face, s = scale) => [FACE_SIZE[face].width * s, FACE_SIZE[face].height * s];
   const targets = {
-    front: createPaintTexture(...sized("front")),
+    front: createPaintTexture(...sized("front"), { opaque: true }),
     frontFoil: createPaintTexture(...sized("front")),
-    spine: createPaintTexture(...sized("spine")),
+    spine: createPaintTexture(...sized("spine"), { opaque: true }),
     spineFoil: createPaintTexture(...sized("spine")),
-    back: createPaintTexture(...sized("back")),
+    back: createPaintTexture(...sized("back"), { opaque: true }),
     backFoil: createPaintTexture(...sized("back")),
-    endpaper: createPaintTexture(384, 576)
+    endpaper: createPaintTexture(384, 576, { opaque: true })
   };
   const stampDepth = () => clamp(rig.data.stamp?.depth ?? 0.5, 0, 1);
   const stampSign = () => (rig.data.stamp?.relief === "deboss" ? -1 : 1);
@@ -311,7 +311,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   const reliefTarget = (face, wanted) => {
     const key = `${face}Relief`;
     const [width, height] = sized(face, wanted * 0.5);
-    if (!targets[key]) targets[key] = createPaintTexture(width, height, { color: false, anisotropy: 4 });
+    if (!targets[key]) targets[key] = createPaintTexture(width, height, { color: false, anisotropy: 4, opaque: true });
     else targets[key].resize(width, height);
     return targets[key];
   };
@@ -462,13 +462,48 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     bandMaterial.color.set(structure.band?.color || "#1d1813");
     penLoop.visible = Boolean(structure.penLoop?.show);
     penLoopMaterial.color.set(structure.penLoop?.color || "#1d1813");
-    updateBand();
+    updateBand(1, { open: frontPivot.rotation.y < -0.02 });
   }
 
-  /** The band is slipped off as soon as the cover starts to open. */
-  function updateBand() {
-    const closed = frontPivot.rotation.y > -0.02;
-    bandParts.forEach((part) => { part.visible = Boolean(part.userData.wanted) && closed; });
+  // `slide` runs 0 (on the book) to 1 (slipped off past the fore-edge);
+  // `tug` is a small elastic pull towards the fore-edge under the pointer.
+  const bandState = { slide: 0, tug: 0, tugVelocity: 0 };
+  const BAND_SLIDE_SECONDS = 0.3;
+  const BAND_SLIDE_DISTANCE = d.width * 0.24;
+
+  /**
+   * Ease the band towards its place: slipped off when `open`, tugged when
+   * `tug`. Returns true while it is still moving.
+   */
+  function updateBand(delta = 1, { open = false, tug = false } = {}) {
+    const wanted = Boolean(bandParts[0].userData.wanted);
+    const target = open ? 1 : 0;
+    const step = delta / BAND_SLIDE_SECONDS;
+    bandState.slide = target > bandState.slide
+      ? Math.min(target, bandState.slide + step)
+      : Math.max(target, bandState.slide - step);
+    // A lightly damped spring, so the tug gives a little and springs back.
+    const tugTarget = tug && !open ? 1 : 0;
+    const dt = Math.min(delta, 0.034);
+    bandState.tugVelocity += ((tugTarget - bandState.tug) * 260 - bandState.tugVelocity * 18) * dt;
+    bandState.tug += bandState.tugVelocity * dt;
+    const tugMoving = Math.abs(tugTarget - bandState.tug) > 0.002 || Math.abs(bandState.tugVelocity) > 0.02;
+    if (!tugMoving) {
+      bandState.tug = tugTarget;
+      bandState.tugVelocity = 0;
+    }
+    const eased = bandState.slide * bandState.slide * (3 - 2 * bandState.slide);
+    const shift = eased * BAND_SLIDE_DISTANCE + bandState.tug * 0.012;
+    bandFront.position.x = bandX + shift;
+    bandBack.position.x = bandX + shift;
+    band.position.x = shift;
+    // The strips stand a hair proud of the boards when pulled.
+    bandFront.position.z = d.board * 0.5 + 0.0028 + bandState.tug * 0.003;
+    const fade = 1 - clamp((eased - 0.3) / 0.7, 0, 1);
+    bandMaterial.opacity = rig.opacity * fade;
+    const shown = wanted && bandState.slide < 1;
+    bandParts.forEach((part) => { part.visible = shown; });
+    return wanted && (bandState.slide !== target || tugMoving);
   }
 
   /* ----- leaves ----- */
@@ -767,6 +802,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     const reliefLayer = changed.relief && !draft ? reliefTarget(face, wanted) : null;
     if (changed.relief) state.reliefStale = !reliefLayer;
     setFastGrain(wanted < scale);
+    paintedFaces += 1;
     try {
       perf.paint(face, () => PAINTERS[face](rig.data, base, foil, onAsset, changed, reliefLayer));
     } finally {
@@ -800,9 +836,17 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
    * (turned away from the camera) not at all.
    * Returns true while any board is still waiting for its full-size pass.
    */
-  function repaint({ force = false, draft = false, hidden = null } = {}) {
+  let paintedFaces = 0;
+
+  /**
+   * `budget` limits how many boards are painted in this call (the rest report
+   * as pending), so a full-size pass can be spread over several frames;
+   * boards facing the camera go first.
+   */
+  function repaint({ force = false, draft = false, hidden = null, budget = Infinity } = {}) {
     rig.painted = true;
     const faces = ["front", "spine", "back"];
+    if (budget < faces.length && hidden) faces.sort((a, b) => Number(Boolean(hidden[a])) - Number(Boolean(hidden[b])));
     const signatures = faces.map((face) => faceSignatures(rig.data, face));
     // Several boards at once (a colour, a material) get a smaller draft.
     const busy = signatures.filter((signature, index) => {
@@ -812,7 +856,15 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     }).length;
     const draftScale = busy > 1 ? DRAFT_SCALE_MANY : DRAFT_SCALE;
     let pending = false;
+    paintedFaces = 0;
     faces.forEach((face, index) => {
+      if (paintedFaces >= budget) {
+        const state = shown[face];
+        const signature = signatures[index];
+        if (force || state.scale !== scale || state.base !== signature.base || state.foil !== signature.foil
+          || Boolean(state.reliefStale) || (reliefOn() && state.relief !== signature.relief)) pending = true;
+        return;
+      }
       if (repaintFace(face, signatures[index], { force, draft, draftScale, hidden: hidden?.[face] })) pending = true;
     });
     if (repaintEndpaper(force, draft && hidden?.endpaper)) pending = true;
@@ -842,11 +894,59 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     return result;
   }
 
-  /** Change the texture resolution of the painted boards. */
-  function setResolution(next) {
-    if (next === scale) return;
+  /**
+   * Stand-ins for every shader variant the boards and foils can switch to
+   * (sheen and clearcoat on the boards; clearcoat, anisotropy and iridescence
+   * on the foil). Three compiles a new program, synchronously, the first time
+   * a material turns one of these on or off; compiling the stand-ins ahead
+   * (in parallel, in idle time) keeps that off the frame of the edit.
+   */
+  function shaderVariants() {
+    const group = new THREE.Group();
+    const variant = (source, mesh, set) => {
+      // userData holds textures, which a clone would serialise.
+      const saved = source.userData;
+      source.userData = {};
+      const material = source.clone();
+      source.userData = saved;
+      if (saved.relief) {
+        material.userData.relief = saved.relief;
+        material.onBeforeCompile = source.onBeforeCompile;
+      }
+      set(material);
+      const stand = new THREE.Mesh(mesh.geometry, material);
+      stand.castShadow = mesh.castShadow;
+      stand.receiveShadow = mesh.receiveShadow;
+      group.add(stand);
+    };
+    const both = [0, 1];
+    [[cloth, frontCover], [coverArt, coverPlane], [backArt, backPlane], [spineArt, spine]].forEach(([material, mesh]) => {
+      both.forEach((sheen) => both.forEach((coat) => variant(material, mesh, (target) => {
+        target.sheen = sheen * 0.4;
+        target.clearcoat = coat * 0.2;
+      })));
+    });
+    [[foilArt, foilPlane], [backFoilArt, backFoilPlane], [spineFoilArt, spineFoil]].forEach(([material, mesh]) => {
+      both.forEach((coat) => both.forEach((grain) => both.forEach((film) => variant(material, mesh, (target) => {
+        target.clearcoat = coat * 0.18;
+        target.anisotropy = grain * 0.34;
+        target.iridescence = film * 0.5;
+      }))));
+    });
+    return group;
+  }
+
+  /**
+   * Change the texture resolution of the painted boards. With `defer`, the
+   * boards keep their current pictures until `repaint` reaches them (the
+   * engine spreads that over several frames).
+   */
+  function setResolution(next, { defer = false } = {}) {
+    if (next === scale) return false;
     scale = next;
+    if (defer) return rig.painted;
     if (rig.painted) repaint();
+    return false;
   }
 
   /** Print a page on one side of a leaf (or leave it blank when `entry` is null). */
@@ -859,7 +959,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     const width = Math.round(PAGE_SIZE.width * pageScale);
     const height = Math.round(PAGE_SIZE.height * pageScale);
     const signature = `${width}x${height}|${index}|${epoch}|${pageSignature(rig.data, entry)}`;
-    if (!face.target) face.target = createPaintTexture(width, height);
+    if (!face.target) face.target = createPaintTexture(width, height, { opaque: true });
     else face.target.resize(width, height);
     if (face.signature !== signature) {
       perf.paint("page", () => paintPage(rig.data, entry, index, face.target, onAsset));
@@ -943,11 +1043,15 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     applyLook,
     repaint,
     hiddenFaces,
+    /** Boards painted by the last `repaint` call. */
+    get paintedFaces() { return paintedFaces; },
+    shaderVariants,
     setResolution,
     setLeafPage,
     setLeafShadows,
     swayRibbon,
     updateBand,
+    get hasBand() { return Boolean(rig.data.structure?.band?.show); },
     setGlint,
     clearLeaves,
     dispose

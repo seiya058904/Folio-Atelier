@@ -1456,10 +1456,11 @@ p {
 }
 
 .sheet__form {
+  --sheet-pad: clamp(22px, 3.4vw, 38px);
   display: grid;
   max-height: inherit;
   gap: 22px;
-  padding: clamp(22px, 3.4vw, 38px);
+  padding: var(--sheet-pad);
   overflow-y: auto;
 }
 
@@ -1519,6 +1520,17 @@ p {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
+}
+
+/* On a short window the bindings scroll; the way out stays in reach. */
+#new-book-form > .sheet__footer {
+  position: sticky;
+  bottom: calc(-1 * var(--sheet-pad));
+  z-index: 1;
+  margin: 0 calc(-1 * var(--sheet-pad)) calc(-1 * var(--sheet-pad));
+  padding: 14px var(--sheet-pad) var(--sheet-pad);
+  border-top: 1px solid var(--hairline);
+  background: var(--paper-pale);
 }
 
 /* ---------- toast, loading, fallback ---------- */
@@ -2038,6 +2050,13 @@ canvas.is-fresh {
   box-shadow: 0 18px 44px rgba(20, 12, 6, 0.22);
   animation: pane-in var(--duration-base) var(--ease-out) both;
   backdrop-filter: blur(8px);
+}
+
+.room-panel__hint {
+  margin: -6px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .room-panel[hidden] {

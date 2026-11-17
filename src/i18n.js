@@ -200,6 +200,7 @@ const ZH = {
   "Saved {name}": "已保存 {name}", "That did not work. Please try again.": "没有成功，请再试一次。",
   "Export all": "全部导出", "Exported {count} books.": "已导出 {count} 本书。", "Imported {count} books.": "已导入 {count} 本书。",
   "Room": "房间", "Shelf": "书架", "Walnut": "胡桃木", "Oak": "橡木", "Painted": "白漆", "Steel": "黑钢", "Ledge": "浮板",
+  "Follow the book": "随书配色", "When on, the walls and the light take their colours from the book in view.": "打开后，墙面和光线会采用眼前这本书的配色。",
   "Lighting": "光线", "Studio": "工作室", "Morning": "清晨", "Golden hour": "黄昏金光", "Night": "夜晚台灯",
   "Format": "开本", "The size of the book and the thickness of its text block.": "书的尺寸和书芯的厚度。",
   "Trim size": "成品尺寸", "Pocket": "口袋本", "Fits a coat pocket": "能放进外套口袋", "Crown octavo": "小开本", "A slim novel": "轻薄的小说",

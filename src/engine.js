@@ -400,7 +400,9 @@ function applyTheme(palette, accent) {
 /* The room: shelf style and light, chosen for the whole library       */
 /* ------------------------------------------------------------------ */
 
-// Each book still tints the room with its palette; these settle on top.
+// The room is the reader's: its colours come from these settings, not from the
+// book in view. ("Follow the book" brings back the original behaviour, where
+// each book's palette tints the walls, the floor and the light.)
 const SHELF_STYLES = {
   walnut: {},
   oak: { tint: "#b98a5b", darkTint: "#8a6440", mix: 0.72 },
@@ -417,11 +419,23 @@ const LIGHT_PRESETS = {
   // No light is added: a new light would recompile every material.
   night: {
     key: "#ffbf73", mix: 0.85, wall: "#1d1b24", wallMix: 0.72,
+    // The interface goes dark with the room, so its words stay legible.
+    palette: {
+      paper: "#2a272e", paperDeep: "#1f1d23", paperPale: "#3a3640", ink: "#f0e8db", inkSoft: "#bdb1a1",
+      wall: "#2a272e"
+    },
     intensity: { key: 0.3, hemisphere: 0.28, fill: 0.2, softKey: 1.25, backFill: 0.3, rim: 0.7, spineRake: 0.8, pageRake: 0.7 }
   }
 };
 
-let room = { shelf: "walnut", light: "studio" };
+let room = { shelf: "walnut", light: "studio", follow: false };
+const ROOM_ACCENT = "#a8643a";
+let studioAccent = "";
+
+/** The room's own palette: the paper studio, as lit by the chosen light. */
+function roomPalette() {
+  return { ...ATELIER_PALETTE, ...(LIGHT_PRESETS[room.light]?.palette || {}) };
+}
 const roomFrame = [];
 
 /** Bend the palette targets towards the chosen shelf and light. */
@@ -476,7 +490,8 @@ function applyRoomSettings() {
 function setRoom(next = {}) {
   room = {
     shelf: SHELF_STYLES[next.shelf] ? next.shelf : room.shelf,
-    light: LIGHT_PRESETS[next.light] ? next.light : room.light
+    light: LIGHT_PRESETS[next.light] ? next.light : room.light,
+    follow: typeof next.follow === "boolean" ? next.follow : room.follow
   };
   if (!scene) return;
   applyRoomSettings();
@@ -487,8 +502,16 @@ function setRoom(next = {}) {
 
 function applySelectedTheme() {
   const book = books[selectedIndex];
-  if (book) applyTheme(bookPalette(book), book.foil.color);
-  else applyTheme(ATELIER_PALETTE, "#a8643a");
+  if (room.follow && book) applyTheme(bookPalette(book), book.foil.color);
+  else applyTheme(roomPalette(), ROOM_ACCENT);
+  // The book still lends its foil to the studio's accents. Set on the panel
+  // alone, so only the panel is restyled.
+  const accent = book && !room.follow ? book.foil.color : "";
+  if (accent !== studioAccent) {
+    studioAccent = accent;
+    if (accent) studioPanel.style.setProperty("--accent", accent);
+    else studioPanel.style.removeProperty("--accent");
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -518,9 +541,11 @@ let fontsTimer = 0;
 function onFontsArrived() {
   clearTimeout(fontsTimer);
   fontsTimer = setTimeout(() => {
+    // Through the board-by-board pass: a font often lands mid-flight.
     bookRigs.forEach((rig) => {
-      if (rig.painted) rig.repaint();
+      if (rig.painted) draftRigs.add(rig);
     });
+    if (draftRigs.size) scheduleSettle(0);
     forgetMeasurements();
     pageEpoch += 1;
     if (activeBook) paginateActive();
@@ -534,6 +559,124 @@ function paintRig(rig) {
   rig.repaint();
   requestCoverFonts(rig);
   shadowHold = 3;
+}
+
+/* ----- warm-up: books near the view get ready before they arrive ----- */
+
+// A book scrolling into view for the first time used to pay for everything in
+// that frame: painting its boards, compiling the shader variants its
+// materials need (100-200 ms each on ANGLE) and uploading its textures. In
+// idle time, every book does it ahead, nearest first, one small step at a
+// time. (A scroll along the shelf paints them all anyway.)
+const WARM_RANGE = Infinity;
+let warmHandle = 0;
+
+function rigTextures(rig) {
+  const found = new Set();
+  rig.root.traverse((object) => {
+    const list = Array.isArray(object.material) ? object.material : [object.material];
+    list.forEach((material) => {
+      if (!material) return;
+      for (const key in material) {
+        const value = material[key];
+        if (value && value.isTexture) found.add(value);
+      }
+      const relief = material.userData?.relief?.map?.value;
+      if (relief?.isTexture) found.add(relief);
+    });
+  });
+  return found;
+}
+
+function scheduleWarmup() {
+  if (warmHandle || !renderer || suspended) return;
+  warmHandle = whenIdle(warmStep, 2400);
+}
+
+function warmStep(deadline) {
+  warmHandle = 0;
+  // Only on the shelf: in the studio every quiet moment belongs to the open
+  // book (returning to the shelf starts it again).
+  if (!renderer || suspended || mode !== "hero") return;
+  // Painting a book takes a few tens of milliseconds: only while the shelf is
+  // still (an ambient frame may wait, nobody sees it) or when it is overdue.
+  const still = position === targetPosition && wheelIdle <= 0;
+  const roomy = deadline.didTimeout || (still && deadline.timeRemaining() > 2);
+  const near = bookRigs
+    .map((rig, index) => [Math.abs(index - targetPosition), rig])
+    .filter(([distance]) => distance <= WARM_RANGE)
+    .sort((a, b) => a[0] - b[0]);
+  for (const [, rig] of near) {
+    if (!rig.painted) {
+      if (!roomy) continue;
+      paintRig(rig);
+      scheduleWarmup();
+      return;
+    }
+    if (!rig.compiled) {
+      rig.compiled = true;
+      // Parallel where the browser can (KHR_parallel_shader_compile). The
+      // program depends on where it draws (tone mapping and colour space are
+      // off inside the composer), so compile against the same target.
+      compileQuietly(rig.root);
+      scheduleWarmup();
+      return;
+    }
+    let uploaded = 0;
+    for (const texture of rigTextures(rig)) {
+      if (texture.version > 0 && renderer.properties.get(texture).__version !== texture.version) {
+        renderer.initTexture(texture);
+        uploaded += 1;
+        if (uploaded >= 2) break;
+      }
+    }
+    if (uploaded) {
+      scheduleWarmup();
+      return;
+    }
+  }
+  if (!roomy && near.some(([, rig]) => !rig.painted)) scheduleWarmup();
+}
+
+/** Compile an object's programs in parallel, for the target the scene draws into. */
+function compileQuietly(object) {
+  const previous = renderer.getRenderTarget();
+  renderer.setRenderTarget(composer ? composer.readBuffer : null);
+  const done = renderer.compileAsync(object, camera, scene).catch(() => {});
+  renderer.setRenderTarget(previous);
+  return done;
+}
+
+/* ----- shader variants for the studio ----- */
+
+// Edits in the studio can switch a material feature on or off (a silk cloth
+// has sheen, a holographic foil iridescence), and Three then compiles a new
+// program in the middle of the frame. Once per visit, the open book's
+// stand-ins for every variant are compiled in idle time, a few at a time.
+let variantsWarm = false;
+
+function prewarmVariants() {
+  if (variantsWarm || !activeBook || !renderer || mode !== "detail") return;
+  variantsWarm = true;
+  const stands = [...activeBook.shaderVariants().children];
+  const release = (batch) => batch.forEach((stand) => {
+    // Keep the material (it holds the program); let go of the book's canvases.
+    for (const key in stand.material) {
+      if (stand.material[key]?.isTexture) stand.material[key] = null;
+    }
+    stand.material.userData = {};
+  });
+  const next = () => {
+    if (!stands.length || !renderer) return;
+    const batch = stands.splice(0, 4);
+    const group = new THREE.Group();
+    batch.forEach((stand) => group.add(stand));
+    compileQuietly(group).then(() => {
+      release(batch);
+      whenIdle(next, 1500);
+    });
+  };
+  whenIdle(next, 1500);
 }
 
 function buildRig(book) {
@@ -620,11 +763,17 @@ function refreshBook(book, dirty = ["all"], { interactive = false } = {}) {
 
 function flushRepaints() {
   if (!pendingRepaints.size) return;
+  let streaming = false;
   pendingRepaints.forEach((entry, rig) => {
+    if (entry.draft) streaming = true;
     if (!bookRigs.includes(rig)) return;
     const has = (key) => entry.dirty.has("all") || entry.dirty.has(key);
     if (rig.painted) {
-      const draft = entry.draft && rig === activeBook;
+      // An edit that repaints the whole book at once (a preset, a material)
+      // is shown as a draft straight away and sharpened board by board, so
+      // the click is answered in the next frame instead of after a pause.
+      const wholeBook = entry.dirty.has("all") || entry.dirty.has("material");
+      const draft = (entry.draft || wholeBook) && rig === activeBook;
       const hidden = draft ? rig.hiddenFaces(camera) : null;
       // The endpapers are inside the boards: out of sight while the book is shut.
       if (hidden) hidden.endpaper = !readingOpen;
@@ -637,8 +786,10 @@ function flushRepaints() {
       rebindTime = 0;
       kickRibbon(0.7);
     }
-    // A change made with one click (not a drag) is answered by the foil.
-    if (!entry.draft && (has("foil") || has("front") || has("spine") || has("back"))) startGlint();
+    // A change made with one click (not a drag) is answered by the foil;
+    // a whole-book change glints once it is sharp.
+    const sharpLater = entry.dirty.has("all") || entry.dirty.has("material");
+    if (!entry.draft && !sharpLater && (has("foil") || has("front") || has("spine") || has("back"))) startGlint();
     // The pages borrow the cover ornament and the cloth colour.
     const motifKey = rig.data.front.motif.key;
     const motifChanged = motifKey !== rig.pageMotif;
@@ -649,20 +800,56 @@ function flushRepaints() {
   });
   pendingRepaints.clear();
   shadowHold = 3;
-  if (draftRigs.size) {
-    clearTimeout(settleTimer);
-    settleTimer = setTimeout(settleDrafts, DRAFT_SETTLE_MS);
-  }
+  // A drag sharpens once the hand rests; a single click right after its
+  // draft has been seen.
+  if (draftRigs.size) scheduleSettle(streaming ? DRAFT_SETTLE_MS : 50);
 }
 
-/** The hand has rested: repaint draft boards at full resolution. */
+let settleEpoch = 0;
+
+/** Start (or restart) the board-by-board full-size pass after `delay` ms. */
+function scheduleSettle(delay) {
+  clearTimeout(settleTimer);
+  settleEpoch += 1;
+  settleTimer = setTimeout(settleDrafts, delay);
+}
+
+/**
+ * The hand has rested: repaint draft boards at full resolution, one board per
+ * frame across all books (each is tens of milliseconds at studio resolution),
+ * the open book and the boards facing the camera first. Nothing is painted
+ * while a book flies between the shelf and the studio.
+ */
 function settleDrafts() {
-  draftRigs.forEach((rig) => {
-    if (bookRigs.includes(rig) && rig.painted) rig.repaint();
-  });
-  draftRigs.clear();
-  startGlint();
+  if (mode === "opening" || mode === "closing") {
+    settleTimer = setTimeout(settleDrafts, 120);
+    return;
+  }
+  const order = [...draftRigs].sort((a, b) => Number(b === activeBook) - Number(a === activeBook));
+  let painted = 0;
+  for (const rig of order) {
+    if (painted) break;
+    if (!bookRigs.includes(rig) || !rig.painted) {
+      draftRigs.delete(rig);
+      continue;
+    }
+    const hidden = rig === activeBook ? rig.hiddenFaces(camera) : null;
+    const more = rig.repaint({ budget: 1, hidden });
+    painted += rig.paintedFaces;
+    if (!more) draftRigs.delete(rig);
+  }
+  shadowHold = Math.max(shadowHold, 2);
   requestFrame();
+  if (draftRigs.size) {
+    // Let this board reach the screen before painting the next.
+    const epoch = settleEpoch;
+    requestAnimationFrame(() => {
+      if (epoch !== settleEpoch) return;
+      settleTimer = setTimeout(settleDrafts, 0);
+    });
+    return;
+  }
+  startGlint();
 }
 
 /* ------------------------------------------------------------------ */
@@ -676,6 +863,7 @@ function updateSelection(index, shouldAnnounce = false) {
   const previousIndex = selectedIndex;
   selectedIndex = nextIndex;
   applySelectedTheme();
+  scheduleWarmup();
   if (previousIndex >= 0 && nextIndex >= 0 && previousIndex !== nextIndex) {
     audio.playCue("navigate");
   }
@@ -766,8 +954,11 @@ function updateShelfLayout(delta, elapsed) {
       if (wheelIdle <= 0) targetPosition = clamp(Math.round(targetPosition), 0, limit);
     }
 
+    // The selection follows where the shelf is going, not where it is on the
+    // way: a jump across several books (or a slow, throttled window) must not
+    // select each book it passes, nor fall back to the one it left.
     if (books.length) {
-      const nearest = clamp(Math.round(position), 0, limit);
+      const nearest = clamp(Math.round(targetPosition), 0, limit);
       if (nearest !== selectedIndex) updateSelection(nearest, false);
     }
   }
@@ -800,6 +991,7 @@ function updateShelfLayout(delta, elapsed) {
     rig.contactShadow.material.opacity = rig.opacity * 0.24;
     rig.hit.visible = rig.opacity > 0.12;
     if (!rig.root.visible) return;
+    if (rig.hasBand && rig.updateBand(delta, { tug: hoveredIndex === index && !reducedMotion })) motion = true;
     if (!rig.painted) {
       // Books are painted as they come into view, at most two a frame.
       if (paintBudget > 0) {
@@ -812,7 +1004,7 @@ function updateShelfLayout(delta, elapsed) {
 
     const isHovered = hoveredIndex === index && mode === "hero";
     const hoverPreview = isHovered && !reducedMotion;
-    const hoverAngle = hoverPreview ? -0.085 : 0;
+    const hoverAngle = hoverPreview && !rig.hasBand ? -0.085 : 0;
     const settle = reducedMotion ? 1000 : 13;
     rig.frontPivot.rotation.y = damp(rig.frontPivot.rotation.y, hoverAngle, settle, delta);
     rig.pagePivots.forEach((pagePivot) => {
@@ -882,12 +1074,51 @@ function deferLeafPrint(rig, pivot, leaf) {
   whenIdle(printDeferredLeaf, 260);
 }
 
+// While a book flies in from the shelf it is shut and its pages cannot be
+// seen, so printing them (tens of milliseconds a leaf, plus the upload) waits
+// for its arrival and then goes one leaf per quiet moment. Opening the book,
+// or turning to a page, prints whatever is still owed at once.
+const leafQueue = [];
+let leafQueueHandle = 0;
+
+function flushLeafQueue() {
+  while (leafQueue.length) {
+    const { rig, pivot, leaf } = leafQueue.shift();
+    if (rig.leaves.includes(pivot) && bookRigs.includes(rig)) printLeaf(rig, pivot, leaf);
+  }
+}
+
+function drainLeafQueue() {
+  leafQueueHandle = 0;
+  const job = leafQueue.shift();
+  if (!job) return;
+  if (job.rig.leaves.includes(job.pivot) && bookRigs.includes(job.rig)) printLeaf(job.rig, job.pivot, job.leaf);
+  shadowHold = Math.max(shadowHold, 1);
+  requestFrame();
+  if (leafQueue.length) leafQueueHandle = whenIdle(drainLeafQueue, 400);
+}
+
+/** Queue the whole leaf window of `rig` for printing (see above). */
+function queueLeafWindow(rig) {
+  leafQueue.length = 0;
+  rig.leafBase = leafBaseFor(rig, currentSpread);
+  rig.assignLeafSlots();
+  for (let order = 0; order < PRINTED_LEAVES; order += 1) {
+    leafQueue.push({ rig, pivot: rig.leaves[order], leaf: rig.leafBase + order });
+  }
+}
+
+function startLeafQueue() {
+  if (leafQueue.length && !leafQueueHandle) leafQueueHandle = whenIdle(drainLeafQueue, 400);
+}
+
 function syncLeafWindow(rig, force = false) {
+  // Anything still owed is printed before the leaves move.
+  flushLeafQueue();
   const base = leafBaseFor(rig, currentSpread);
   const shift = base - rig.leafBase;
   if (!force && shift === 0) return;
   rig.leafBase = base;
-  // Anything still owed is printed before the leaves move again.
   printDeferredLeaf();
 
   if (!force && shift === 1) {
@@ -919,7 +1150,8 @@ function paginateActive() {
   perf.mark("paginate", paginateCost);
   rig.leafCount = Math.max(1, Math.ceil(rig.flat.length / 2));
   currentSpread = clamp(currentSpread, 0, rig.leafCount);
-  syncLeafWindow(rig, true);
+  if (mode === "opening") queueLeafWindow(rig);
+  else syncLeafWindow(rig, true);
   perf.mark("pages", performance.now() - started);
   emitPageState(false);
   emit("onPagination", rig.flat);
@@ -1003,6 +1235,7 @@ function emitPageState(shouldAnnounce = false) {
 function setReadingOpen(open, shouldAnnounce = true) {
   if (mode !== "detail" || readingOpen === open) return;
   cancelPageDrag();
+  flushLeafQueue();
   if (open) flushPageRefresh();
   readingOpen = open;
   audio.playCue(readingOpen ? "open" : "close");
@@ -1057,12 +1290,9 @@ function goToPage(pageIndex) {
 function updatePaginatedBook(rig, delta, openAmount = 1) {
   const amount = clamp(openAmount, 0, 1);
   const speed = reducedMotion ? 1000 : 10.5;
-  const hoverCrack = (
-    mode === "detail"
-    && !readingOpen
-    && detailBookHovered
-    && !reducedMotion
-  ) ? -0.16 : 0;
+  const hovering = mode === "detail" && !readingOpen && detailBookHovered && !reducedMotion;
+  // A banded book does not crack open under the pointer: the band tugs instead.
+  const hoverCrack = hovering && !rig.hasBand ? -0.16 : 0;
   const coverTarget = amount > 0
     ? (-Math.PI + 0.055) * amount
     : hoverCrack;
@@ -1084,7 +1314,9 @@ function updatePaginatedBook(rig, delta, openAmount = 1) {
       rig.frontPivot.rotation.y = coverSpring.value;
     }
   }
-  rig.updateBand();
+  // The band slips off the fore-edge as the cover is opened, and back on.
+  const bandOpen = coverTarget < -0.02 || rig.frontPivot.rotation.y < -0.02;
+  if (rig.updateBand(reducedMotion ? 1 : delta, { open: bandOpen, tug: hovering })) motion = true;
 
   rig.leaves.forEach((pagePivot, leafOrder) => {
     let pageTarget = 0;
@@ -1255,7 +1487,10 @@ function openDetail(origin = null) {
   activeBook.fadeMaterials.forEach((material) => { material.opacity = 1; });
   activeBook.leafBase = 0;
   if (!activeBook.painted) paintRig(activeBook);
-  activeBook.setResolution(quality.detail);
+  // The boards are sharpened to studio resolution once the book has arrived
+  // (board by board, see finishOpening): painting them now would stall the
+  // flight from the shelf.
+  if (activeBook.setResolution(quality.detail, { defer: true })) draftRigs.add(activeBook);
   activeBook.setLeafShadows(quality.leafShadows);
   preparePages();
   experience.classList.add("mode-detail", "is-opening");
@@ -1305,6 +1540,9 @@ function finishOpening() {
   emitPageState(false);
   coverSpring.velocity = 0;
   kickRibbon(0.8);
+  if (draftRigs.size) scheduleSettle(0);
+  startLeafQueue();
+  prewarmVariants();
   if (pendingView) {
     const view = pendingView;
     pendingView = null;
@@ -1317,6 +1555,8 @@ function closeDetail() {
   audio.playCue(readingOpen ? "close" : "select", {
     gain: readingOpen ? 1 : 0.72
   });
+  // Leaves not yet printed stay as they are: the next visit prints afresh.
+  leafQueue.length = 0;
   cancelPageDrag();
   resetDetailPress();
   clearTimeout(pageRefreshTimer);
@@ -1385,6 +1625,7 @@ function finishClosing() {
   const book = activeBook.data;
   activeBook = null;
   emit("onMode", mode, book);
+  scheduleWarmup();
   announce(t("{title} returned to the shelf.", { title: book.title }));
   requestAnimationFrame(() => focusReturnTarget?.focus?.({ preventScroll: true }));
 }
@@ -1649,11 +1890,36 @@ function captureTurntable({ frames = 36, size = 360 } = {}) {
   if (!activeBook || mode !== "detail" || !renderer) return [];
   const rig = activeBook;
   const start = rig.root.rotation.y;
-  const centre = new THREE.Vector3();
-  rig.root.getWorldPosition(centre);
-  centre.y += 0.05;
+  // Crop to the sphere the book sweeps as it turns (an open book is wide).
+  const pivot = new THREE.Vector3();
+  rig.root.getWorldPosition(pivot);
+  const box = new THREE.Box3();
+  rig.motion.updateWorldMatrix(true, true);
+  rig.motion.traverseVisible((object) => {
+    if (object.isMesh && !object.layers.isEnabled(HIT_LAYER)) box.expandByObject(object, false);
+  });
+  // Turning about the vertical axis, the book sweeps a circle in plan.
+  let swing = 0;
+  [box.min.x, box.max.x].forEach((x) => [box.min.z, box.max.z].forEach((z) => {
+    swing = Math.max(swing, Math.hypot(x - pivot.x, z - pivot.z));
+  }));
+  const reach = Math.max(swing, (box.max.y - box.min.y) * 0.5);
+  const centre = new THREE.Vector3(pivot.x, (box.min.y + box.max.y) * 0.5, pivot.z);
+  // Step the camera back along its line of sight until that sphere fits.
+  const savedCamera = camera.position.clone();
+  const forward = camera.getWorldDirection(new THREE.Vector3());
+  const halfFov = THREE.MathUtils.degToRad(camera.fov * 0.5);
+  const fit = (reach * 1.12) / Math.tan(Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect))) + swing;
+  const distance = camera.position.distanceTo(centre);
+  if (fit > distance) {
+    camera.position.copy(centre).addScaledVector(forward, -fit);
+    camera.updateMatrixWorld();
+  }
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(reach);
+  const edge = centre.clone().add(right).project(camera);
   centre.project(camera);
-  const side = Math.min(canvas.height * 0.94, canvas.width * 0.7);
+  const radius = Math.abs(edge.x - centre.x) * 0.5 * canvas.width;
+  const side = clamp(radius * 2.08, 64, Math.min(canvas.width, canvas.height));
   const sx = clamp((centre.x + 1) * 0.5 * canvas.width - side / 2, 0, canvas.width - side);
   const sy = clamp((1 - centre.y) * 0.5 * canvas.height - side / 2, 0, canvas.height - side);
   const out = document.createElement("canvas");
@@ -1669,6 +1935,8 @@ function captureTurntable({ frames = 36, size = 360 } = {}) {
     result.push(ctx.getImageData(0, 0, size, size));
   }
   rig.root.rotation.y = start;
+  camera.position.copy(savedCamera);
+  camera.updateMatrixWorld();
   shadowHold = 3;
   requestFrame();
   return result;
@@ -1833,6 +2101,7 @@ function onVisibilityChange() {
   if (!suspended) {
     lastTime = performance.now();
     requestFrame();
+    scheduleWarmup();
   } else {
     settlePageDrag(true);
     resetDetailPress();
@@ -2015,7 +2284,8 @@ async function initialize(options) {
     calls: renderer.info.render.calls,
     triangles: renderer.info.render.triangles,
     textures: renderer.info.memory.textures,
-    geometries: renderer.info.memory.geometries
+    geometries: renderer.info.memory.geometries,
+    programs: renderer.info.programs?.length || 0
   }));
   renderFrame();
   // Keep the loading mark up until the covers in view have their real type
@@ -2030,6 +2300,7 @@ async function initialize(options) {
     if (!suspended) renderFrame();
     experience.classList.add("webgl-ready");
     loading.classList.add("is-done");
+    scheduleWarmup();
     setTimeout(() => { loading.hidden = true; }, reducedMotion ? 0 : 560);
     requestFrame();
   });
@@ -2075,7 +2346,10 @@ export const engine = {
     get motionScale() { return motionScale; },
     set motionScale(value) { if (RENDER_SCALES.includes(value)) motionScale = value; },
     stepQualityDown: () => stepQualityDown(),
-    get activeRig() { return activeBook; }
+    get activeRig() { return activeBook; },
+    get rigs() { return bookRigs; },
+    get scene() { return scene; },
+    get renderer() { return renderer; }
   }
 };
 
@@ -2377,7 +2651,8 @@ function onPagePointerDown(event) {
 
   event.preventDefault();
   event.stopImmediatePropagation();
-  // Lifting a leaf can show the one beneath: make sure it is printed.
+  // Lifting a leaf (or the cover) can show the one beneath: make sure it is printed.
+  flushLeafQueue();
   printDeferredLeaf();
   pageDrag.active = true;
   pageDrag.pointerId = event.pointerId;

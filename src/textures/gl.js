@@ -39,10 +39,19 @@ export function paintContext(canvas) {
 /**
  * A canvas-backed texture that can be repainted and resized in place.
  * Resizing disposes the GPU copy so Three re-allocates storage.
+ *
+ * Uploads are the largest cost of a repaint, so they take the browser's fast
+ * path: the canvas goes up unflipped (the texture transform flips it back for
+ * every map that samples it), and `opaque` layers go up premultiplied, which
+ * for opaque pixels is the canvas's own storage and needs no conversion.
  */
-export function createPaintTexture(width, height, options) {
+export function createPaintTexture(width, height, { opaque = false, ...options } = {}) {
   const canvas = makeCanvas(width, height);
   const texture = configureCanvasTexture(new THREE.CanvasTexture(canvas), options);
+  texture.flipY = false;
+  texture.repeat.set(1, -1);
+  texture.offset.set(0, 1);
+  texture.premultiplyAlpha = opaque;
   return {
     canvas,
     texture,

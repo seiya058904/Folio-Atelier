@@ -4,7 +4,18 @@ Round 1 (Phases A–F: speed, motion, decoration, structure, rooms, sharing) is 
 
 This round has three sources: the user's review of the deployed build, the parts of round 1 left unfinished (C, D and E were partial), and our own code review. Work goes phase by phase in the order below. Each phase ends with its checks, a status note at the top of this file, and one scoped commit.
 
-**Status:** not started (planned 2026-11-17).
+**Status:** G done (2026-11-17); H next.
+
+- **G — done.** Measured on an RTX 3070 laptop, `?quality=high`, 1440 × 900, Playwright:
+  - First pass along a freshly loaded shelf of 14 books: frame p95 60.6 → 12 ms, worst frame 231 → 13 ms. Cause: each book paid for its painting, its shader variants (100–200 ms each) and its texture uploads on the frame it first scrolled into view. Books now get ready in idle time, nearest first (about 1 s for 14 books).
+  - Opening a book: the flight from the shelf had frames of 270–360 ms (studio-resolution repaint, page printing, fonts arriving). Now nothing paints in flight; the worst frame is 86 ms. After landing, the boards sharpen and the leaves print one per frame.
+  - Applying a preset in the studio: 300–550 ms → 55–130 ms, and up to 240 ms for the heaviest cover. The edit is drafted at once and sharpened board by board, and shader variants are compiled ahead, so no program compiles mid-edit.
+  - Rooms no longer follow the book: the "Follow the book" switch is off by default, and night light gives a dark interface. Colour drags became cheaper as a result: p95 18.3 → 12.1 ms.
+  - The band no longer vanishes: a banded book does not crack open on hover, and the band slides off the fore-edge when the cover opens. The turntable sweep (36 views, closed and open) found every part present wherever it faces the camera. Turntable GIFs now frame the whole open book.
+  - The "Begin a book" Create button is pinned.
+  - The Ego-only report of "a new book opened another book" was traced: the shelf selection followed the animated position, so a slow or throttled window could fall back to the previous book. It now follows the target.
+  - Not fixed: the Ego window stays throttled when unfocused (36 ms median frame), so frame rates measured there are not used.
+  - Left over: the heaviest cover (midnight) still takes about 150 ms to sharpen at studio resolution; painting off the main thread would be the next step.
 
 **Goals, in priority order**
 1. Nothing should feel broken or stiff: no stutter, no parts vanishing, no native controls, no abrupt transitions.
