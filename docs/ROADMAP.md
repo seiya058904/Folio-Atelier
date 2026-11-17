@@ -36,19 +36,52 @@ Causes found: every `oninput` repaints cover/spine/back/endpaper synchronously (
 
 ## Phase C — Decoration (DIY depth I)
 
-- **Hot-stamping:** per-layer foil, stamp depth, multiple foils on one cover, foil textures (matte, brushed, diffraction).
-- **Relief and tooling:** deboss/emboss from any mask, gold-tooled borders and corner fleurons, inlay/onlay panels, die-cut window.
-- **Materials:** cork, canvas, denim, pebbled/snakeskin leather, wood veneer, acrylic; wear and patina slider.
-- **Add-ons:** wax seal, metal nameplate, labels and stickers, embroidered patch, monogram generator, image filters and crop handles, SVG ornament upload.
-- **Inside:** marbled/deckle/tooled edges, fore-edge painting, marbled and map endpapers, ruled/dotted/grid notebook pages, tipped-in plates, vellum interleaves.
+Researched against bookbinding references (tooling, onlay/inlay, blocking, edge decoration). Ordered by visual payoff per effort; fits the existing mask + foil-layer pipeline.
+
+**C1 — Stamping and relief (core, do first)**
+- **Three stamp modes per layer:** foil, *blind* (heat-pressed, no colour — the oldest decoration, and the usual first step before gilding), and ink. Add stamp depth so blind/foil/ink can sit debossed or embossed (normal-map relief from the same mask).
+- **Foil-embossed combo** (foil plus raised relief) and **multiple foils** on one cover; foil textures: matte, brushed, diffraction.
+- **Hand-tooling kit:** gold-tooled fillets (lines), rolls, corner fleurons, panel frames and spine compartments, drawn from the existing border/ornament painters.
+
+**C2 — Inlay and onlay**
+- **Onlay** (contrasting leather laid on top, in relief) and **inlay** (flush piece set into a cut-out) as a "panel" layer with its own material and colour; window die-cut showing the endpaper beneath.
+- Stitched/embroidered patch, metal nameplate, wax seal, label and sticker set, monogram generator.
+
+**C3 — Materials and age**
+- New grains: cork, canvas, denim, pebbled and snakeskin leather, wood veneer, acrylic.
+- Wear/patina sliders: scuffing at corners and spine, edge rub, foil wear, sun-fading, optional stains.
+
+**C4 — Inside the book**
+- **Edges:** marbled, German-paste (brushed paste patterns), sprayed/stencilled, gauffered (gilt edge tooled with repeating patterns), and **fore-edge painting** — an image visible only when the pages are fanned (single and double variants; a great 3D showpiece).
+- **Endpapers:** marbled, paste paper, map and photo prints; printed hinges.
+- **Pages:** ruled/dotted/grid notebook pages, tipped-in plates, vellum interleaves, running heads, footnotes.
+- Image tools: duotone/halftone/engraving filters, crop handles, SVG ornament upload.
 
 ## Phase D — Structure (DIY depth II)
 
-- **Trim presets** (pocket, A5, B5, square, landscape) with thickness from page count; shelf slots follow the format.
-- **Binding styles:** Japanese stab (with visible thread), Coptic, long-stitch, accordion, notebook with elastic.
-- **Closures:** elastic band, wrap strap, ribbon tie, clasp.
-- **Spine and extras:** raised bands, tooled compartments, headcap; dust jacket with flaps, slipcase, clamshell box.
-- Bump `SCHEMA_VERSION`; stay backward compatible.
+Researched against hand-binding and commercial journal/notebook options.
+
+**D1 — Format and construction**
+- **Trim presets** (pocket, A5, B5, square, landscape, tall) with thickness from page count; shelf slots follow the format.
+- **Construction families:**
+  - *Case binding* (hardcover — current default), with rounded or square spine, flexible or hard cover.
+  - *Japanese stab* — visible side thread, 4/5/6-hole and hemp-leaf patterns; doesn't open flat.
+  - *Coptic* — exposed chain stitch on the spine, lies flat when open.
+  - *Long-stitch* — exposed stitching across a soft wrap cover.
+  - *Accordion* (leporello) — unfolds into a strip.
+  - *Soft-cover notebook* with sewn or glued spine.
+
+**D2 — Journal-style practical options** (what notebook makers commonly offer)
+- **Closures:** elastic band (colour-matched), wrap strap, ribbon tie, clasp.
+- **Pen loop**, **inner pocket** / expandable back pocket, second ribbon, bookmark charm, corner rounding.
+- **Spine extras:** raised bands, tooled compartments, headcap and tailband styles.
+
+**D3 — Protective extras**
+- Dust jacket with flaps (separately designable), slipcase, clamshell box; each gets its own cover painter and appears on the shelf.
+
+**Notes:** structure changes touch rig geometry, shelf spacing, thumbnails and page layout, so build one family at a time (order: trim presets → closures/pen loop/pocket → Coptic and Japanese stab → accordion → jacket and slipcase). Bump `SCHEMA_VERSION`; stay backward compatible. Add a "Structure" tab to the studio rather than growing Details.
+
+**Sources:** [Morgan Library on tooling](https://www.themorgan.org/book/export/html/1180291), [Adelaide: hand tooling](https://www.adelaide.edu.au/library/special/exhibitions/cover-to-cover/hand-tooling/), [Adelaide: edge decoration](https://adelaide.edu.au/library/special/exhibitions/cover-to-cover/edge-decoration), [AIC book decoration](https://www.conservation-wiki.com/wiki/Book_Decoration), [Friesens: deboss/emboss](https://www.friesens.com/books/specialty-options/specialty-finishes/debossemboss/), [Tiny Workshops: binding techniques](https://tinyworkshops.com/bookbinding-techniques/), [Vistaprint journal options](https://www.vistaprint.com/promotional-products/writing-office/padfolio-notebooks).
 
 ## Phase E — Shelves and rooms
 
