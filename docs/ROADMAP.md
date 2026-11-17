@@ -20,6 +20,8 @@ Phase E (partial, 2026-11-17). A Room panel on the shelf: walnut, oak, painted w
 
 Phase F done (2026-11-17). Design tab → Share: a PNG of the current view, a 36-frame turntable GIF (360 px, own median-cut + LZW encoder in `src/share.js`, about 1 s) and a PDF of every printed page (one JPEG per page at 2×, own minimal writer). Shelf → Export all writes `folio-library.folio` (format `folio-atelier-library`, version 3: every book with its pictures, plus the room); Import reads it as well as single-book v1 files. Checked by decoding all 36 GIF frames and every PDF xref offset with an independent script.
 
+Follow-up (2026-11-17): after Phase F the colour drag measured about 8 % below Phase B. A per-phase bisect showed the 3D path unchanged; the cost was the page-wide style recalculation when the interface theme follows the book colour, which grew with the studio's DOM. The interface now restyles once a drag rests (a single swatch click still restyles at once): colour drag 64 → 87 fps and edit-to-pixel 14.6 → 9.1 ms against Phase B.
+
 ## Phase A — Speed (do first)
 
 Causes found: every `oninput` repaints cover/spine/back/endpaper synchronously (up to 1536×2304 plus mipmaps and upload); `front` edits also repaint spine and endpaper; tab switches rebuild the whole panel and repaint all thumbnails; the render loop never idles (GTAO + 4× MSAA every frame); quality only steps down once.

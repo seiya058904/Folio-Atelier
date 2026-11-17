@@ -334,6 +334,7 @@ const PAGE_THEME_INTERVAL_MS = 180;
 let pendingPageTheme = null;
 let pageThemeAt = -1000;
 let pageThemeTimer = 0;
+let themeRequestAt = -1000;
 
 function applyPageTheme() {
   clearTimeout(pageThemeTimer);
@@ -360,12 +361,17 @@ function applyTheme(palette, accent) {
   const key = JSON.stringify([palette, accent]);
   if (key === themeKey) return;
   themeKey = key;
-  // Restyling the interface is throttled: while a colour is being dragged the
-  // 3D room follows every frame and the page catches up a few times a second.
+  // Restyling the interface recalculates the style of the whole page, which
+  // grows with the studio. A single change (a swatch) restyles at once; while
+  // a colour is being dragged the 3D room follows every frame and the page
+  // waits until the hand rests.
   pendingPageTheme = { palette, accent };
-  const wait = PAGE_THEME_INTERVAL_MS - (performance.now() - pageThemeAt);
-  if (wait <= 0) applyPageTheme();
-  else if (!pageThemeTimer) pageThemeTimer = setTimeout(applyPageTheme, wait);
+  const now = performance.now();
+  const streaming = now - themeRequestAt < PAGE_THEME_INTERVAL_MS;
+  themeRequestAt = now;
+  clearTimeout(pageThemeTimer);
+  if (!streaming && now - pageThemeAt >= PAGE_THEME_INTERVAL_MS) applyPageTheme();
+  else pageThemeTimer = setTimeout(applyPageTheme, PAGE_THEME_INTERVAL_MS);
 
   themeTargets.floor.set(palette.paperDeep);
   themeTargets.wall.set(palette.wall);
