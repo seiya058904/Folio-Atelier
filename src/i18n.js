@@ -201,6 +201,7 @@ const ZH = {
   "Export all": "全部导出", "Exported {count} books.": "已导出 {count} 本书。", "Imported {count} books.": "已导入 {count} 本书。",
   "Room": "房间", "Shelf": "书架", "Walnut": "胡桃木", "Oak": "橡木", "Painted": "白漆", "Steel": "黑钢", "Ledge": "浮板",
   "Follow the book": "随书配色",
+  "Moved {title} to place {n} of {count}.": "已把《{title}》移到第 {n} 位，共 {count} 本。",
   "Board corners": "书角", "Square": "直角", "Metal clasp": "金属搭扣", "Clasp metal": "搭扣金属",
   "Brass": "黄铜", "Blackened iron": "黑铁", "Pocket and slipcase": "内袋与书匣",
   "A paper pocket inside the front board, and a case that keeps the book on the shelf. The book slides out of it when you open it.": "封面内侧的纸袋，以及在书架上收纳书本的书匣。翻开时，书会从书匣里滑出。",

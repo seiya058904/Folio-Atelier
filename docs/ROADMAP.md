@@ -4,7 +4,16 @@ Round 1 (Phases A–F: speed, motion, decoration, structure, rooms, sharing) is 
 
 This round has three sources: the user's review of the deployed build, the parts of round 1 left unfinished (C, D and E were partial), and our own code review. Work goes phase by phase in the order below. Each phase ends with its checks, a status note at the top of this file, and one scoped commit.
 
-**Status:** G, H and I done; J partly done (2026-11-18); K next.
+**Status:** G, H and I done; J and K partly done (2026-11-18); L next.
+
+- **K — partly done.**
+  - Drag a book along the shelf to move it: it lifts off and follows the pointer, and its neighbours make room. Alt + arrow keys do the same, and the move is announced to screen readers. The release does not open the book.
+  - The shelf order is now saved (`folio-atelier-order`). Before, books always reloaded in creation order, so even inserting a book next to the current one was lost.
+  - A brass desk lamp stands on the shelf in the night light. Its programs are compiled ahead of time, so switching to night causes no stall (worst frame 14 ms).
+  - **Not done:**
+    - Distinct places (glass cabinet, desk, window sill, plinth).
+    - Arrangements (stacked, leaning, face-out, several rows).
+    - Collections.
 
 - **J — partly done.** New Structure-tab options, each with defaults, `normalizeBook` handling and ZH strings:
   - Rounded board corners, with the boards, art and endpapers cut to match.

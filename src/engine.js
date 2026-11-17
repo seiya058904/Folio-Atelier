@@ -483,6 +483,10 @@ function applyRoomSettings() {
     material.metalness = shelf.metalness ?? material.userData.baseMetalness ?? material.metalness;
   });
   roomFrame.forEach((mesh) => { mesh.visible = !shelf.frameless; });
+  if (lamp) {
+    lamp.visible = room.light === "night";
+    lamp.userData.shade.emissiveIntensity = lamp.visible ? 0.9 : 0;
+  }
   shadowHold = 4;
 }
 
@@ -968,8 +972,11 @@ function updateShelfLayout(delta, elapsed) {
   bookRigs.forEach((rig, index) => {
     if (rig.root.parent !== shelfStage) return;
 
-    const slot = shelfSlot(index);
-    const targetY = shelfBoardTop + rig.base.height * 0.5 + slot.focus * 0.15;
+    const dragged = shelfDrag.active && index === shelfDrag.index;
+    const slot = shelfSlot(dragSlotIndex(index));
+    // The book being moved is lifted off the shelf and brought forward.
+    if (dragged) slot.z += 0.28;
+    const targetY = shelfBoardTop + rig.base.height * 0.5 + slot.focus * 0.15 + (dragged ? 0.12 : 0);
     const speed = reducedMotion ? 1000 : 12;
     rig.lastOffset = slot.offset;
 
@@ -1002,7 +1009,7 @@ function updateShelfLayout(delta, elapsed) {
       }
     }
 
-    const isHovered = hoveredIndex === index && mode === "hero";
+    const isHovered = hoveredIndex === index && mode === "hero" && !shelfDrag.active;
     const hoverPreview = isHovered && !reducedMotion;
     const hoverAngle = hoverPreview && !rig.hasBand ? -0.085 : 0;
     const settle = reducedMotion ? 1000 : 13;
@@ -1429,7 +1436,89 @@ function setHovered(index) {
   requestFrame();
 }
 
+/* ----- moving a book along the shelf ----- */
+
+// Press a book and drag it sideways: it lifts off the shelf and follows the
+// pointer while its neighbours make room. Alt + arrow keys do the same.
+const shelfDrag = { pointerId: null, index: -1, startX: 0, startY: 0, offset: 0, pixels: 100, active: false, target: -1, dropped: false };
+
+/** Screen pixels between two neighbouring places on the shelf. */
+function slotPixels() {
+  const a = new THREE.Vector3(0, shelfBoardTop, 0.2);
+  const b = new THREE.Vector3(spacing, shelfBoardTop, 0.2);
+  shelfStage.localToWorld(a).project(camera);
+  shelfStage.localToWorld(b).project(camera);
+  return Math.max(24, Math.abs(b.x - a.x) * 0.5 * viewWidth);
+}
+
+function onShelfPointerDown(event) {
+  if (mode !== "hero" || event.button !== 0 || event.isPrimary === false || books.length < 2) return;
+  setPointerFromEvent(event);
+  const index = bookIndexAtPointer();
+  if (index < 0) return;
+  Object.assign(shelfDrag, {
+    pointerId: event.pointerId, index, target: index, offset: 0, active: false,
+    startX: event.clientX, startY: event.clientY, pixels: slotPixels()
+  });
+}
+
+function onShelfPointerMove(event) {
+  if (shelfDrag.pointerId !== event.pointerId || mode !== "hero") return;
+  const dx = event.clientX - shelfDrag.startX;
+  if (!shelfDrag.active) {
+    if (Math.abs(dx) < 9 || Math.abs(dx) < Math.abs(event.clientY - shelfDrag.startY)) return;
+    shelfDrag.active = true;
+    canvas.setPointerCapture?.(event.pointerId);
+    canvas.classList.add("is-moving-book");
+    setHovered(-1);
+  }
+  shelfDrag.offset = clamp(dx / shelfDrag.pixels, -shelfDrag.index - 0.4, books.length - 0.6 - shelfDrag.index);
+  shelfDrag.target = clamp(Math.round(shelfDrag.index + shelfDrag.offset), 0, books.length - 1);
+  requestFrame();
+}
+
+function onShelfPointerEnd(event) {
+  if (shelfDrag.pointerId !== event.pointerId) return;
+  shelfDrag.pointerId = null;
+  if (!shelfDrag.active) return;
+  shelfDrag.active = false;
+  canvas.classList.remove("is-moving-book");
+  // The click that follows the release is not a selection.
+  shelfDrag.dropped = true;
+  setTimeout(() => { shelfDrag.dropped = false; }, 0);
+  if (event.type !== "pointercancel" && shelfDrag.target !== shelfDrag.index) moveBook(shelfDrag.index, shelfDrag.target);
+  requestFrame();
+}
+
+/** Where a book stands while another is being dragged past it. */
+function dragSlotIndex(index) {
+  if (!shelfDrag.active) return index;
+  const { index: from, target } = shelfDrag;
+  if (index === from) return from + shelfDrag.offset;
+  if (from < target && index > from && index <= target) return index - 1;
+  if (from > target && index < from && index >= target) return index + 1;
+  return index;
+}
+
+/** Move the book at `from` to `to`: the rigs here, the library through `onMove`. */
+function moveBook(from, to) {
+  if (from === to || !bookRigs[from]) return;
+  const [rig] = bookRigs.splice(from, 1);
+  bookRigs.splice(to, 0, rig);
+  rebuildHitTargets();
+  hoveredIndex = -1;
+  emit("onMove", rig.data.id, to);
+  selectedIndex = to;
+  targetPosition = to;
+  position = clamp(position + (to - from), 0, Math.max(0, books.length - 1));
+  emit("onSelect", selectedIndex, rig.data);
+  audio.playCue("navigate");
+  announce(t("Moved {title} to place {n} of {count}.", { title: rig.data.title, n: to + 1, count: books.length }));
+  requestFrame();
+}
+
 function onCanvasClick(event) {
+  if (shelfDrag.dropped) return;
   if (mode === "detail" && !readingOpen && event.button === 0) {
     if (!detailPress.allowClick) return;
     detailPress.allowClick = false;
@@ -1741,6 +1830,7 @@ function frame(time) {
     || themeIsMoving
     || viewTween.active
     || pageDrag.active
+    || shelfDrag.active
     || rebindTime < 1
     || glintTime < 1
     || leavingRigs.length > 0
@@ -2084,6 +2174,12 @@ function onKeyDown(event) {
     else closeDetail();
     return;
   }
+  if (mode === "hero" && event.altKey && !typing && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    event.preventDefault();
+    const to = clamp(selectedIndex + (event.key === "ArrowLeft" ? -1 : 1), 0, books.length - 1);
+    moveBook(selectedIndex, to);
+    return;
+  }
   if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
 
   if (mode === "detail" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
@@ -2251,6 +2347,10 @@ async function initialize(options) {
 
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerleave", onPointerLeave);
+  canvas.addEventListener("pointerdown", onShelfPointerDown);
+  canvas.addEventListener("pointermove", onShelfPointerMove);
+  canvas.addEventListener("pointerup", onShelfPointerEnd);
+  canvas.addEventListener("pointercancel", onShelfPointerEnd);
   canvas.addEventListener("click", onCanvasClick);
   canvas.addEventListener("pointerdown", onDetailBookPointerDown, { capture: true });
   canvas.addEventListener("pointermove", onDetailBookPointerMove, { capture: true });
@@ -2309,6 +2409,8 @@ async function initialize(options) {
     experience.classList.add("webgl-ready");
     loading.classList.add("is-done");
     scheduleWarmup();
+    // The night lamp's materials, so choosing the night light does not stall.
+    if (lamp) whenIdle(() => compileQuietly(lamp), 3000);
     setTimeout(() => { loading.hidden = true; }, reducedMotion ? 0 : 560);
     requestFrame();
   });
@@ -2486,6 +2588,11 @@ function setPointerFromEvent(event) {
 
 function updateHover() {
   pointerDirty = false;
+  // No hover label while a book is being carried along the shelf.
+  if (shelfDrag.active) {
+    setHovered(-1);
+    return;
+  }
   if (mode === "detail" && activeBook) {
     setHovered(-1);
     if (readingOpen) {
@@ -3047,11 +3154,59 @@ function addRoom() {
   shadowStrip.position.set(0, 0.49, 0.06);
   shelfStage.add(shadowStrip);
 
+  addLamp();
+
   roomMaterials.floor = floor.material;
   roomMaterials.wall = back.material;
   roomMaterials.shelf = shared.walnut;
   roomMaterials.shelfDark = shared.walnutDark;
   roomMaterials.shadow = shadowStrip.material;
+}
+
+/**
+ * A brass desk lamp standing at the left end of the shelf. It is shown with
+ * the night light, where the warmed softbox plays its light (no light is
+ * added: that would recompile every material); its shade and bulb glow.
+ */
+let lamp = null;
+function addLamp() {
+  const brass = new THREE.MeshStandardMaterial({ color: 0xb48a4a, metalness: 0.85, roughness: 0.32 });
+  // Enamelled green outside; inside, lit by the bulb.
+  const shade = new THREE.MeshStandardMaterial({ color: 0x24352a, roughness: 0.42, metalness: 0.25 });
+  const shadeInside = new THREE.MeshStandardMaterial({
+    color: 0xf3e6c8, roughness: 0.7, metalness: 0, side: THREE.BackSide,
+    emissive: 0xffc070, emissiveIntensity: 0
+  });
+  const glow = new THREE.MeshBasicMaterial({ color: 0xfff1d6 });
+  lamp = new THREE.Group();
+  lamp.name = "night-lamp";
+  const base = createMesh(new THREE.CylinderGeometry(0.2, 0.23, 0.05, 40), brass, "lamp-base");
+  base.position.y = 0.025;
+  const stem = createMesh(new THREE.CylinderGeometry(0.016, 0.016, 1.25, 16), brass, "lamp-stem");
+  stem.position.set(0.12, 0.64, 0);
+  stem.rotation.z = -0.19;
+  const arm = createMesh(new THREE.CylinderGeometry(0.014, 0.014, 0.62, 16), brass, "lamp-arm");
+  arm.position.set(0.47, 1.27, 0.03);
+  arm.rotation.z = -1.2;
+  const joint = createMesh(new THREE.SphereGeometry(0.028, 16, 12), brass, "lamp-joint");
+  joint.position.set(0.24, 1.25, 0);
+  const hoodGeometry = new THREE.CylinderGeometry(0.06, 0.24, 0.3, 40, 1, true);
+  const hood = createMesh(hoodGeometry, shade, "lamp-shade");
+  hood.position.set(0.76, 1.12, 0.05);
+  hood.rotation.z = 0.5;
+  const hoodInside = createMesh(hoodGeometry, shadeInside, "lamp-shade-inside", false, false);
+  hood.add(hoodInside);
+  const cap = createMesh(new THREE.SphereGeometry(0.062, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), shade, "lamp-cap");
+  cap.position.set(0.684, 1.25, 0.05);
+  cap.rotation.z = 0.5;
+  const bulb = createMesh(new THREE.SphereGeometry(0.07, 20, 14), glow, "lamp-bulb", false, false);
+  bulb.position.set(0.79, 1.06, 0.05);
+  lamp.add(base, stem, arm, joint, hood, cap, bulb);
+  lamp.position.set(-3.35, shelfBoardTop, -0.12);
+  lamp.rotation.y = 0.25;
+  lamp.visible = false;
+  lamp.userData.shade = shadeInside;
+  shelfStage.add(lamp);
 }
 
 function addLights() {

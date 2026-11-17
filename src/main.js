@@ -28,6 +28,10 @@ async function start() {
     books: store.books,
     hooks: {
       onSelect: () => library?.renderSelection(),
+      onMove: (id, index) => {
+        store.move(id, index);
+        library?.refresh();
+      },
       onMode: (mode, book) => {
         if (mode === "opening") {
           library.setInteractive(false);

@@ -2358,3 +2358,9 @@ canvas.is-fresh {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* ---------- moving a book along the shelf (Phase K) ---------- */
+
+#scene.is-moving-book {
+  cursor: grabbing;
+}

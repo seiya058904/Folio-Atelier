@@ -8,6 +8,18 @@ import * as storage from "./storage.js";
 
 const HISTORY_LIMIT = 80;
 const COALESCE_MS = 700;
+// The order of the books on the shelf (a list of ids). Books not in it go
+// after, oldest first.
+const ORDER_KEY = "folio-atelier-order";
+
+function readOrder() {
+  try {
+    const order = JSON.parse(localStorage.getItem(ORDER_KEY));
+    return Array.isArray(order) ? order : [];
+  } catch (error) {
+    return [];
+  }
+}
 
 export function createStore() {
   const listeners = new Map();
@@ -17,6 +29,14 @@ export function createStore() {
 
   const emit = (event, payload) => {
     listeners.get(event)?.forEach((listener) => listener(payload));
+  };
+
+  const saveOrder = () => {
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(books.map((book) => book.id)));
+    } catch (error) {
+      // Private mode: the order is kept for this visit only.
+    }
   };
 
   const persist = (book) => {
@@ -72,6 +92,8 @@ export function createStore() {
         const book = normalizeBook(value);
         if (book) books.push(book);
       });
+      const rank = new Map(readOrder().map((id, index) => [id, index]));
+      books.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || (a.createdAt || 0) - (b.createdAt || 0));
       return books;
     },
 
@@ -86,6 +108,7 @@ export function createStore() {
     add(book, index = books.length) {
       books.splice(index, 0, book);
       persist(book);
+      saveOrder();
       emit("add", { book, index });
       return book;
     },
@@ -97,8 +120,21 @@ export function createStore() {
       history.delete(id);
       savers.delete(id);
       storage.deleteBook(id).catch(() => {});
+      saveOrder();
       emit("remove", { book, index });
       return book;
+    },
+
+    /** Move a book to another place on the shelf. */
+    move(id, index) {
+      const from = books.findIndex((book) => book.id === id);
+      if (from < 0) return;
+      const to = Math.max(0, Math.min(books.length - 1, index));
+      if (to === from) return;
+      const [book] = books.splice(from, 1);
+      books.splice(to, 0, book);
+      saveOrder();
+      emit("move", { book, from, to });
     },
 
     /**
