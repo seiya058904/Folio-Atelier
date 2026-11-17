@@ -21,6 +21,7 @@ import {
 import { createPaintTexture } from "../textures/gl.js";
 import { PAGE_SIZE, pageSignature, paintPage } from "../textures/pages.js";
 import {
+  BAKED_EDGES,
   getContactShadowTexture,
   getHeadbandTexture,
   getMaterialMaps,
@@ -625,12 +626,12 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     });
 
     const edge = spec.details.edge;
-    const baked = edge.style === "sprinkled" || edge.style === "ombre";
+    const baked = BAKED_EDGES.has(edge.style);
     const edgeMaps = getPageEdgeTextures(baked ? edge.style : "plain", edge.color);
     foreEdgeMaterial.map = edgeMaps.fore;
     headTailEdgeMaterial.map = edgeMaps.headTail;
     [foreEdgeMaterial, headTailEdgeMaterial].forEach((material) => {
-      if (edge.style === "gilt") {
+      if (edge.style === "gilt" || edge.style === "gauffered") {
         material.color.set(edge.color || "#d9b25f");
         material.metalness = 0.92;
         material.roughness = 0.34;

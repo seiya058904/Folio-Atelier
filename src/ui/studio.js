@@ -931,10 +931,10 @@ export function createStudioUi({ store, engine, audio }) {
     const edgeColour = h("div");
     const paintEdge = () => {
       edgeColour.replaceChildren(details().edge.style === "plain" ? "" : colorField({
-        label: details().edge.style === "gilt" ? "Leaf" : details().edge.style === "sprinkled" ? "Sprinkle" : "Stain",
+        label: ["gilt", "gauffered"].includes(details().edge.style) ? "Leaf" : details().edge.style === "sprinkled" ? "Sprinkle" : "Stain",
         value: details().edge.color,
         swatches: EDGE_COLORS,
-        metal: details().edge.style === "gilt",
+        metal: ["gilt", "gauffered"].includes(details().edge.style),
         onInput: (value) => edit(() => { details().edge.color = value; }, ["details"], { key: "edge-color" })
       }));
     };
@@ -943,12 +943,12 @@ export function createStudioUi({ store, engine, audio }) {
     const boards = ["details", "material"];
     return [
       group("Page edges", "Gilding and staining show on the three trimmed edges of the block.",
-        segmented({
+        select({
           label: "Finish", value: current.details.edge.style, options: EDGE_STYLES,
           onChange: (value) => {
             edit(() => {
               details().edge.style = value;
-              if (value === "gilt") details().edge.color = "#d9b25f";
+              if (value === "gilt" || value === "gauffered") details().edge.color = "#d9b25f";
               if (value === "tinted") details().edge.color = "#c6532f";
             }, ["details"]);
             paintEdge();
@@ -1053,6 +1053,7 @@ export function createStudioUi({ store, engine, audio }) {
       case "plate": return first(page.caption) || t(page.image ? "Image" : "Ornament");
       case "colophon": return first(page.text) || t("Written for you");
       case "contents": return page.heading || t("Contents");
+      case "notebook": return t("{count} pages", { count: Math.round(page.count || 1) });
       default: return "—";
     }
   }
@@ -1154,6 +1155,18 @@ export function createStudioUi({ store, engine, audio }) {
           onChange: set("motif")
         }),
         textField({ label: "Caption", value: page.caption, placeholder: "Optional", onInput: set("caption", { later: true }) })
+      );
+    } else if (page.type === "notebook") {
+      fields.push(
+        segmented({
+          label: "Ruling", value: page.ruling || "lined",
+          options: [{ id: "lined", label: "Lined" }, { id: "dotted", label: "Dot grid" }, { id: "grid", label: "Squared" }],
+          onChange: set("ruling")
+        }),
+        slider({
+          label: "Number of pages", value: page.count || 4, min: 1, max: 48, step: 1, format: (value) => String(Math.round(value)),
+          onInput: (value) => set("count", { later: true })(Math.round(value))
+        })
       );
     } else if (page.type === "colophon") {
       fields.push(textArea({

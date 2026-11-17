@@ -23,6 +23,7 @@ export const PAGE_TYPES = [
   { id: "quote", label: "Pull quote", note: "A large quotation" },
   { id: "plate", label: "Plate", note: "Image or ornament with caption" },
   { id: "colophon", label: "Colophon", note: "Notes on the edition" },
+  { id: "notebook", label: "Notebook", note: "Ruled, dotted or squared pages to write in" },
   { id: "blank", label: "Blank", note: "An empty page" }
 ];
 
@@ -80,6 +81,8 @@ const PAGE_DEFAULTS = {
   quote: () => ({ text: words().quote, attribution: "" }),
   plate: () => ({ image: null, motif: "", caption: "", bleed: false }),
   colophon: () => ({ text: "" }),
+  // `count` pages ruled with lines, a dot grid or squares.
+  notebook: () => ({ ruling: "lined", count: 4 }),
   blank: () => ({})
 };
 

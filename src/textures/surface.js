@@ -674,8 +674,11 @@ const pageEdgeCache = new Map();
  * material colour (natural, gilt, stained); `sprinkled` and `ombre` bake the
  * colour into the texture.
  */
+/** Edge finishes whose colour is painted into the edge texture. */
+export const BAKED_EDGES = new Set(["sprinkled", "ombre", "marbled", "paste", "gauffered"]);
+
 export function getPageEdgeTextures(variant = "plain", color = "#c6532f") {
-  const baked = variant === "sprinkled" || variant === "ombre";
+  const baked = BAKED_EDGES.has(variant);
   const key = baked ? `${variant}-${color}` : "plain";
   if (pageEdgeCache.has(key)) return pageEdgeCache.get(key);
 
@@ -698,6 +701,45 @@ export function getPageEdgeTextures(variant = "plain", color = "#c6532f") {
       ctx.fillStyle = fade;
       ctx.fillRect(0, 0, width, height);
       ctx.globalAlpha = 1;
+    }
+    if (variant === "marbled") {
+      // Combed marbling: wandering veins of the colour and a lighter tint.
+      const veins = Math.round((width * height) / 2600);
+      for (let vein = 0; vein < veins; vein += 1) {
+        const y = random() * height;
+        const amplitude = 6 + random() * 26;
+        const period = 40 + random() * 120;
+        const phase = random() * Math.PI * 2;
+        ctx.strokeStyle = random() > 0.4 ? color : "rgba(250,244,230,0.8)";
+        ctx.globalAlpha = 0.35 + random() * 0.5;
+        ctx.lineWidth = 1 + random() * 6;
+        ctx.beginPath();
+        for (let x = 0; x <= width; x += 6) {
+          const yy = y + Math.sin(x / period + phase) * amplitude + Math.sin(x / (period * 0.3)) * amplitude * 0.2;
+          if (x) ctx.lineTo(x, yy);
+          else ctx.moveTo(x, yy);
+        }
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    } else if (variant === "paste") {
+      // German paste paper: coloured paste dragged into fans with a comb.
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalAlpha = 1;
+      const fan = Math.max(28, Math.min(width, height) * 0.9);
+      ctx.strokeStyle = "rgba(250,244,230,0.55)";
+      ctx.lineWidth = 1.6;
+      for (let cy = 0; cy < height + fan; cy += fan) {
+        for (let cx = 0; cx < width + fan; cx += fan) {
+          for (let ring = 3; ring < fan * 0.6; ring += 4) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, ring, Math.PI, Math.PI * 1.5);
+            ctx.stroke();
+          }
+        }
+      }
     }
     const step = suffix === "fore" ? 2 : 1.35;
     for (let y = 0; y < height; y += step) {
@@ -724,6 +766,19 @@ export function getPageEdgeTextures(variant = "plain", color = "#c6532f") {
         ctx.fill();
       }
       ctx.globalAlpha = 1;
+    }
+    if (variant === "gauffered") {
+      // Gilt, then tooled with a heated wheel: a lattice of small dots.
+      ctx.fillStyle = "rgba(60,40,10,0.55)";
+      const pitch = suffix === "fore" ? 14 : 10;
+      for (let y = pitch / 2; y < height; y += pitch) {
+        for (let x = pitch / 2; x < width; x += pitch) {
+          const offset = Math.round(y / pitch) % 2 ? pitch / 2 : 0;
+          ctx.beginPath();
+          ctx.arc(x + offset, y, pitch * 0.16, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
     }
     const shade = ctx.createLinearGradient(0, 0, width, 0);
     shade.addColorStop(0, "rgba(58,48,35,0.18)");

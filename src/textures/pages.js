@@ -288,6 +288,9 @@ export function paginate(book) {
           lines
         });
       });
+    } else if (page.type === "notebook") {
+      const count = Math.max(1, Math.min(48, Math.round(page.count || 1)));
+      for (let index = 0; index < count; index += 1) flat.push({ type: "notebook", source: page.id, page });
     } else if (page.type === "contents") {
       flat.push({ type: "contents", source: page.id, heading: page.heading || words.contents, chapters });
     } else {
@@ -305,7 +308,8 @@ export function paginate(book) {
 
 const TYPE_LABELS = {
   halftitle: "Half-title", title: "Title page", dedication: "Dedication", epigraph: "Epigraph",
-  quote: "Quotation", plate: "Plate", colophon: "Colophon", blank: "Blank", contents: "Contents"
+  quote: "Quotation", plate: "Plate", colophon: "Colophon", blank: "Blank", contents: "Contents",
+  notebook: "Notebook"
 };
 
 /** What the reader bar calls a page, in the interface language. */
@@ -432,6 +436,45 @@ function drawFurniture(ctx, book, entry, recto, ink) {
 
 const PAINT = {
   blank() {},
+
+  /** Writing paper: lines, a dot grid or squares in a pale rule colour. */
+  notebook(ctx, book, entry, recto, ink) {
+    const ruling = entry.page?.ruling || "lined";
+    const left = recto ? MARGIN.inner : MARGIN.outer;
+    const right = left + TEXT_WIDTH;
+    const top = MARGIN.top;
+    const bottom = H - MARGIN.bottom;
+    const pitch = ruling === "lined" ? 25 : 18;
+    ctx.save();
+    ctx.fillStyle = ink.rule;
+    ctx.strokeStyle = ink.rule;
+    if (ruling === "lined") {
+      for (let y = top + pitch; y <= bottom; y += pitch) ctx.fillRect(left, y, TEXT_WIDTH, 0.8);
+    } else if (ruling === "dotted") {
+      for (let y = top; y <= bottom; y += pitch) {
+        for (let x = left; x <= right + 0.5; x += pitch) {
+          ctx.beginPath();
+          ctx.arc(x, y, 1.05, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    } else {
+      ctx.globalAlpha = 0.7;
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      for (let y = top; y <= bottom + 0.5; y += pitch) {
+        ctx.moveTo(left, y);
+        ctx.lineTo(left + Math.floor(TEXT_WIDTH / pitch) * pitch, y);
+      }
+      const lastY = top + Math.floor((bottom - top) / pitch) * pitch;
+      for (let x = left; x <= right + 0.5; x += pitch) {
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, lastY);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  },
 
   halftitle(ctx, book, entry, recto, ink) {
     ctx.fillStyle = ink.text;

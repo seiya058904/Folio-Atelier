@@ -151,7 +151,10 @@ export const EDGE_STYLES = [
   { id: "gilt", label: "Gilt" },
   { id: "tinted", label: "Stained" },
   { id: "sprinkled", label: "Sprinkled" },
-  { id: "ombre", label: "Ombré" }
+  { id: "ombre", label: "Ombré" },
+  { id: "marbled", label: "Marbled" },
+  { id: "paste", label: "Paste" },
+  { id: "gauffered", label: "Gauffered" }
 ];
 
 export const CORNER_STYLES = [
