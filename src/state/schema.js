@@ -10,6 +10,29 @@ export const SCHEMA_VERSION = 2;
 /** Standard trim: one shared hardcover format for every book. */
 export const BOOK_FORMAT = Object.freeze({ width: 1.06, height: 1.59, depth: 0.27 });
 
+// Trim sizes keep the 2 : 3 board (every cover painter is laid out on it) and
+// scale the whole book; `bulk` makes the block thinner or thicker.
+export const TRIMS = [
+  { id: "pocket", label: "Pocket", note: "Fits a coat pocket", scale: 0.8 },
+  { id: "crown", label: "Crown octavo", note: "A slim novel", scale: 0.91 },
+  { id: "standard", label: "Standard", note: "A5-ish, the default", scale: 1 },
+  { id: "large", label: "Large", note: "Royal octavo, a generous hardback", scale: 1.15 }
+];
+
+export function trimScale(book) {
+  return (TRIMS.find((trim) => trim.id === book.structure?.trim) || TRIMS[2]).scale;
+}
+
+/** Structure defaults: also used to fill stored books. */
+export function defaultStructure(color = "#1d1813") {
+  return {
+    trim: "standard",
+    bulk: 1,
+    band: { show: false, color: mixHex(color, "#111111", 0.6) },
+    penLoop: { show: false, color: mixHex(color, "#111111", 0.6) }
+  };
+}
+
 export const PAGE_TYPES = [
   { id: "halftitle", label: "Half-title", note: "The title alone" },
   { id: "title", label: "Title page", note: "Title, subtitle, author" },
@@ -332,6 +355,7 @@ export function createBook({ presetId = "ultramarine", title = "", author = "", 
     // Age: rubbed corners and edges (`scuff`) and sun-fading (`fade`), 0 to 1.
     wear: { scuff: 0, fade: 0 }
   };
+  book.structure = defaultStructure();
   applyPreset(book, presetId);
   return book;
 }
@@ -407,6 +431,15 @@ export function normalizeBook(value) {
   if (!["deboss", "emboss", "flat"].includes(book.stamp.relief)) book.stamp.relief = "flat";
   book.stamp.depth = Math.min(1, Math.max(0, Number(book.stamp.depth) || 0));
   book.wear = { scuff: 0, fade: 0, ...(value.wear || {}) };
+  const structure = value.structure || {};
+  book.structure = {
+    ...defaultStructure(),
+    ...structure,
+    band: { ...defaultStructure().band, ...(structure.band || {}) },
+    penLoop: { ...defaultStructure().penLoop, ...(structure.penLoop || {}) }
+  };
+  if (!TRIMS.some((trim) => trim.id === book.structure.trim)) book.structure.trim = "standard";
+  book.structure.bulk = Math.min(1.6, Math.max(0.55, Number(book.structure.bulk) || 1));
   book.pattern = { ...base.pattern, ...(value.pattern || {}) };
   if (!value.pattern) book.pattern.key = "none";
   // Books made before these options existed keep the look they had.

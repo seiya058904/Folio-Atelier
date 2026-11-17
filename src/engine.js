@@ -987,6 +987,7 @@ function updatePaginatedBook(rig, delta, openAmount = 1) {
       rig.frontPivot.rotation.y = coverSpring.value;
     }
   }
+  rig.updateBand();
 
   rig.leaves.forEach((pagePivot, leafOrder) => {
     let pageTarget = 0;

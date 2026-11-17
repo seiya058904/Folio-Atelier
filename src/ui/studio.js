@@ -25,6 +25,7 @@ import { perf } from "../perf.js";
 import { addImage, getImage } from "../state/images.js";
 import {
   PAGE_TYPES,
+  TRIMS,
   applyLayout,
   applyPreset,
   createPage,
@@ -57,6 +58,7 @@ const TABS = [
   { id: "spine", label: "Spine", view: "spine" },
   { id: "back", label: "Back", view: "back" },
   { id: "details", label: "Details", view: "details" },
+  { id: "structure", label: "Structure", view: "front" },
   { id: "pages", label: "Pages", view: "pages" }
 ];
 
@@ -878,6 +880,45 @@ export function createStudioUi({ store, engine, audio }) {
     );
   }
 
+  /** Trim size, thickness, closure band and pen loop. */
+  function structureTab() {
+    const current = book();
+    const structure = () => book().structure;
+    const change = (mutate, key = null, rerender = false) => edit(() => mutate(structure()), ["details"], { key, rerender });
+    return [
+      group("Format", "The size of the book and the thickness of its text block.",
+        segmented({
+          label: "Trim size", value: current.structure.trim, options: TRIMS,
+          onChange: (value) => change((target) => { target.trim = value; })
+        }),
+        slider({
+          label: "Thickness", value: current.structure.bulk, min: 0.55, max: 1.6, step: 0.01, format: percent,
+          onInput: (value) => change((target) => { target.bulk = value; }, "structure-bulk")
+        })
+      ),
+      group("Closure", "An elastic band that holds the book shut. It slips off when you open the book.",
+        toggle({
+          label: "Elastic band", value: current.structure.band.show,
+          onChange: (value) => change((target) => { target.band.show = value; }, null, true)
+        }),
+        current.structure.band.show ? colorField({
+          label: "Band colour", value: current.structure.band.color, swatches: CLOTH_COLORS,
+          onInput: (value) => change((target) => { target.band.color = value; }, "band-color")
+        }) : null
+      ),
+      group("Pen loop", "A fabric loop on the back board to keep a pen with the book.",
+        toggle({
+          label: "Pen loop", value: current.structure.penLoop.show,
+          onChange: (value) => change((target) => { target.penLoop.show = value; }, null, true)
+        }),
+        current.structure.penLoop.show ? colorField({
+          label: "Loop colour", value: current.structure.penLoop.color, swatches: CLOTH_COLORS,
+          onInput: (value) => change((target) => { target.penLoop.color = value; }, "pen-loop-color")
+        }) : null
+      )
+    ];
+  }
+
   function spineTab() {
     const current = book();
     const spine = () => book().spine;
@@ -1378,6 +1419,7 @@ export function createStudioUi({ store, engine, audio }) {
     spine: spineTab,
     back: backTab,
     details: detailsTab,
+    structure: structureTab,
     pages: pagesTab
   };
 
