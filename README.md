@@ -210,8 +210,8 @@ Folio Atelier is a remix of **[The Complete Shelf](https://github.com/mengto/com
 
 New in this remix: the bookmaking studio and `BookSpec` model, materials, foils, patterns, ornaments, typesetting for Latin and CJK text, the page-template system, the `.folio` library, undo/redo, the Simplified Chinese interface, and rendering tiers.
 
-> [!IMPORTANT]
-> **The original repository does not state a licence**, so no licence is granted for this remix either. It is shared as a personal study of the original's work. Please ask the original author before redistributing, reusing or building on it commercially. If the original author asks for it to be taken down, it will be.
+> [!NOTE]
+> The original repository carries no licence file, but its README openly invites readers to **build or remix it** with a coding agent, and this project follows that invitation. Folio Atelier keeps full credit to the original, leaves out its brand-themed cover artwork and product names, and does not claim the original's work as its own. If the original author ever asks for a change, it will be made.
 
 ---
 

@@ -6,7 +6,7 @@ A 3D book-making studio remixed from `mengto/complete-shelf`. See `README.md` fo
 
 - No build step, no npm dependencies. Native ES modules; Three.js 0.165 pinned in the import map in `index.html`. Ask before upgrading Three.js or adding a dependency.
 - The interface is bilingual (English and Simplified Chinese). English is the source language in code; every new visible string needs an entry in the `ZH` table in `src/i18n.js`. Book content must keep working with CJK text.
-- The original repository has no licence: keep the credit in `README.md`, never add its brand-themed cover artwork or product names, and do not publish or deploy without the user's explicit go-ahead.
+- The original repository has no licence file, but its README invites remixing ("Build or remix it with an agent"). Keep the credit in `README.md` and never add its brand-themed cover artwork or product names. Pushes and deployments still need the user's go-ahead (given for the initial publication on 2026-11-17).
 - Preserve the 3D quality of the original (materials, page physics, transitions). Compare against the live original before changing rig, lighting or page motion.
 
 ## Run and verify
