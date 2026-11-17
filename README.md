@@ -41,7 +41,7 @@ foil that catches the light, and typeset pages inside, kept on your own shelf in
 
 > **No account. No server. No install.**
 >
-> Folio Atelier is a single static page. Books save automatically to your browser, and any book can be exported as a `.folio` file to back it up or carry it elsewhere.
+> Folio Atelier is a single static page. Books save automatically to your browser; export one book or the whole library as a `.folio` file to back it up or carry it elsewhere.
 
 ## 🪑 From an Empty Shelf
 
@@ -68,14 +68,14 @@ The first visit shows an empty walnut shelf and one invitation: create your firs
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>🧶 Nine Covering Materials</h3>
-      <p><sub>BOOKCLOTH · BUCKRAM · LINEN · SILK · LEATHER · SUEDE · VELLUM · PAPER · VELVET</sub></p>
-      <p>Full, quarter or half binding in two colours, each with its own grain, sheen and wear.</p>
+      <h3>🧶 Fifteen Covering Materials</h3>
+      <p><sub>BOOKCLOTH · BUCKRAM · LINEN · SILK · LEATHER · SUEDE · VELLUM · PAPER · VELVET · CANVAS · DENIM · CORK · SNAKESKIN · WOOD VENEER · ACRYLIC</sub></p>
+      <p>Full, quarter or half binding in two colours, each with its own grain and sheen. An <strong>Age</strong> control rubs the corners and fore-edge, fades the colour in the sun and wears the foil thin.</p>
     </td>
     <td width="50%" valign="top">
-      <h3>✨ Sixteen Foils</h3>
+      <h3>✨ Sixteen Foils, Pressed in Relief</h3>
       <p><sub>ANTIQUE GOLD · SILVER · COPPER · HOLOGRAPHIC · PEARL …</sub></p>
-      <p>Adjustable metal, polish and iridescence. Foil is a true metallic layer, so it flashes as you orbit the book.</p>
+      <p>Adjustable metal, polish and iridescence, and a polished, matte or brushed leaf. Foil and blind stamps are <strong>debossed or embossed</strong> to the depth you choose: a height map lights them as real impressions as you orbit the book.</p>
     </td>
   </tr>
   <tr>
@@ -87,7 +87,7 @@ The first visit shows an empty walnut shelf and one invitation: create your firs
     <td width="50%" valign="top">
       <h3>🔩 Finishing Details</h3>
       <p><sub>EDGES · CORNERS · STITCHING · RIBBONS · HEADBANDS</sub></p>
-      <p>Gilt, stained, sprinkled or ombré page edges; metal corner pieces; stab stitching in four or six holes; a pasted spine label; patterned endpapers; one or two ribbons; seven paper stocks.</p>
+      <p>Gilt, gauffered, stained, sprinkled, ombré, marbled or paste-patterned page edges; metal corner pieces; stab stitching in four or six holes; a pasted spine label; patterned endpapers; one or two ribbons; seven paper stocks.</p>
     </td>
   </tr>
 </table>
@@ -95,7 +95,11 @@ The first visit shows an empty walnut shelf and one invitation: create your firs
 <a id="the-cover"></a>
 ## 🏷️ The Cover, Spine and Back
 
-Eight cover layouts (two set the title vertically), fourteen border styles and thirty-three ornaments. Bring your own artwork as a full cover or an inset plate, and add lettering lines with typeface, size, weight, tracking, position, direction and finish. Twenty-one typefaces are included, five of them Chinese. The spine and back are composed with the same tools.
+Eight cover layouts (two set the title vertically), seventeen border styles — among them hand-tooled fillets, a leaf roll and corner fleurons — and thirty-three ornaments. Lay a contrasting piece of leather on the board (an **onlay**, standing proud) or set it flush (an **inlay**). Bring your own artwork as a full cover or an inset plate, and add lettering lines with typeface, size, weight, tracking, position, direction and finish. Twenty-one typefaces are included, five of them Chinese. The spine and back are composed with the same tools, including tooled compartments between raised bands.
+
+## 📐 The Structure
+
+Four trim sizes — pocket, crown octavo, standard and large — and a thickness control for the text block. Add an **elastic closure band**, which slips off when the book opens, and a **pen loop** on the back board.
 
 <a id="the-inside"></a>
 ## 📄 The Inside
@@ -107,7 +111,7 @@ Eight cover layouts (two set the title vertically), fourteen border styles and t
     </td>
     <td width="42%" valign="top">
       <h3>Write it, and it is typeset</h3>
-      <p>Thirteen page templates: half-title, title page, dedication, epigraph, contents, part title, chapter opener, body text, verse, pull quote, plate, colophon and blank.</p>
+      <p>Fourteen page templates: half-title, title page, dedication, epigraph, contents, part title, chapter opener, body text, verse, pull quote, plate, colophon, blank, and notebook pages — lined, dot grid or squared, as many as you like.</p>
       <p>Long text flows onto as many pages as it needs. The contents page builds itself, and <code>***</code> on its own line sets a section break.</p>
       <p>Choose leading, chapter-opening style, page-number position and ink colour. Latin and CJK text are both set properly.</p>
     </td>
@@ -144,7 +148,13 @@ Each book also chooses the language of its own printed labels, so a book can say
 
 ## 📚 Keep a Library
 
-Books save automatically in your browser (IndexedDB). Duplicate or delete a volume, **export** it to a `.folio` file and **import** it on another device or browser. Nothing is uploaded anywhere.
+Books save automatically in your browser (IndexedDB). Duplicate or delete a volume, **export** it — or **export all** the books, their pictures and the room in one `.folio` file — and **import** it on another device or browser. Nothing is uploaded anywhere.
+
+The **Room** panel on the shelf sets the scene for the whole library: a walnut, oak, painted, black-steel or floating-ledge shelf, in studio, morning, golden-hour or night light.
+
+## 📤 Share a Book
+
+From the Design tab: save a **picture** of the view (PNG), a **turntable** of the book turning once round (an animated GIF), or **every printed page as a PDF** ready to print. All three are made in the browser.
 
 > [!NOTE]
 > **Books live only in the browser that made them.** Clearing site data removes them. Export a `.folio` file to keep a copy.
@@ -154,7 +164,7 @@ Books save automatically in your browser (IndexedDB). Duplicate or delete a volu
 
 No framework, bundler or backend: native ES modules, [Three.js](https://threejs.org/) 0.165 from a CDN, and IndexedDB for storage.
 
-Each book is one serialisable `BookSpec`. The rig paints every surface from that spec onto canvases — a base layer for dyed material and print, and a white mask that the metallic foil material uses — so any edit repaints only the surfaces it touches while the model stays on screen. Only four leaves carry printed pages; as you read through a longer book, the leaf at the bottom of one pile is moved under the other and printed with the pages about to come into view.
+Each book is one serialisable `BookSpec`. The rig paints every surface from that spec onto canvases — a base layer for dyed material and print, a white mask that the metallic foil material uses, and a height map for stamping depth — so any edit repaints only the surfaces it touches while the model stays on screen. Edits are merged and painted once per frame (at draft size while dragging), and the render loop sleeps when nothing moves: an idle studio draws no frames. Add `?perf` to see frame times and what each repaint costs. Only four leaves carry printed pages; as you read through a longer book, the leaf at the bottom of one pile is moved under the other and printed with the pages about to come into view.
 
 <details>
 <summary><strong>⚙️ Expand run-locally, module map &amp; rendering tiers</strong></summary>
@@ -184,6 +194,9 @@ Then open <http://localhost:4173>. An internet connection is needed for the pinn
 | [`src/data/`](src/data/) | Starting bindings and typefaces |
 | [`src/ui/`](src/ui/) | Shelf interface, studio workbench, controls |
 | [`src/i18n.js`](src/i18n.js) | English / Simplified Chinese interface strings |
+| [`src/motion.js`](src/motion.js) | Shared easing curves, springs and idle scheduling |
+| [`src/share.js`](src/share.js) | GIF encoder and PDF writer for sharing (no dependencies) |
+| [`src/perf.js`](src/perf.js), [`src/dev/bench.js`](src/dev/bench.js) | `?perf` overlay and the `?bench` benchmark |
 | [`src/audio.js`](src/audio.js) | Music and interaction sounds |
 
 ### Rendering quality
@@ -208,7 +221,7 @@ The [Pages workflow](.github/workflows/pages.yml) syntax-checks every module, as
 
 Folio Atelier is a remix of **[The Complete Shelf](https://github.com/mengto/complete-shelf) by Meng To**. The hardcover construction, page-turn physics, shelf-to-detail transitions, room and lighting, walnut texture, soundtrack and Foley come from that project. Its seven bindings live on here as de-branded colour, foil and ornament presets; the original cover artwork and product names are not included.
 
-New in this remix: the bookmaking studio and `BookSpec` model, materials, foils, patterns, ornaments, typesetting for Latin and CJK text, the page-template system, the `.folio` library, undo/redo, the Simplified Chinese interface, and rendering tiers.
+New in this remix: the bookmaking studio and `BookSpec` model, materials, foils, stamping relief, onlays, patterns, ornaments and tooling, trim sizes and closures, typesetting for Latin and CJK text, the page-template system, the `.folio` library, the room panel, PNG / GIF / PDF sharing, undo/redo, the Simplified Chinese interface, on-demand rendering and rendering tiers.
 
 > [!NOTE]
 > The original repository carries no licence file, but its README openly invites readers to **build or remix it** with a coding agent, and this project follows that invitation. Folio Atelier keeps full credit to the original, leaves out its brand-themed cover artwork and product names, and does not claim the original's work as its own. If the original author ever asks for a change, it will be made.
