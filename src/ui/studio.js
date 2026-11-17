@@ -789,6 +789,7 @@ export function createStudioUi({ store, engine, audio }) {
         })
       ),
       group("Border", null, ...borderEditor("front")),
+      onlayGroup(),
       group("Ornament", null, ...motifEditor("front")),
       group("Artwork", "Use your own picture as the whole cover or as an inset plate. Foil and print sit on top.",
         h("div", { class: "upload" },
@@ -813,6 +814,56 @@ export function createStudioUi({ store, engine, audio }) {
       ),
       letteringGroup("front", "Each line can use the book's shared words or its own text.")
     ];
+  }
+
+  /** A contrasting piece of leather on the front board. */
+  function onlayGroup() {
+    const onlay = () => book().front.onlay;
+    const current = onlay();
+    const change = (mutate, key = null) => edit(() => mutate(onlay()), ["front"], { key });
+    return group("Onlay", "A piece of contrasting leather laid on the board, or set flush into it.",
+      toggle({
+        label: "Add a leather piece", value: current.show,
+        onChange: (value) => edit(() => { onlay().show = value; }, ["front"], { rerender: true })
+      }),
+      current.show ? segmented({
+        label: "Setting", value: current.mode,
+        options: [{ id: "onlay", label: "Laid on" }, { id: "inlay", label: "Set flush" }],
+        onChange: (value) => change((target) => { target.mode = value; })
+      }) : null,
+      current.show ? row(
+        select({
+          label: "Shape", value: current.shape,
+          options: [
+            { id: "rect", label: "Rectangle" }, { id: "rounded", label: "Rounded" }, { id: "oval", label: "Oval" },
+            { id: "diamond", label: "Diamond" }, { id: "arch", label: "Arch" }
+          ],
+          onChange: (value) => change((target) => { target.shape = value; })
+        }),
+        select({
+          label: "Material", value: current.kind, options: MATERIALS,
+          onChange: (value) => change((target) => { target.kind = value; })
+        })
+      ) : null,
+      current.show ? colorField({
+        label: "Leather colour", value: current.color, swatches: CLOTH_COLORS,
+        onInput: (value) => change((target) => { target.color = value; }, "onlay-color")
+      }) : null,
+      current.show ? row(
+        slider({
+          label: "Width", value: current.width, min: 0.15, max: 0.9, step: 0.01, format: percent,
+          onInput: (value) => change((target) => { target.width = value; }, "onlay-width")
+        }),
+        slider({
+          label: "Height", value: current.height, min: 0.1, max: 0.9, step: 0.01, format: percent,
+          onInput: (value) => change((target) => { target.height = value; }, "onlay-height")
+        }),
+        slider({
+          label: "Position", value: 1 - current.y, min: 0.1, max: 0.9, step: 0.01, format: percent,
+          onInput: (value) => change((target) => { target.y = 1 - value; }, "onlay-y")
+        })
+      ) : null
+    );
   }
 
   function spineTab() {

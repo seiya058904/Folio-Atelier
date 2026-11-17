@@ -140,6 +140,13 @@ function buildFront(layoutId, preset, color) {
   if (front.border.finish !== "ink") front.border.color = ink;
   front.texts.forEach((layer) => { if (layer.finish !== "ink") layer.color = ink; });
   front.motif.color = ink;
+  // A piece of contrasting leather laid on the board (onlay) or set flush
+  // into a cut-out (inlay). Off until the reader adds one.
+  front.onlay = {
+    show: false, mode: "onlay", shape: "rounded", kind: "leather",
+    color: mixHex(color, luminance(color) < 0.3 ? "#e8dcc4" : "#1d1813", 0.55),
+    x: 0.5, y: 0.4, width: 0.62, height: 0.3
+  };
   if (preset.border) front.border.style = preset.border;
   if (preset.blank) {
     front.border.style = "none";
@@ -289,6 +296,7 @@ export function applyLayout(book, layoutId) {
   const preset = { motif: book.front?.motif?.key || "none" };
   const next = buildFront(layoutId, preset, book.material.color);
   next.image = book.front?.image || null;
+  if (book.front?.onlay) next.onlay = book.front.onlay;
   book.front?.texts?.forEach((previous) => {
     const layer = next.texts.find((candidate) => candidate.id === previous.id);
     if (layer && previous.source === "custom") {
@@ -412,6 +420,7 @@ export function normalizeBook(value) {
       ...base[face],
       ...stored,
       border: { ...base[face].border, ...(stored.border || {}) },
+      ...(face === "front" ? { onlay: { ...base.front.onlay, ...(stored.onlay || {}) } } : {}),
       motif: { ...base[face].motif, ...(stored.motif || {}) },
       texts: Array.isArray(stored.texts) && stored.texts.length
         ? stored.texts.map((layer) => ({ ...base[face].texts[0], vertical: false, ...layer }))

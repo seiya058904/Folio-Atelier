@@ -299,7 +299,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   };
   const stampDepth = () => clamp(rig.data.stamp?.depth ?? 0.5, 0, 1);
   const stampSign = () => (rig.data.stamp?.relief === "deboss" ? -1 : 1);
-  const reliefOn = () => (rig.data.stamp?.relief ?? "flat") !== "flat" && stampDepth() > 0;
+  const onlayShown = () => Boolean(rig.data.front.onlay?.show);
+  const reliefOn = () => ((rig.data.stamp?.relief ?? "flat") !== "flat" && stampDepth() > 0) || onlayShown();
   // Relief maps are made only for books that use them, at half size: a
   // height map needs less detail than the picture on top of it.
   const reliefTarget = (face, wanted) => {
@@ -615,7 +616,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     });
     if (glint > 0) setGlint(glint);
 
-    const reliefScale = reliefOn() ? stampDepth() * RELIEF_STRENGTH : 0;
+    // A laid-on piece of leather always stands proud, even on a flat book.
+    const reliefScale = reliefOn() ? Math.max(stampDepth(), onlayShown() ? 0.4 : 0) * RELIEF_STRENGTH : 0;
     Object.entries(artFor).forEach(([face, material]) => {
       const target = targets[`${face}Relief`];
       material.userData.relief.map.value = target ? target.texture : null;

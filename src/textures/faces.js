@@ -46,7 +46,83 @@ const RELIEF_LEVEL = "#808080";
 
 /** The height a stamp leaves in the relief layer. */
 function stampTone(book) {
-  return book.stamp?.relief === "emboss" ? "#ffffff" : "#000000";
+  const relief = book.stamp?.relief;
+  if (relief === "emboss") return "#ffffff";
+  return relief === "deboss" ? "#000000" : RELIEF_LEVEL;
+}
+
+/** Trace an onlay's outline (logical board units). */
+function traceOnlay(ctx, onlay, width, height, inset = 0) {
+  const w = onlay.width * width - inset * 2;
+  const h = onlay.height * height - inset * 2;
+  const x = onlay.x * width - w / 2;
+  const y = onlay.y * height - h / 2;
+  ctx.beginPath();
+  if (onlay.shape === "oval") {
+    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+  } else if (onlay.shape === "diamond") {
+    ctx.moveTo(x + w / 2, y);
+    ctx.lineTo(x + w, y + h / 2);
+    ctx.lineTo(x + w / 2, y + h);
+    ctx.lineTo(x, y + h / 2);
+    ctx.closePath();
+  } else if (onlay.shape === "arch") {
+    const radius = Math.min(w / 2, h * 0.6);
+    ctx.moveTo(x, y + h);
+    ctx.lineTo(x, y + radius);
+    ctx.arc(x + w / 2, y + radius, w / 2, Math.PI, 0);
+    ctx.lineTo(x + w, y + h);
+    ctx.closePath();
+  } else if (onlay.shape === "rounded") {
+    ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.12);
+  } else {
+    ctx.rect(x, y, w, h);
+  }
+}
+
+/**
+ * Onlay: a pared piece of leather laid on the board, standing a little proud
+ * with a soft shadow. Inlay: the same piece set flush into a cut-out, seen by
+ * the fine line where the two meet.
+ */
+function drawOnlay(layers, book, onlay, width, height) {
+  if (!onlay?.show) return;
+  const ctx = layers.base;
+  const inlay = onlay.mode === "inlay";
+  ctx.save();
+  if (!inlay) {
+    ctx.shadowColor = "rgba(0,0,0,0.34)";
+    ctx.shadowBlur = 7;
+    ctx.shadowOffsetY = 2.5;
+    ctx.fillStyle = onlay.color;
+    traceOnlay(ctx, onlay, width, height);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+  }
+  traceOnlay(ctx, onlay, width, height);
+  ctx.clip();
+  paintMaterialBase(ctx, width, height, onlay.color, onlay.kind, book.seed + 19, { overlay: fastGrain });
+  ctx.restore();
+  ctx.save();
+  traceOnlay(ctx, onlay, width, height, inlay ? 0 : 1.2);
+  ctx.lineWidth = inlay ? 1.8 : 1.4;
+  ctx.strokeStyle = inlay ? "rgba(0,0,0,0.5)" : "rgba(255,255,255,0.16)";
+  ctx.stroke();
+  ctx.restore();
+  if (layers.relief) {
+    const relief = layers.relief;
+    relief.save();
+    traceOnlay(relief, onlay, width, height);
+    if (inlay) {
+      relief.lineWidth = 2.2;
+      relief.strokeStyle = "#000000";
+      relief.stroke();
+    } else {
+      relief.fillStyle = "#c4c4c4";
+      relief.fill();
+    }
+    relief.restore();
+  }
 }
 
 /**
@@ -680,6 +756,7 @@ export function paintFront(book, baseTarget, foilTarget, onAsset, commit, relief
   };
   const front = book.front;
   paintBoard(layers, baseTarget, book, "front", width, height);
+  drawOnlay(layers, book, front.onlay, width, height);
 
   if (front.image?.id) {
     const image = getImage(front.image.id, onAsset);
@@ -1035,7 +1112,13 @@ export function faceSignatures(book, face) {
   } else {
     const side = book[face];
     if (pattern && hasPattern(pattern.key)) split(pattern.finish, [pattern, twoTone ? material.binding : ""], parts);
-    if (face === "front") parts.base.push(side.image, side.image?.id ? Boolean(getImage(side.image.id)) : null);
+    if (face === "front") {
+      parts.base.push(side.image, side.image?.id ? Boolean(getImage(side.image.id)) : null);
+      if (side.onlay?.show) {
+        parts.base.push(side.onlay);
+        parts.relief.push([side.onlay.mode, side.onlay.shape, side.onlay.x, side.onlay.y, side.onlay.width, side.onlay.height]);
+      }
+    }
     // A pasted panel always prints its paper on the base, whatever its rule is.
     if (side.border.style === "panel" || side.border.style === "slip") parts.base.push(side.border);
     split(side.border.finish, side.border, parts);
