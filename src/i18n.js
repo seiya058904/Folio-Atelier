@@ -205,6 +205,8 @@ const ZH = {
   "Printed as": "印制方式", "Photograph": "照片", "Duotone": "双色调", "Halftone": "网点", "Engraving": "版画线条",
   "Wax seal": "火漆印", "Letter": "字母", "From the title": "取自书名", "Wax": "火漆",
   "A seal of wax pressed on the board, with a letter. It takes the first letter of the title unless you give it one.": "压在封面上的火漆印，带一个字母。不填写时取书名的第一个字。",
+  "Second foil": "第二种箔", "Zoom": "缩放", "Paste paper": "糊染纸", "Contour map": "等高线地图",
+  "Used for everything stamped in foil on the boards and spine. Give any element the finish Second foil to stamp it in a second colour.": "封面、封底和书脊上所有烫箔的元素都用它。把任一元素的工艺设为“第二种箔”，就用第二种颜色烫印。",
   "Board corners": "书角", "Square": "直角", "Metal clasp": "金属搭扣", "Clasp metal": "搭扣金属",
   "Brass": "黄铜", "Blackened iron": "黑铁", "Pocket and slipcase": "内袋与书匣",
   "A paper pocket inside the front board, and a case that keeps the book on the shelf. The book slides out of it when you open it.": "封面内侧的纸袋，以及在书架上收纳书本的书匣。翻开时，书会从书匣里滑出。",

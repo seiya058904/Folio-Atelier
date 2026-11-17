@@ -30,7 +30,8 @@ import {
   applyLayout,
   applyPreset,
   createPage,
-  layerText
+  layerText,
+  secondFoilFor
 } from "../state/schema.js";
 import { PAGE_INKS, PAGE_SIZE, paintPage } from "../textures/pages.js";
 import { buildPdf, encodeGif } from "../share.js";
@@ -83,9 +84,13 @@ const SOURCES = [
 ];
 const FINISHES = [
   { id: "foil", label: "Foil" },
+  { id: "foil2", label: "Second foil" },
   { id: "ink", label: "Print" },
   { id: "blind", label: "Blind" }
 ];
+// The second foil is stored as finish "foil" with `leaf: "second"`, so every
+// painter that knows foil keeps working; the control shows it as a finish.
+const finishOf = (element) => (element.finish === "foil" && element.leaf === "second" ? "foil2" : element.finish);
 const LAYER_NAMES = {
   series: "Series line", title: "Title", subtitle: "Subtitle", author: "Author",
   "spine-title": "Title", "spine-author": "Author", "spine-mark": "Head mark",
@@ -411,10 +416,14 @@ export function createStudioUi({ store, engine, audio }) {
     return [
       segmented({
         label: "Finish",
-        value: target().finish,
+        value: finishOf(target()),
         options: FINISHES,
         onChange: (value) => {
-          edit(() => { target().finish = value; }, dirty);
+          edit(() => {
+            const element = target();
+            element.finish = value === "foil2" ? "foil" : value;
+            element.leaf = value === "foil2" ? "second" : "main";
+          }, dirty);
           paintColour();
         }
       }),
@@ -760,7 +769,7 @@ export function createStudioUi({ store, engine, audio }) {
           })
         ] : null
       ),
-      group("Foil", "Used for everything stamped in foil on the boards and spine.",
+      group("Foil", "Used for everything stamped in foil on the boards and spine. Give any element the finish Second foil to stamp it in a second colour.",
         colorField({
           label: "Foil", value: current.foil.preset, swatches: foilSwatches,
           onInput: (value, custom) => edit(() => {
@@ -771,7 +780,8 @@ export function createStudioUi({ store, engine, audio }) {
               const foil = getFoil(value);
               target.foil = {
                 preset: foil.id, color: foil.color, metalness: foil.metalness, roughness: foil.roughness,
-                iridescence: foil.iridescence || 0, texture: target.foil.texture || "polished"
+                iridescence: foil.iridescence || 0, texture: target.foil.texture || "polished",
+                second: target.foil.second || secondFoilFor(foil.id)
               };
             }
           }, ["foil"], { key: custom ? "foil-color" : null, rerender: !custom })
@@ -798,6 +808,13 @@ export function createStudioUi({ store, engine, audio }) {
             { id: "brushed", label: "Brushed" }
           ],
           onChange: (value) => edit(() => { book().foil.texture = value; }, ["foil"])
+        }),
+        colorField({
+          label: "Second foil", value: current.foil.second,
+          swatches: FOILS.filter((foil) => foil.id !== "custom" && foil.metalness > 0.3).map((foil) => ({
+            color: foil.color, label: foil.label, value: foil.color, metal: true
+          })),
+          onInput: (value) => edit(() => { book().foil.second = value; }, ["foil"], { key: "foil-second" })
         })
       ),
       group("Share", "Keep a picture of the book, a turntable to send, or its pages to print.",
@@ -859,7 +876,7 @@ export function createStudioUi({ store, engine, audio }) {
         return;
       }
       edit(() => {
-        book().front.image = { id, mode: book().front.image?.mode || "full", opacity: 1 };
+        book().front.image = { id, mode: book().front.image?.mode || "full", opacity: 1, treatment: "none", zoom: 1, focusX: 0.5, focusY: 0.5 };
       }, ["front"], { rerender: true });
     };
 
@@ -904,7 +921,22 @@ export function createStudioUi({ store, engine, audio }) {
             { id: "halftone", label: "Halftone" }, { id: "engraving", label: "Engraving" }
           ],
           onChange: (value) => edit(() => { book().front.image.treatment = value; }, ["front"])
-        }) : null
+        }) : null,
+        // Framing: enlarge the picture and choose which part of it shows.
+        image ? row(
+          slider({
+            label: "Zoom", value: image.zoom ?? 1, min: 1, max: 3, step: 0.01, format: percent,
+            onInput: (value) => edit(() => { book().front.image.zoom = value; }, ["front"], { key: "front-image-zoom" })
+          }),
+          slider({
+            label: "Across", value: image.focusX ?? 0.5, min: 0, max: 1, step: 0.01, format: percent,
+            onInput: (value) => edit(() => { book().front.image.focusX = value; }, ["front"], { key: "front-image-x" })
+          }),
+          slider({
+            label: "Down", value: image.focusY ?? 0.5, min: 0, max: 1, step: 0.01, format: percent,
+            onInput: (value) => edit(() => { book().front.image.focusY = value; }, ["front"], { key: "front-image-y" })
+          })
+        ) : null
       ),
       letteringGroup("front", "Each line can use the book's shared words or its own text.")
     ];

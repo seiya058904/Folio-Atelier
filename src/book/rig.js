@@ -287,7 +287,16 @@ function createBandJoin(width, thick, halfHeight, outer, reach) {
   add(top, -outer + radius);
   arc(top - radius, -outer + radius, Math.PI * 0.5, Math.PI);
   add(halfHeight - reach, -outer);
+  return sweepBand(path, width, thick);
+}
 
+/**
+ * A strip of rounded section swept along `path` ([y, z] points in the y-z
+ * plane). The straight strips and the joins share it, so their sections and
+ * their weave meet without a seam. `period` is the weave's repeat along the
+ * strip.
+ */
+function sweepBand(path, width, thick, period = 0.08) {
   // A rounded rectangle for the section (a superellipse).
   const RING = 16;
   const section = [];
@@ -315,7 +324,7 @@ function createBandJoin(width, thick, halfHeight, outer, reach) {
     if (index > 0) travelled += Math.hypot(y - path[index - 1][0], z - path[index - 1][1]);
     section.forEach(([sx, sn], ring) => {
       positions.push(sx, y + ny * sn, z + nz * sn);
-      uvs.push(ring / RING, travelled / 0.08);
+      uvs.push(ring / RING, travelled / period);
     });
   });
   const indices = [];
@@ -510,6 +519,32 @@ function withRelief(material) {
   return material;
 }
 
+/*
+ * Two foils on one board. The foil layer is white where the main foil is
+ * stamped and magenta (no green) where the second is; the material itself is
+ * white, and this tints each texel, and its glow, with its own leaf colour.
+ * Both colours are uniforms, so changing either one repaints nothing.
+ */
+function compileLeaf(shader) {
+  shader.uniforms.leafMain = this.userData.leaf.main;
+  shader.uniforms.leafSecond = this.userData.leaf.second;
+  shader.fragmentShader = shader.fragmentShader
+    .replace("#include <map_pars_fragment>", "#include <map_pars_fragment>\nuniform vec3 leafMain;\nuniform vec3 leafSecond;")
+    .replace("#include <map_fragment>", `vec3 leafTint = leafMain;
+#ifdef USE_MAP
+  vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+  leafTint = mix( leafMain, leafSecond, clamp( 1.0 - sampledDiffuseColor.g / max( sampledDiffuseColor.r, 0.001 ), 0.0, 1.0 ) );
+  diffuseColor *= vec4( leafTint * sampledDiffuseColor.r, sampledDiffuseColor.a );
+#endif`)
+    .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance *= leafTint;");
+}
+
+function withLeaf(material) {
+  material.userData.leaf = { main: { value: new THREE.Color(1, 1, 1) }, second: { value: new THREE.Color(1, 1, 1) } };
+  material.onBeforeCompile = compileLeaf;
+  return material;
+}
+
 // Height of a full stamp at depth 1. The height map steps over a texel or two,
 // so it needs a much larger scale than a soft bump map.
 const RELIEF_STRENGTH = 12;
@@ -583,9 +618,9 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     polygonOffsetFactor: -2,
     side
   });
-  const foilArt = physical(foilParameters(targets.frontFoil, THREE.FrontSide));
-  const spineFoilArt = physical(foilParameters(targets.spineFoil, THREE.DoubleSide));
-  const backFoilArt = physical(foilParameters(targets.backFoil, THREE.DoubleSide));
+  const foilArt = withLeaf(physical(foilParameters(targets.frontFoil, THREE.FrontSide)));
+  const spineFoilArt = withLeaf(physical(foilParameters(targets.spineFoil, THREE.DoubleSide)));
+  const backFoilArt = withLeaf(physical(foilParameters(targets.backFoil, THREE.DoubleSide)));
   const endpaperMaterial = physical({
     map: targets.endpaper.texture, bumpMap: paperFace, bumpScale: 0.0018,
     roughness: 0.94, metalness: 0, sheen: 0.025, sheenRoughness: 1, side: THREE.DoubleSide
@@ -751,10 +786,11 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   const BAND_REACH = 0.05; // how far each join runs down a board
   const bandStripLength = d.height - BAND_REACH * 2;
   if (!shared.bandStrip) {
-    shared.bandStrip = new RoundedBoxGeometry(BAND_WIDTH, bandStripLength, BAND_THICK, 2, BAND_THICK * 0.45);
-    // The weave repeats every 8 cm, as on the joins.
-    const uv = shared.bandStrip.getAttribute("uv");
-    for (let index = 0; index < uv.count; index += 1) uv.setY(index, uv.getY(index) * (bandStripLength / 0.08));
+    // Swept like the joins, with a whole number of weave repeats, so the weave
+    // carries on unbroken into the joins at both ends.
+    const half = bandStripLength * 0.5;
+    const period = bandStripLength / Math.max(1, Math.round(bandStripLength / 0.08));
+    shared.bandStrip = sweepBand([[-half, 0], [0, 0], [half, 0]], BAND_WIDTH, BAND_THICK, period);
   }
   const bandFront = createMesh(shared.bandStrip, bandMaterial, "band-front", true, false);
   bandFront.position.set(bandX, 0, d.board * 0.5 + BAND_THICK * 0.5);
@@ -1202,8 +1238,12 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     const twoTone = spec.material.binding === "quarter" || spec.material.binding === "half";
     grooveMaterial.color.set(twoTone ? spec.material.second : spec.material.color).multiplyScalar(0.42);
 
+    const secondColor = new THREE.Color(spec.foil.second || spec.foil.color);
     [foilArt, spineFoilArt, backFoilArt].forEach((material) => {
-      material.color.copy(foilColor);
+      // The colours are the shader's (see `compileLeaf`); the material is white.
+      material.color.setRGB(1, 1, 1);
+      material.userData.leaf.main.value.copy(foilColor);
+      material.userData.leaf.second.value.copy(secondColor);
       material.metalness = spec.foil.metalness;
       material.roughness = spec.foil.roughness;
       // Pigment foils sit flat; metallic foils are pressed deeper. Debossed
@@ -1220,7 +1260,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
       const anisotropy = texture === "matte" ? 0 : texture === "brushed" ? 0.9 : metallic ? 0.34 : 0;
       if ((material.anisotropy > 0) !== (anisotropy > 0)) material.needsUpdate = true;
       material.anisotropy = anisotropy;
-      material.emissive.copy(foilColor);
+      material.emissive.setRGB(1, 1, 1);
       material.emissiveIntensity = metallic ? 0.2 : 0.06;
       // Holographic and pearl foils: thin-film colour that shifts with the view.
       const iridescence = spec.foil.iridescence || 0;
@@ -1433,8 +1473,9 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
       source.userData = {};
       const material = source.clone();
       source.userData = saved;
-      if (saved.relief) {
-        material.userData.relief = saved.relief;
+      if (saved.relief || saved.leaf) {
+        if (saved.relief) material.userData.relief = saved.relief;
+        if (saved.leaf) material.userData.leaf = saved.leaf;
         material.onBeforeCompile = source.onBeforeCompile;
       }
       set(material);

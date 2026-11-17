@@ -264,6 +264,107 @@ const DRAW = {
     ctx.globalAlpha = 1;
   },
 
+  // Paste paper: coloured paste combed through in swathes, each swathe
+  // swaying the other way from its neighbours, the teeth a little uneven.
+  paste(ctx, w, h, u, random) {
+    const swathe = u * 1.15;
+    const teeth = 7;
+    const baseWidth = ctx.lineWidth;
+    for (let column = -1, sx = -swathe * 0.5; sx < w + swathe; column += 1, sx += swathe) {
+      const phase = (column % 2 ? Math.PI : 0) + random() * 0.4;
+      const sway = u * (0.2 + random() * 0.08);
+      for (let tooth = 0; tooth < teeth; tooth += 1) {
+        const offset = (tooth / teeth) * swathe + random() * u * 0.03;
+        ctx.globalAlpha = 0.55 + random() * 0.45;
+        ctx.lineWidth = baseWidth * (1.6 + random() * 1.8);
+        ctx.beginPath();
+        for (let step = 0, y = -u * 0.2; y <= h + u * 0.2; step += 1, y += u * 0.12) {
+          const x = sx + offset + Math.sin((y / u) * 2.4 + phase) * sway + Math.sin((y / u) * 7.3 + tooth) * u * 0.012;
+          if (step) ctx.lineTo(x, y);
+          else ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = baseWidth;
+  },
+
+  // A contour map of imaginary country: hills and hollows from a few soft
+  // bumps, traced level by level (marching squares), every fifth line heavier.
+  contour(ctx, w, h, u, random) {
+    const hills = Array.from({ length: Math.max(6, Math.round((w * h) / (u * u * 9))) }, () => ({
+      x: random() * w, y: random() * h, r: u * (0.9 + random() * 2.2), a: (random() - 0.35) * 2
+    }));
+    const tilt = random() * TAU;
+    const field = (x, y) => {
+      let value = Math.sin((x * Math.cos(tilt) + y * Math.sin(tilt)) / (u * 3.1)) * 0.35;
+      for (const hill of hills) {
+        const dx = x - hill.x;
+        const dy = y - hill.y;
+        // Beyond three radii a bump adds nothing visible.
+        if (Math.abs(dx) > hill.r * 3 || Math.abs(dy) > hill.r * 3) continue;
+        value += hill.a * Math.exp(-(dx * dx + dy * dy) / (hill.r * hill.r));
+      }
+      return value;
+    };
+    const cell = Math.max(3, u * 0.14);
+    const nx = Math.ceil(w / cell) + 1;
+    const ny = Math.ceil(h / cell) + 1;
+    const grid = new Float32Array(nx * ny);
+    let low = Infinity;
+    let high = -Infinity;
+    for (let j = 0; j < ny; j += 1) {
+      for (let i = 0; i < nx; i += 1) {
+        const value = field(i * cell, j * cell);
+        grid[j * nx + i] = value;
+        low = Math.min(low, value);
+        high = Math.max(high, value);
+      }
+    }
+    const step = 0.11;
+    const baseWidth = ctx.lineWidth;
+    const lerp = (a, b, level) => (level - a) / (b - a || 1e-6);
+    for (let index = Math.ceil(low / step); index * step < high; index += 1) {
+      const level = index * step;
+      ctx.lineWidth = baseWidth * (index % 5 === 0 ? 1.7 : 0.8);
+      ctx.globalAlpha = index % 5 === 0 ? 1 : 0.75;
+      ctx.beginPath();
+      for (let j = 0; j < ny - 1; j += 1) {
+        for (let i = 0; i < nx - 1; i += 1) {
+          const a = grid[j * nx + i];
+          const b = grid[j * nx + i + 1];
+          const c = grid[(j + 1) * nx + i + 1];
+          const d = grid[(j + 1) * nx + i];
+          const code = (a > level ? 8 : 0) | (b > level ? 4 : 0) | (c > level ? 2 : 0) | (d > level ? 1 : 0);
+          if (code === 0 || code === 15) continue;
+          const x = i * cell;
+          const y = j * cell;
+          // Where the level crosses each edge of the cell: top, right, bottom, left.
+          const top = [x + lerp(a, b, level) * cell, y];
+          const right = [x + cell, y + lerp(b, c, level) * cell];
+          const bottom = [x + lerp(d, c, level) * cell, y + cell];
+          const left = [x, y + lerp(a, d, level) * cell];
+          const segment = (p, q) => { ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); };
+          switch (code) {
+            case 1: case 14: segment(left, bottom); break;
+            case 2: case 13: segment(bottom, right); break;
+            case 3: case 12: segment(left, right); break;
+            case 4: case 11: segment(top, right); break;
+            case 6: case 9: segment(top, bottom); break;
+            case 7: case 8: segment(left, top); break;
+            case 5: segment(left, top); segment(bottom, right); break;
+            case 10: segment(top, right); segment(left, bottom); break;
+            default: break;
+          }
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = baseWidth;
+  },
+
   speckle(ctx, w, h, u, random) {
     const count = Math.round(((w * h) / (u * u)) * 16);
     for (let dot = 0; dot < count; dot += 1) {

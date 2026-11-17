@@ -6,6 +6,15 @@ This round has three sources: the user's review of the deployed build, the parts
 
 **Status:** G, H and I done; J, K and L partly done (2026-11-18). What is left of J, K and L is listed under each phase below and carries over to round 3.
 
+- **Follow-up pass on the leftovers (2026-11-18).** The user chose to take only the leftovers that are small and clearly worth it, and to drop thickness from page count.
+  - **Done:**
+    - A second foil: any element (lettering, border, ornament, pattern, spine decoration) can be stamped in a second colour. The foil layer marks it magenta and the foil shader tints it, so both colours change as uniforms, with no repaint. Cover thumbnails show it too.
+    - Picture framing: zoom (100–300%) and the point it centres on, for full covers and plates, treatments included.
+    - Paste-paper and contour-map papers, as endpapers and as all-over cover patterns. The contour mask costs about 10 ms the first time for a book and is cached after.
+    - The band's straight strips are swept with the same section as the joins, with a whole number of weave repeats, so the seam is gone.
+  - `?bench` is within the range of the earlier runs on every measure.
+  - **Judged not worth it now:** square and landscape formats, dust jacket, binding families, wrap strap and ribbon tie, distinct places, arrangements, collections (each needs large new geometry or painter work); fore-edge painting (the leaves never fan); nameplate and stickers (the onlay and seal already cover them); tipped-in plates, vellum, footnotes; SVG upload; painting the midnight cover off the main thread.
+
 - **L — partly done.**
   - A cover picture can be printed as a photograph, duotone, halftone or engraving, with inks taken from the cloth. Each treatment is cached, so drags elsewhere on the cover do not redo it (23–98 ms on first paint).
   - A wax seal can be pressed on the front board: an irregular disc of wax with a raised rim and a letter (the title's initial unless given), with colour and position controls.

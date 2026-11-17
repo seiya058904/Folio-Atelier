@@ -125,7 +125,9 @@ export const PATTERNS = [
   { id: "sprigs", label: "Sprigs" },
   { id: "clouds", label: "Clouds" },
   { id: "marble", label: "Marbled" },
-  { id: "speckle", label: "Sprinkled" }
+  { id: "speckle", label: "Sprinkled" },
+  { id: "paste", label: "Paste paper" },
+  { id: "contour", label: "Contour map" }
 ];
 
 export const SPINE_STYLES = [
@@ -178,7 +180,9 @@ export const ENDPAPER_PATTERNS = [
   { id: "stars", label: "Stars" },
   { id: "sprigs", label: "Sprigs" },
   { id: "clouds", label: "Clouds" },
-  { id: "chevron", label: "Chevron" }
+  { id: "chevron", label: "Chevron" },
+  { id: "paste", label: "Paste paper" },
+  { id: "contour", label: "Contour map" }
 ];
 
 /* ---------- cover layouts ---------- */

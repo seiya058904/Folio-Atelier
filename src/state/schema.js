@@ -141,6 +141,12 @@ export function defaultPages() {
   ];
 }
 
+// The second foil, for elements stamped in it (`leaf: "second"` on an
+// element; anything else is the main foil): silver beside a warm leaf, gold
+// beside a cool one.
+const COOL_FOILS = new Set(["silver", "aluminum", "gunmetal", "holo", "pearl", "white", "sapphire", "emerald"]);
+export const secondFoilFor = (id) => getFoil(COOL_FOILS.has(id) ? "gold" : "silver").color;
+
 function resolveFoil(foil) {
   if (foil && typeof foil === "object") {
     const base = getFoil(foil.preset);
@@ -150,14 +156,16 @@ function resolveFoil(foil) {
       metalness: foil.metalness ?? base.metalness,
       roughness: foil.roughness ?? base.roughness,
       iridescence: foil.iridescence ?? base.iridescence ?? 0,
-      texture: foil.texture || "polished"
+      texture: foil.texture || "polished",
+      second: foil.second || secondFoilFor(base.id)
     };
   }
   const base = getFoil(foil);
   return {
     preset: base.id, color: base.color, metalness: base.metalness, roughness: base.roughness,
     iridescence: base.iridescence || 0,
-    texture: "polished"
+    texture: "polished",
+    second: secondFoilFor(base.id)
   };
 }
 
@@ -442,6 +450,7 @@ export function normalizeBook(value) {
   // A foil stored before iridescence existed keeps its plain look.
   if (value.foil && value.foil.iridescence === undefined) book.foil.iridescence = 0;
   if (!["polished", "matte", "brushed"].includes(book.foil.texture)) book.foil.texture = "polished";
+  if (!/^#[0-9a-f]{6}$/i.test(book.foil.second || "")) book.foil.second = secondFoilFor(book.foil.preset);
   // Books made before stamping depth existed keep their flat boards.
   book.stamp = { relief: "flat", depth: 0.5, ...(value.stamp || {}) };
   if (!["deboss", "emboss", "flat"].includes(book.stamp.relief)) book.stamp.relief = "flat";
@@ -482,7 +491,11 @@ export function normalizeBook(value) {
       border: { ...base[face].border, ...(stored.border || {}) },
       ...(face === "front" ? {
         onlay: { ...base.front.onlay, ...(stored.onlay || {}) },
-        seal: { ...base.front.seal, ...(stored.seal || {}) }
+        seal: { ...base.front.seal, ...(stored.seal || {}) },
+        // Pictures stored before framing existed show as they did: centred.
+        image: stored.image && typeof stored.image === "object" && stored.image.id
+          ? { mode: "full", opacity: 1, treatment: "none", zoom: 1, focusX: 0.5, focusY: 0.5, ...stored.image }
+          : null
       } : {}),
       motif: { ...base[face].motif, ...(stored.motif || {}) },
       texts: Array.isArray(stored.texts) && stored.texts.length

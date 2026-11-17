@@ -126,14 +126,23 @@ function drawOnlay(layers, book, onlay, width, height) {
 }
 
 /**
- * Route a drawing routine to the right layer for its finish.
- * foil  → white on the foil mask
- * ink   → the layer's own colour, printed on the material
+ * The ink an element leaves on the foil layer: white for the main foil,
+ * magenta (no green) for the second. The foil shader tells them apart by the
+ * green channel and tints each with its own leaf colour; red stays full, so
+ * both press the same depth.
+ */
+export const leafInk = (element) => (element?.leaf === "second" ? "#ff00ff" : "#ffffff");
+
+/**
+ * Route an element's drawing routine to the right layer for its finish.
+ * foil  → white (or magenta, second foil) on the foil mask
+ * ink   → the element's own colour, printed on the material
  * blind → a tone-on-tone impression pressed into the material
  */
-function withFinish(layers, finish, color, draw) {
+function withFinish(layers, element, draw) {
+  const { finish, color } = element;
   if (finish === "foil") {
-    draw(layers.foil, "#ffffff");
+    draw(layers.foil, leafInk(element));
   } else if (finish === "blind") {
     const ctx = layers.base;
     ctx.save();
@@ -180,9 +189,10 @@ function tracePartRegion(ctx, binding, width, height, hinge) {
   }
 }
 
-function stampFinish(layers, mask, width, height, finish, color, opacity) {
+function stampFinish(layers, mask, width, height, element, opacity) {
+  const { finish, color } = element;
   if (finish === "foil") {
-    stampPattern(layers.foil, mask, width, height, "#ffffff", opacity);
+    stampPattern(layers.foil, mask, width, height, leafInk(element), opacity);
   } else if (finish === "blind") {
     stampPattern(layers.base, mask, width, height, "rgb(255,255,255)", 0.13 * opacity, 1.3, 1.5);
     stampPattern(layers.base, mask, width, height, "rgb(0,0,0)", 0.34 * opacity);
@@ -212,7 +222,7 @@ function paintBoard(layers, target, book, face, width, height) {
       layers.foil.rect(0, 0, width, height);
       layers.foil.clip("evenodd");
     }
-    stampFinish(layers, mask, width, height, pattern.finish, pattern.color, pattern.opacity ?? 0.6);
+    stampFinish(layers, mask, width, height, pattern, pattern.opacity ?? 0.6);
     if (clipFoil) layers.foil.restore();
   }
 
@@ -602,7 +612,7 @@ function drawPanel(layers, border, width, height) {
     }
     ctx.restore();
   } else {
-    withFinish(layers, border.finish, border.color, (ctx, color) => {
+    withFinish(layers, border, (ctx, color) => {
       ctx.save();
       ctx.strokeStyle = color;
       ctx.lineWidth = 2.2;
@@ -660,7 +670,7 @@ function drawTextLayer(layers, book, layer, width, height) {
   const text = layerText(book, layer).trim();
   if (!text) return;
   if (layer.vertical) {
-    withFinish(layers, layer.finish, layer.color, (ctx, color) => {
+    withFinish(layers, layer, (ctx, color) => {
       ctx.save();
       ctx.fillStyle = color;
       drawVerticalText(ctx, text, layer, layer.x * width, layer.y * height, (layer.width || 0.5) * height, width * 0.24);
@@ -671,7 +681,7 @@ function drawTextLayer(layers, book, layer, width, height) {
   const maxWidth = (layer.width || 0.8) * width;
   const isDisplay = layer.size >= 44;
 
-  withFinish(layers, layer.finish, layer.color, (ctx, color) => {
+  withFinish(layers, layer, (ctx, color) => {
     ctx.save();
     ctx.fillStyle = color;
     const setFont = (size) => {
@@ -706,7 +716,7 @@ function drawTextLayer(layers, book, layer, width, height) {
 function drawMotifLayer(layers, book, motif, width, height) {
   if (!motif || !hasMotif(motif.key)) return;
   const size = Math.min(width, height) * 0.22 * (motif.scale || 1);
-  withFinish(layers, motif.finish, motif.color, (ctx, color) => {
+  withFinish(layers, motif, (ctx, color) => {
     drawMotif(ctx, motif.key, {
       cx: motif.x * width,
       cy: motif.y * height,
@@ -755,17 +765,15 @@ const smooth = (edge0, edge1, value) => {
  * maps light and dark to two inks, halftone prints it as a dot screen,
  * engraving as lines that swell in the shadows.
  */
-function treatedImage(image, imageId, treatment, width, height, dark, light) {
-  const key = `${imageId}|${treatment}|${width}x${height}|${dark}|${light}`;
+function treatedImage(image, imageId, treatment, width, height, dark, light, frame) {
+  const [sx, sy, sw, sh] = cropSource(image, width, height, frame);
+  const key = `${imageId}|${treatment}|${width}x${height}|${dark}|${light}|${[sx, sy, sw, sh].map(Math.round)}`;
   if (treatedCache.has(key)) return treatedCache.get(key);
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
-  const sw = width / scale;
-  const sh = height / scale;
-  ctx.drawImage(image, (image.naturalWidth - sw) / 2, (image.naturalHeight - sh) / 2, sw, sh, 0, 0, width, height);
+  ctx.drawImage(image, sx, sy, sw, sh, 0, 0, width, height);
   const pixels = ctx.getImageData(0, 0, width, height);
   const data = pixels.data;
   const [dr, dg, db] = hexToRgb(dark);
@@ -821,7 +829,22 @@ function treatedImage(image, imageId, treatment, width, height, dark, light) {
   return canvas;
 }
 
-function drawCoverImage(ctx, image, x, y, w, h, treatment = null) {
+/**
+ * The part of the picture that fills a w x h box: cover-fitted, then
+ * enlarged by `frame.zoom` about the point `frame.focusX`, `frame.focusY`
+ * (0..1 across and down the picture).
+ */
+function cropSource(image, w, h, frame) {
+  const zoom = Math.min(4, Math.max(1, frame?.zoom ?? 1));
+  const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight) * zoom;
+  const sw = w / scale;
+  const sh = h / scale;
+  const fx = Math.min(1, Math.max(0, frame?.focusX ?? 0.5));
+  const fy = Math.min(1, Math.max(0, frame?.focusY ?? 0.5));
+  return [(image.naturalWidth - sw) * fx, (image.naturalHeight - sh) * fy, sw, sh];
+}
+
+function drawCoverImage(ctx, image, x, y, w, h, treatment = null, frame = null) {
   if (treatment) {
     // Treated at the board's device resolution (capped), then placed.
     const transform = ctx.getTransform();
@@ -830,23 +853,11 @@ function drawCoverImage(ctx, image, x, y, w, h, treatment = null) {
     const factor = Math.min(1, 1400 / Math.max(w * scaleX, h * scaleY, 1));
     const width = Math.max(8, Math.round(w * scaleX * factor));
     const height = Math.max(8, Math.round(h * scaleY * factor));
-    ctx.drawImage(treatedImage(image, treatment.id, treatment.kind, width, height, treatment.dark, treatment.light), x, y, w, h);
+    ctx.drawImage(treatedImage(image, treatment.id, treatment.kind, width, height, treatment.dark, treatment.light, frame), x, y, w, h);
     return;
   }
-  const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
-  const sw = w / scale;
-  const sh = h / scale;
-  ctx.drawImage(
-    image,
-    (image.naturalWidth - sw) / 2,
-    (image.naturalHeight - sh) / 2,
-    sw,
-    sh,
-    x,
-    y,
-    w,
-    h
-  );
+  const [sx, sy, sw, sh] = cropSource(image, w, h, frame);
+  ctx.drawImage(image, sx, sy, sw, sh, x, y, w, h);
 }
 
 /* ---------- wear ---------- */
@@ -965,9 +976,9 @@ export function paintFront(book, baseTarget, foilTarget, onAsset, commit, relief
         ctx.shadowColor = "rgba(0,0,0,0.3)";
         ctx.shadowBlur = 9;
         ctx.shadowOffsetY = 3;
-        drawCoverImage(ctx, image, x, y, w, h, imageTreatment(book));
+        drawCoverImage(ctx, image, x, y, w, h, imageTreatment(book), front.image);
       } else {
-        drawCoverImage(ctx, image, 0, 0, width, height, imageTreatment(book));
+        drawCoverImage(ctx, image, 0, 0, width, height, imageTreatment(book), front.image);
         ctx.globalAlpha = 1;
         const shade = ctx.createLinearGradient(0, 0, width, 0);
         shade.addColorStop(0, "rgba(0,0,0,0.2)");
@@ -984,7 +995,7 @@ export function paintFront(book, baseTarget, foilTarget, onAsset, commit, relief
   if (front.border.style === "panel" || front.border.style === "slip") {
     drawPanel(layers, front.border, width, height);
   } else if (front.border.style !== "none") {
-    withFinish(layers, front.border.finish, front.border.color, (ctx, color) => {
+    withFinish(layers, front.border, (ctx, color) => {
       drawBorder(ctx, color, front.border.style, front.border.inset, width, height);
     });
   }
@@ -1008,7 +1019,7 @@ export function paintBack(book, baseTarget, foilTarget, onAsset, commit, reliefT
   paintBoard(layers, baseTarget, book, "back", width, height);
 
   if (!["none", "panel", "slip"].includes(back.border.style)) {
-    withFinish(layers, back.border.finish, back.border.color, (ctx, color) => {
+    withFinish(layers, back.border, (ctx, color) => {
       drawBorder(ctx, color, back.border.style, back.border.inset, width, height);
     });
   }
@@ -1024,7 +1035,7 @@ function drawSpineText(layers, book, layer, width, height, room) {
   if (!layer.show) return;
   const text = layerText(book, layer).trim();
   if (!text) return;
-  withFinish(layers, layer.finish, layer.color, (ctx, color) => {
+  withFinish(layers, layer, (ctx, color) => {
     ctx.save();
     ctx.fillStyle = color;
     ctx.textBaseline = "middle";
@@ -1072,7 +1083,7 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
     const mask = patternMask(pattern.key, baseTarget.canvas.width, baseTarget.canvas.height, { width, height }, {
       scale: (pattern.scale || 1) * 1.3, seed: book.seed + 1
     });
-    stampFinish(layers, mask, width, height, pattern.finish, pattern.color, pattern.opacity ?? 0.6);
+    stampFinish(layers, mask, width, height, pattern, pattern.opacity ?? 0.6);
   }
 
   const stitch = book.details.stitch;
@@ -1110,7 +1121,7 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
     ctx.fillRect(22, top, width - 44, labelHalf * 2);
   }
 
-  withFinish(layers, spine.finish, spine.color, (ctx, color) => {
+  withFinish(layers, spine, (ctx, color) => {
     ctx.save();
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
@@ -1221,7 +1232,7 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
   });
 
   if (spine.emblem === "motif" && hasMotif(book.front.motif.key)) {
-    withFinish(layers, spine.finish, spine.color, (ctx, color) => {
+    withFinish(layers, spine, (ctx, color) => {
       drawMotif(ctx, book.front.motif.key, {
         cx: width / 2, cy: height - 128, size: 44, color, alpha: 1, lineWidth: 2, text: book.title
       });
@@ -1304,7 +1315,7 @@ export function faceSignatures(book, face) {
     parts.foil.push(label);
     parts.relief.push(label, BANDED.has(spine.style), spine.texts.map((layer) => [layer.show, layer.y]));
     if (!twoTone && pattern?.spine && hasPattern(pattern.key)) split(pattern.finish, pattern, parts);
-    split(spine.finish, [spine.style, spine.emblem, spine.color, motif], parts);
+    split(spine.finish, [spine.style, spine.emblem, spine.color, spine.leaf, motif], parts);
     textParts(book, spine.texts, parts);
   } else {
     const side = book[face];
@@ -1367,7 +1378,8 @@ export function paintEndpaper(book, target) {
     const mask = patternMask(pattern, target.canvas.width, target.canvas.height, logical, {
       unit: 40, lineWidth: 1, seed: book.seed
     });
-    stampPattern(ctx, mask, width, height, book.material.color, 0.36);
+    // Paste is laid on thick; the other papers are printed lightly.
+    stampPattern(ctx, mask, width, height, book.material.color, pattern === "paste" ? 0.52 : 0.36);
   } else if (pattern === "marble") {
     ctx.lineWidth = 1.4;
     for (let band = 0; band < 46; band += 1) {

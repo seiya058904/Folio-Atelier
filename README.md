@@ -75,19 +75,19 @@ The first visit shows an empty walnut shelf and one invitation: create your firs
     <td width="50%" valign="top">
       <h3>✨ Sixteen Foils, Pressed in Relief</h3>
       <p><sub>ANTIQUE GOLD · SILVER · COPPER · HOLOGRAPHIC · PEARL …</sub></p>
-      <p>Adjustable metal, polish and iridescence, and a polished, matte or brushed leaf. Foil and blind stamps are <strong>debossed or embossed</strong> to the depth you choose: a height map lights them as real impressions as you orbit the book.</p>
+      <p>Adjustable metal, polish and iridescence, and a polished, matte or brushed leaf. A <strong>second foil</strong> colour lets you stamp any element in another leaf — a silver title inside a gold frame. Foil and blind stamps are <strong>debossed or embossed</strong> to the depth you choose: a height map lights them as real impressions as you orbit the book.</p>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🔶 Seventeen All-Over Patterns</h3>
-      <p><sub>STRIPES · HARLEQUIN · WAVE SCALES · LINKED CIRCLES · FRET · CLOUDS · SPRIGS · MARBLING …</sub></p>
+      <h3>🔶 Nineteen All-Over Patterns</h3>
+      <p><sub>STRIPES · HARLEQUIN · WAVE SCALES · LINKED CIRCLES · FRET · CLOUDS · MARBLING · PASTE PAPER · CONTOUR MAP …</sub></p>
       <p>Stamped in foil, printed, or pressed blind, and optionally carried across the spine.</p>
     </td>
     <td width="50%" valign="top">
       <h3>🔩 Finishing Details</h3>
       <p><sub>EDGES · CORNERS · STITCHING · RIBBONS · HEADBANDS</sub></p>
-      <p>Gilt, gauffered, stained, sprinkled, ombré, marbled or paste-patterned page edges; metal corner pieces; stab stitching in four or six holes; a pasted spine label; patterned endpapers; one or two ribbons; seven paper stocks.</p>
+      <p>Gilt, gauffered, stained, sprinkled, ombré, marbled or paste-patterned page edges; metal corner pieces; stab stitching in four or six holes; a pasted spine label; patterned endpapers, among them combed paste paper and a contour map; one or two ribbons; seven paper stocks.</p>
     </td>
   </tr>
 </table>
@@ -95,7 +95,7 @@ The first visit shows an empty walnut shelf and one invitation: create your firs
 <a id="the-cover"></a>
 ## 🏷️ The Cover, Spine and Back
 
-Eight cover layouts (two set the title vertically), seventeen border styles — among them hand-tooled fillets, a leaf roll and corner fleurons — and thirty-three ornaments. Lay a contrasting piece of leather on the board (an **onlay**, standing proud) or set it flush (an **inlay**). Bring your own artwork as a full cover or an inset plate, printed as a photograph, a **duotone**, a **halftone** dot screen or an **engraving**, and press a **wax seal** with a letter on the board. Add lettering lines with typeface, size, weight, tracking, position, direction and finish. Twenty-one typefaces are included, five of them Chinese. The spine and back are composed with the same tools, including tooled compartments between raised bands.
+Eight cover layouts (two set the title vertically), seventeen border styles — among them hand-tooled fillets, a leaf roll and corner fleurons — and thirty-three ornaments. Lay a contrasting piece of leather on the board (an **onlay**, standing proud) or set it flush (an **inlay**). Bring your own artwork as a full cover or an inset plate, zoomed and framed as you like, printed as a photograph, a **duotone**, a **halftone** dot screen or an **engraving**, and press a **wax seal** with a letter on the board. Add lettering lines with typeface, size, weight, tracking, position, direction and finish. Twenty-one typefaces are included, five of them Chinese. The spine and back are composed with the same tools, including tooled compartments between raised bands.
 
 ## 📐 The Structure
 
@@ -164,7 +164,7 @@ From the Design tab: save a **picture** of the view (PNG), a **turntable** of th
 
 No framework, bundler or backend: native ES modules, [Three.js](https://threejs.org/) 0.165 from a CDN, and IndexedDB for storage.
 
-Each book is one serialisable `BookSpec`. The rig paints every surface from that spec onto canvases — a base layer for dyed material and print, a white mask that the metallic foil material uses, and a height map for stamping depth — so any edit repaints only the surfaces it touches while the model stays on screen. Edits are merged and painted once per frame (at draft size while dragging), and the render loop sleeps when nothing moves: an idle studio draws no frames. Add `?perf` to see frame times and what each repaint costs. Only four leaves carry printed pages; as you read through a longer book, the leaf at the bottom of one pile is moved under the other and printed with the pages about to come into view.
+Each book is one serialisable `BookSpec`. The rig paints every surface from that spec onto canvases — a base layer for dyed material and print, a mask that the metallic foil material uses (white for the main foil, magenta for the second), and a height map for stamping depth — so any edit repaints only the surfaces it touches while the model stays on screen. Edits are merged and painted once per frame (at draft size while dragging), and the render loop sleeps when nothing moves: an idle studio draws no frames. Add `?perf` to see frame times and what each repaint costs. Only four leaves carry printed pages; as you read through a longer book, the leaf at the bottom of one pile is moved under the other and printed with the pages about to come into view.
 
 <details>
 <summary><strong>⚙️ Expand run-locally, module map &amp; rendering tiers</strong></summary>

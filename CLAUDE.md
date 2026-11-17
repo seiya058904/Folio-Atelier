@@ -45,7 +45,7 @@ When driving the page with Playwright:
 - All-over patterns are drawn once as a white mask (`patternMask` in `textures/patterns.js`) and stamped per finish; add a pattern there and list it in `PATTERNS` (and `ENDPAPER_PATTERNS` if it suits paper).
 - Adding a spec field: give it a default in `schema.js` and make sure `normalizeBook` fills it for stored books.
 - Painters in `src/textures/` draw on logical canvases (768 × 1152 covers, 320 × 1536 spine, 512 × 768 pages) and must not depend on canvas pixel size.
-- Foil is a white-on-transparent mask; print and blind stamping go on the base layer (`withFinish` in `faces.js`).
+- Foil is a mask on the foil layer; print and blind stamping go on the base layer (`withFinish` / `stampFinish` in `faces.js`, which take the element itself). An element with `finish: "foil"` and `leaf: "second"` is drawn magenta (`leafInk`), anything else white; the foil shader (`compileLeaf` in `rig.js`) tints by the green channel with the `leafMain` / `leafSecond` uniforms, so both foil colours change without a repaint. Draw anything new on the foil layer with `leafInk(element)`, never a colour.
 - Post-processing is ambient occlusion only (`buildComposer` in `engine.js`). Bloom and depth of field were tried and removed because they blur printed pages; do not re-add them without a side-by-side check.
 - Pointer hit volumes sit on `HIT_LAYER` so they are raycast but never rendered.
 - The render loop sleeps. Anything that changes what is on screen must call `requestFrame()`; anything animated must go through the tracked `damp()` or set `motion = true` in its frame, or the loop stops under it. Shadows are redrawn only on frames with `shadowHold > 0`.
