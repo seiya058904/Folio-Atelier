@@ -18,6 +18,15 @@ node --input-type=module --check < src/engine.js   # syntax check any module
 
 There is no test framework. Verify in a real browser: empty shelf on first visit, create a book, edit each studio tab and watch the model update, open and turn pages, reload to confirm it persisted. The console must stay free of errors.
 
+Which browser tool to use:
+
+- **Playwright** — scripted, repeatable checks during iteration: driving a flow, measuring timings, console-error sweeps, rendering-tier and language comparisons.
+- **Ego browser** (the `ego-browser` skill) — the broader, real-world pass: whole-product walkthroughs, visual and feel review, and the final check of a finished or deployed build. It is a normal Chromium with real GPU, window focus and user context, so its frame rate and behaviour match what users see. Prefer it for release sign-off.
+
+Roadmap for the next round: `docs/ROADMAP.md`.
+
+Performance stance: optimise real cost first; where a wait is unavoidable, hide it with cheap, purposeful motion (instant feedback, skeletons, cross-fades, loading choreography). Masking must never be used as a reason to spend more GPU/CPU, and must respect `prefers-reduced-motion`.
+
 When driving the page with Playwright:
 
 - Call `page.bringToFront()` first — an occluded window throttles `requestAnimationFrame` to about 2 fps and transitions appear stuck.
