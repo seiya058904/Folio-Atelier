@@ -1,117 +1,105 @@
-# Folio Atelier — Next iteration roadmap
+# Folio Atelier — Roadmap, round 2 (Phases G–L)
 
-Outline for the next round, from a code review of `main` (2026-11-17). Once approved, work proceeds phase by phase in this order. Performance claims below come from reading the code; profile with `?perf` (Phase A) before and after each fix.
+Round 1 (Phases A–F: speed, motion, decoration, structure, rooms, sharing) is recorded in [roadmap-round-1.md](roadmap-round-1.md).
 
-**Status:** Phases A–F done (C, D and E partly; see each note below). Phase A done (2026-11-17). Measured with `?bench` on an RTX 3070 laptop, 1440 × 900, high tier, before → after: front-board slider drag 2.8 → 82 fps (edit-to-pixel 378 → 13 ms); cloth colour drag 2.2 → 56 fps (479 → 20 ms); frames while idle 330 per 2 s → 0 (after a 9 s ambient fade at 30 fps); warm tab switch ≤ 21 ms; keystroke to printed page ≥ 140 → 31 ms.
+This round has three sources: the user's review of the deployed build, the parts of round 1 left unfinished (C, D and E were partial), and our own code review. Work goes phase by phase in the order below. Each phase ends with its checks, a status note at the top of this file, and one scoped commit.
 
-Phase B done (2026-11-17). Shared motion vocabulary (`src/motion.js` + CSS tokens); cover opens on a spring with a slight overshoot; ribbon sways on open, close and page turns; foil glints after a stamping change; duplicates slide out of their source, deleted books lift and fade while neighbours close the gap; tabs settle in group by group, thumbnails breathe as placeholders and fade in, pressed controls answer in the same frame; loading veil waits (≤ 1.4 s) for the cover fonts and lifts as the mark closes; the next tab is built in idle time, and recycled leaves and the page-list follow are printed in idle time (page-turn click 9 → 0.3 ms with the Pages tab open). All motion is skipped under `prefers-reduced-motion`. Bench unchanged from Phase A (front-board drag 78 fps, foil 165 fps, orbit and page turns 160+ fps, typing 35 ms); frames in the 2 s after page turns 211 → 64 (ambient fade only), shelf idle 0. Not done: low-res → full-res texture cross-fade (the foil glint marks the full-size pass instead) and reshaping the shelf ⇄ studio camera path (carried over from the original; left as is).
+**Status:** not started (planned 2026-11-17).
 
-**Goals:** (1) faster, lighter, more responsive; (2) smoother, richer motion; (3) far deeper DIY; (4) more varied shelves and rooms.
+**Goals, in priority order**
+1. Nothing should feel broken or stiff: no stutter, no parts vanishing, no native controls, no abrupt transitions.
+2. Finer craft: models and materials that hold up in close-ups.
+3. The room belongs to the reader: books no longer recolour it, and shelves and rooms become real places.
+4. Finish what round 1 left open in structure, shelves and decoration.
 
-**Principles:** real speed first, masking second — unavoidable waits are hidden with cheap, purposeful motion, never an excuse for more GPU/CPU. Respect `prefers-reduced-motion`. Every new spec field gets a default, `normalizeBook` handling, `ZH` strings and a `dirty` key. Keep no-build, no-dependency.
-
----
-
-Phase C done (2026-11-17). C1: relief layer per board (debossed / flat / embossed, depth) added over the cloth normal map by a shared shader patch, skipped while dragging; foil leaf polished / matte / brushed; tooled fillets, leaf roll, corner fleurons, tooled spine compartments with raised cords. C2: leather onlay (laid on, raised) and inlay (set flush) in five shapes. C3: canvas, denim, cork, snakeskin, wood veneer, acrylic; Age (wear, sun-fading, foil flaking). C4: marbled, paste and gauffered edges; notebook pages (lined, dot grid, squared). Fresh-book bench, Phase B vs C (two runs each): colour drag 66 vs 64 fps, front slider 127 vs 121 fps, within run-to-run noise; everything else equal. Not done: multiple foils per cover, die-cut window, patches / nameplate / wax seal / stickers / monogram generator, pebbled-leather variant, fore-edge painting, paste-paper and map endpapers, tipped-in plates, vellum interleaves, footnotes, image filters and crop handles, SVG upload.
-
-Phase D (partial, 2026-11-17). A Structure tab: trim sizes pocket / crown octavo / standard / large (uniform scale, standing on the shelf line), thickness 55–160 %, an elastic closure band that slips off when the book opens, and a pen loop on the back board; all in `book.structure`, untouched by binding presets. Trims keep the 2 : 3 board because every cover painter is laid out on it: square and landscape formats need per-format painter layouts and geometry and are left for later, as are the construction families (Japanese stab, Coptic, long-stitch, accordion, soft cover), wrap strap, ribbon tie, clasp, inner pocket, bookmark charm, corner rounding, dust jacket, slipcase and clamshell box, and thickness derived from page count.
-
-Phase E (partial, 2026-11-17). A Room panel on the shelf: walnut, oak, painted white, black steel or a frameless ledge, and studio, morning, golden-hour or night light (the softbox, warmed, plays the lamp; no light is added, so nothing recompiles). Saved per library in localStorage; each book still tints the room with its palette and the room settles on top. Not done: glass cabinet, desk, window sill, plinth; stacks, leaning, face-out, multi-row, bookends, drag-to-reorder, shelf per collection.
-
-Phase F done (2026-11-17). Design tab → Share: a PNG of the current view, a 36-frame turntable GIF (360 px, own median-cut + LZW encoder in `src/share.js`, about 1 s) and a PDF of every printed page (one JPEG per page at 2×, own minimal writer). Shelf → Export all writes `folio-library.folio` (format `folio-atelier-library`, version 3: every book with its pictures, plus the room); Import reads it as well as single-book v1 files. Checked by decoding all 36 GIF frames and every PDF xref offset with an independent script.
-
-Follow-up (2026-11-17): after Phase F the colour drag measured about 8 % below Phase B. A per-phase bisect showed the 3D path unchanged; the cost was the page-wide style recalculation when the interface theme follows the book colour, which grew with the studio's DOM. The interface now restyles once a drag rests (a single swatch click still restyles at once): colour drag 64 → 87 fps and edit-to-pixel 14.6 → 9.1 ms against Phase B.
-
-## Phase A — Speed (do first)
-
-Causes found: every `oninput` repaints cover/spine/back/endpaper synchronously (up to 1536×2304 plus mipmaps and upload); `front` edits also repaint spine and endpaper; tab switches rebuild the whole panel and repaint all thumbnails; the render loop never idles (GTAO + 4× MSAA every frame); quality only steps down once.
-
-1. `?perf` overlay: frame time, repaint ms per painter, texture uploads. Baseline numbers first.
-2. Coalesce edits: merge `dirty` sets and repaint once per `requestAnimationFrame`; paint at reduced resolution while dragging, full resolution on release.
-3. Narrow the dirty → painter map in `rig.repaint`.
-4. On-demand render loop: render only while something moves; idle = no frames.
-5. Panel: build each tab once and show/hide; thumbnail cache keyed by spec fields; paint only visible tiles.
-6. Adaptive quality: lower pixel ratio and AO while orbiting, restore at rest; make `watchFrameBudget` continuous (down and up); consider half-res GTAO and 2× MSAA.
-7. Page refresh: longer debounce while typing; cache text measurement; defer audio and non-visible fonts until after first paint.
-
-**Done when:** slider drag ≥ 50 fps, control-to-pixel < 50 ms, tab switch < 100 ms, idle GPU ≈ 0, console clean.
-
-## Phase B — Motion and perceived speed
-
-- One shared easing/spring helper for CSS and 3D tweens.
-- Instant feedback on every control (press state within one frame), heavy work deferred.
-- Panel and tab transitions (stagger, cross-fade), tile hover lift, skeleton thumbnails that fade in.
-- Repaint cross-fades (low-res → full-res, old page texture → new) and a foil-glint on change.
-- Book life: create (drop in), duplicate (slides out), delete (lifts, fades), neighbours shift; shelf ⇄ studio camera path with eased legs; opening overshoot; ribbon sway; idle dust in light.
-- Loading intro (a book closing/binding) covering engine and font setup; idle pre-painting of the next spread; prefetch for the likely next tab.
-
-**Rules:** masks ≤ ~600 ms, never block input, verified with `?perf` not to lower fps.
-**Done when:** every state change animates and unavoidable waits are masked.
-
-## Phase C — Decoration (DIY depth I)
-
-Researched against bookbinding references (tooling, onlay/inlay, blocking, edge decoration). Ordered by visual payoff per effort; fits the existing mask + foil-layer pipeline.
-
-**C1 — Stamping and relief (core, do first)**
-- **Three stamp modes per layer:** foil, *blind* (heat-pressed, no colour — the oldest decoration, and the usual first step before gilding), and ink. Add stamp depth so blind/foil/ink can sit debossed or embossed (normal-map relief from the same mask).
-- **Foil-embossed combo** (foil plus raised relief) and **multiple foils** on one cover; foil textures: matte, brushed, diffraction.
-- **Hand-tooling kit:** gold-tooled fillets (lines), rolls, corner fleurons, panel frames and spine compartments, drawn from the existing border/ornament painters.
-
-**C2 — Inlay and onlay**
-- **Onlay** (contrasting leather laid on top, in relief) and **inlay** (flush piece set into a cut-out) as a "panel" layer with its own material and colour; window die-cut showing the endpaper beneath.
-- Stitched/embroidered patch, metal nameplate, wax seal, label and sticker set, monogram generator.
-
-**C3 — Materials and age**
-- New grains: cork, canvas, denim, pebbled and snakeskin leather, wood veneer, acrylic.
-- Wear/patina sliders: scuffing at corners and spine, edge rub, foil wear, sun-fading, optional stains.
-
-**C4 — Inside the book**
-- **Edges:** marbled, German-paste (brushed paste patterns), sprayed/stencilled, gauffered (gilt edge tooled with repeating patterns), and **fore-edge painting** — an image visible only when the pages are fanned (single and double variants; a great 3D showpiece).
-- **Endpapers:** marbled, paste paper, map and photo prints; printed hinges.
-- **Pages:** ruled/dotted/grid notebook pages, tipped-in plates, vellum interleaves, running heads, footnotes.
-- Image tools: duotone/halftone/engraving filters, crop handles, SVG ornament upload.
-
-## Phase D — Structure (DIY depth II)
-
-Researched against hand-binding and commercial journal/notebook options.
-
-**D1 — Format and construction**
-- **Trim presets** (pocket, A5, B5, square, landscape, tall) with thickness from page count; shelf slots follow the format.
-- **Construction families:**
-  - *Case binding* (hardcover — current default), with rounded or square spine, flexible or hard cover.
-  - *Japanese stab* — visible side thread, 4/5/6-hole and hemp-leaf patterns; doesn't open flat.
-  - *Coptic* — exposed chain stitch on the spine, lies flat when open.
-  - *Long-stitch* — exposed stitching across a soft wrap cover.
-  - *Accordion* (leporello) — unfolds into a strip.
-  - *Soft-cover notebook* with sewn or glued spine.
-
-**D2 — Journal-style practical options** (what notebook makers commonly offer)
-- **Closures:** elastic band (colour-matched), wrap strap, ribbon tie, clasp.
-- **Pen loop**, **inner pocket** / expandable back pocket, second ribbon, bookmark charm, corner rounding.
-- **Spine extras:** raised bands, tooled compartments, headcap and tailband styles.
-
-**D3 — Protective extras**
-- Dust jacket with flaps (separately designable), slipcase, clamshell box; each gets its own cover painter and appears on the shelf.
-
-**Notes:** structure changes touch rig geometry, shelf spacing, thumbnails and page layout, so build one family at a time (order: trim presets → closures/pen loop/pocket → Coptic and Japanese stab → accordion → jacket and slipcase). Bump `SCHEMA_VERSION`; stay backward compatible. Add a "Structure" tab to the studio rather than growing Details.
-
-**Sources:** [Morgan Library on tooling](https://www.themorgan.org/book/export/html/1180291), [Adelaide: hand tooling](https://www.adelaide.edu.au/library/special/exhibitions/cover-to-cover/hand-tooling/), [Adelaide: edge decoration](https://adelaide.edu.au/library/special/exhibitions/cover-to-cover/edge-decoration), [AIC book decoration](https://www.conservation-wiki.com/wiki/Book_Decoration), [Friesens: deboss/emboss](https://www.friesens.com/books/specialty-options/specialty-finishes/debossemboss/), [Tiny Workshops: binding techniques](https://tinyworkshops.com/bookbinding-techniques/), [Vistaprint journal options](https://www.vistaprint.com/promotional-products/writing-office/padfolio-notebooks).
-
-## Phase E — Shelves and rooms
-
-- Shelf styles: oak, painted white, black steel, floating ledge, glass cabinet, desk with lamp, window sill, museum plinth.
-- Arrangements: stacks, leaning, face-out, multi-row; bookends and props; drag-to-reorder; shelf per collection.
-- Lighting: morning, golden hour, night with lamp; per-library choice saved.
-
-## Phase F — Share
-
-PNG / turntable GIF export, print-ready PDF of pages, whole-library import/export (`.folio` v3).
+**Rules (unchanged from round 1, plus three)**
+- Real speed first; mask only waits that cannot be removed, with cheap motion that respects `prefers-reduced-motion`.
+- Run `?bench` before and after every phase; no measure may get worse than the phase before. When a measure moves, bisect by phase before guessing.
+- Every new spec field gets a default, `normalizeBook` handling, `ZH` strings (check for key collisions first) and a `dirty` key; no build step, no dependencies, Three.js stays at 0.165.
+- New: never add or remove a light, or toggle a material feature, at run time without measuring the recompile; prefer fixed lights at zero intensity only if the per-pixel cost is measured and accepted.
+- New: every 3D change is checked with a turntable sweep (36 views of the open and closed book) so nothing disappears at some angle.
+- New: Ego checks run with the window in front and cache disabled; a throttled window (about 28 fps) does not count as a measurement.
 
 ---
 
-## Verification
+## Phase G — Fix what feels broken (first)
 
-- **Playwright** each phase: scripted flows, timings from `?perf`, console-error sweep, tier and language checks.
-- **Ego browser** at the end of each phase and before release: full walkthrough on the real GPU and the deployed Pages build.
-- Compare with the live original before touching rig, lighting or page motion.
-- Each phase ends with a scoped commit; pushing and deploying need the user's go-ahead.
+Reported by the user, causes confirmed in the code unless marked *(to measure)*.
+
+**G1. Stutter while moving along the shelf** *(to measure)*
+- Baseline first: `?perf` frame times while dragging and wheeling through 12+ books, and a new `?bench` step for it.
+- Likely causes: every change of selected book restyles the whole page theme (the same page-wide style recalculation fixed for colour drags); books entering view paint three full-size boards in one frame; the room colour eases with every book.
+- Fixes: no interface restyle while moving, one restyle when the shelf rests; paint boards for books about to enter view in idle time, first at draft size; spread first paints over frames.
+- Done when: shelf drag frame p95 < 20 ms with no frame over 50 ms, at least as good as round 1 everywhere else.
+
+**G2. Books no longer recolour the room**
+- Cause: inherited from The Complete Shelf, each book's palette drives the walls, floor, shelf and lights; the Room panel only settles on top of it.
+- Change: the room's colours come from the Room settings alone. A book's palette tints only the book and the studio panel accent. An optional "Follow the book" switch (off by default) keeps the old behaviour.
+- Done when: switching books leaves the room unchanged; no room easing work while browsing.
+
+**G3. The closure band vanishes**
+- Cause: hovering the book in the studio cracks the cover open by about 9°, and the band hides as soon as the cover opens.
+- Change: a banded book does not crack open on hover (the band tugs instead); when the book really opens, the band slides off the fore-edge with a short animation rather than vanishing.
+
+**G4. Nothing vanishes at any angle**
+- Audit transparent materials (all book materials are transparent for the shelf fade), draw order, `polygonOffset` and frustum culling of thin parts (foil planes, band, pen loop, ribbons, headbands).
+- Add the turntable sweep as a repeatable check: 36 frames each of the closed and open book, every part present in every frame.
+
+**G5. Small fixes found in review**
+- The "Begin a book" dialog keeps its Create button pinned at the bottom instead of scrolled out of view.
+- Recheck the two Ego-only reports in an unthrottled window: an edit taking 5 s to appear after many changes at once, and a new book where the studio opened another book.
+
+## Phase H — Controls and motion
+
+**H1. A custom select** replacing every native `<select>` (trim, border, shape, material, edge finish, fonts, layouts…): a popover list in the panel's style, keyboard and screen-reader complete, with small previews where they help (border, shape, material, edge, typeface), animated open and close.
+
+**H2. Tactile buttons.** Press and release both eased with `--ease-spring` (today the release snaps back); consistent hover, selected and focus states; a sliding indicator for segmented controls and tabs; toggles that slide rather than jump.
+
+**H3. One motion system.** Every duration and curve comes from `src/motion.js` and its CSS tokens; review all transitions (panel, tabs, toasts, dialogs, room panel, tooltips, page list) for consistency and reduced-motion behaviour.
+
+Done when: no native form popups remain except colour and file pickers; every control answers within one frame; `?bench` tab switch and slider measures unchanged.
+
+## Phase I — Finer models
+
+Compare against the live original before changing rig, lighting or page motion.
+
+- **Closure band:** a real elastic strip with a rounded section, bending round the head and tail with a radius, ends tucked under the back board; a little sheen.
+- **Pen loop:** a flattened fabric tube on a cloth tab stitched to the back board, with visible stitching and a woven material.
+- **General pass:** board corners, rounded spine and joints, headbands, ribbon ends, turn-ins and the endpaper joint, block thickness. Trim sizes must not thicken the boards: scale the block, keep board thickness.
+- Each item gets before/after close-ups and a bench run.
+
+## Phase J — Structure (completing Phase D)
+
+1. **Square and landscape formats:** cover layouts move to proportional coordinates so painters work on any board ratio; geometry per format; shelf slots follow the format.
+2. **Dust jacket** (its own design, flaps, removable) and **slipcase** (the book slides out), both shown on the shelf.
+3. **Bindings:** Japanese stab (visible thread, 4/5/6-hole and hemp-leaf), soft cover, Coptic (exposed chain stitch, lies flat), accordion (unfolds to a strip). One family at a time.
+4. **Practical options:** wrap strap, ribbon tie, metal clasp, inner pocket, rounded corners, thickness from page count.
+
+`SCHEMA_VERSION` bump with full backward compatibility; a Structure tab section per family.
+
+## Phase K — Shelves and rooms (completing Phase E)
+
+1. **Distinct places, not recoloured shelves:** glass cabinet, desk with a modelled lamp, window sill with window light, museum plinth.
+2. **Arrangement:** upright, stacked, leaning, face-out, multi-row; bookends and small props; slot widths from each book's trim and thickness.
+3. **Drag to reorder** on the shelf, and **collections** shown as separate shelves.
+4. **Light:** a real lamp model for night; any extra light is fixed in the scene and measured for its per-pixel cost.
+
+## Phase L — Decoration (completing Phase C)
+
+- Several foils on one cover (a foil per element).
+- Fore-edge painting, visible when the pages fan.
+- Badges, nameplate, wax seal, stickers; a monogram generator.
+- Paste-paper and map endpapers; tipped-in plates; vellum interleaves; footnotes.
+- Image filters (duotone, halftone, engraving), crop handles, SVG ornament upload.
+
+---
+
+## Throughout
+
+- **Review:** a code review of each phase's diff before its commit.
+- **Bench coverage:** add shelf drag, book switching, custom select and turntable sweep to `?bench`, so regressions show up as numbers.
+- **Scale:** first-load time and memory with 30+ books; keep full-size textures only for books near the view if needed.
+
+## Order and size
+
+G → H → I come first: they are what the user feels most directly, and G and H should each fit in one round of work. J and K are the largest (new geometry and layout), L is many small independent pieces.
