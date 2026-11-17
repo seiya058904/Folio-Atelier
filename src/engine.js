@@ -1619,6 +1619,7 @@ function finishClosing() {
   glintTime = 1;
   activeBook.motion.scale.setScalar(1);
   activeBook.setResolution(quality.shelf);
+  activeBook.setCase(1);
   controls.target.copy(shelfCameraTarget);
   mode = "hero";
   transitionTime = 0;
@@ -3212,6 +3213,8 @@ function updateTransition(delta) {
       transitionTime + delta / DETAIL_TRANSITION_DURATION
     );
     applyOpeningPose(transitionTime);
+    // A book in a slipcase slides out of it first.
+    activeBook.setCase(1 - clamp(transitionTime / 0.35, 0, 1));
     updatePaginatedBook(activeBook, delta, 0);
     if (transitionTime >= 1) finishOpening();
   } else if (mode === "closing") {
@@ -3220,6 +3223,8 @@ function updateTransition(delta) {
       transitionTime + delta / SHELF_TRANSITION_DURATION
     );
     applyClosingPose(transitionTime);
+    // ...and slides back in as it lands.
+    activeBook.setCase(clamp((transitionTime - 0.65) / 0.35, 0, 1));
     updatePaginatedBook(activeBook, delta, 0);
     if (transitionTime >= 1) finishClosing();
   } else if (mode === "hero") {

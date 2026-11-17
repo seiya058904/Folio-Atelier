@@ -4,7 +4,20 @@ Round 1 (Phases A–F: speed, motion, decoration, structure, rooms, sharing) is 
 
 This round has three sources: the user's review of the deployed build, the parts of round 1 left unfinished (C, D and E were partial), and our own code review. Work goes phase by phase in the order below. Each phase ends with its checks, a status note at the top of this file, and one scoped commit.
 
-**Status:** G, H and I done (2026-11-18); J next.
+**Status:** G, H and I done; J partly done (2026-11-18); K next.
+
+- **J — partly done.** New Structure-tab options, each with defaults, `normalizeBook` handling and ZH strings:
+  - Rounded board corners, with the boards, art and endpapers cut to match.
+  - A metal clasp in brass, silver or blackened iron. It wraps the fore-edge and is undone as the book opens, like the band.
+  - A paper pocket inside the front board. The back endpaper is never shown by the reading engine, so the pocket cannot go there.
+  - A slipcase, cloth-covered with a printed title label. The book slides out of it as it flies to the studio and back in as it lands.
+  - **Not done, kept for a later round:**
+    - Square and landscape formats: the painters are built for a 2:3 board, and the leaf geometry would need work.
+    - Dust jacket.
+    - The binding families: Japanese stab, soft cover, Coptic, accordion.
+    - Wrap strap, ribbon tie.
+    - Thickness from page count.
+  - Each of these is a large piece of new geometry, or of painter work.
 
 - **I — done.**
   - The book is split into `body` (trim size, in width and height) and `block` (bulk, in depth). Trim size no longer thickens the boards, and a thick book's cover no longer stretches as it opens. The cause: it turned inside a parent scaled unevenly, and at 160% bulk it stretched to 1.6× its length half-way open.

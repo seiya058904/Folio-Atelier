@@ -26,6 +26,7 @@ import { addImage, getImage } from "../state/images.js";
 import {
   PAGE_TYPES,
   TRIMS,
+  CLASP_METALS,
   applyLayout,
   applyPreset,
   createPage,
@@ -1024,6 +1025,11 @@ export function createStudioUi({ store, engine, audio }) {
         slider({
           label: "Thickness", value: current.structure.bulk, min: 0.55, max: 1.6, step: 0.01, format: percent,
           onInput: (value) => change((target) => { target.bulk = value; }, "structure-bulk")
+        }),
+        segmented({
+          label: "Board corners", value: current.structure.corners,
+          options: [{ id: "square", label: "Square" }, { id: "rounded", label: "Rounded" }],
+          onChange: (value) => change((target) => { target.corners = value; })
         })
       ),
       group("Closure", "An elastic band that holds the book shut. It slips off when you open the book.",
@@ -1034,6 +1040,14 @@ export function createStudioUi({ store, engine, audio }) {
         current.structure.band.show ? colorField({
           label: "Band colour", value: current.structure.band.color, swatches: CLOTH_COLORS,
           onInput: (value) => change((target) => { target.band.color = value; }, "band-color")
+        }) : null,
+        toggle({
+          label: "Metal clasp", value: current.structure.clasp.show,
+          onChange: (value) => change((target) => { target.clasp.show = value; }, null, true)
+        }),
+        current.structure.clasp.show ? segmented({
+          label: "Clasp metal", value: current.structure.clasp.metal, options: CLASP_METALS,
+          onChange: (value) => change((target) => { target.clasp.metal = value; })
         }) : null
       ),
       group("Pen loop", "A fabric loop on the back board to keep a pen with the book.",
@@ -1044,6 +1058,20 @@ export function createStudioUi({ store, engine, audio }) {
         current.structure.penLoop.show ? colorField({
           label: "Loop colour", value: current.structure.penLoop.color, swatches: CLOTH_COLORS,
           onInput: (value) => change((target) => { target.penLoop.color = value; }, "pen-loop-color")
+        }) : null
+      ),
+      group("Pocket and slipcase", "A paper pocket inside the front board, and a case that keeps the book on the shelf. The book slides out of it when you open it.",
+        toggle({
+          label: "Inside pocket", value: current.structure.pocket.show,
+          onChange: (value) => change((target) => { target.pocket.show = value; })
+        }),
+        toggle({
+          label: "Slipcase", value: current.structure.slipcase.show,
+          onChange: (value) => change((target) => { target.slipcase.show = value; }, null, true)
+        }),
+        current.structure.slipcase.show ? colorField({
+          label: "Slipcase colour", value: current.structure.slipcase.color, swatches: CLOTH_COLORS,
+          onInput: (value) => change((target) => { target.slipcase.color = value; }, "slipcase-color")
         }) : null
       )
     ];

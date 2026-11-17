@@ -5,7 +5,7 @@
 
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
-import { BOOK_FORMAT, bookPalette, trimScale } from "../state/schema.js";
+import { BOOK_FORMAT, CLASP_METALS, bookPalette, trimScale } from "../state/schema.js";
 import { perf } from "../perf.js";
 import { clamp, mixHex } from "../util.js";
 import {
@@ -77,6 +77,76 @@ function createRoundedPlaneGeometry(width, height, radius) {
     uv[index * 2 + 1] = (position.getY(index) + halfHeight) / height;
   }
   geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * A rectangle whose two corners on one side (`foreSide`: +1 for +x, -1 for
+ * -x) are rounded by `fore`; the other two by `radius`. UVs span 0..1.
+ */
+function createFacePlaneGeometry(width, height, radius, fore, foreSide) {
+  const halfWidth = width * 0.5;
+  const halfHeight = height * 0.5;
+  const r = (x) => Math.min(Math.sign(x) === foreSide ? fore : radius, halfWidth, halfHeight);
+  const shape = new THREE.Shape();
+  const corners = [[halfWidth, -halfHeight], [halfWidth, halfHeight], [-halfWidth, halfHeight], [-halfWidth, -halfHeight]];
+  const first = corners[3];
+  shape.moveTo(first[0] + r(first[0]), first[1]);
+  corners.forEach(([x, y], index) => {
+    const radiusHere = r(x);
+    const sx = Math.sign(x);
+    const sy = Math.sign(y);
+    // Arrive along the edge, then turn the corner.
+    if (index % 2 === 0) {
+      shape.lineTo(x - sx * radiusHere, y);
+      shape.quadraticCurveTo(x, y, x, y - sy * radiusHere);
+    } else {
+      shape.lineTo(x, y - sy * radiusHere);
+      shape.quadraticCurveTo(x, y, x - sx * radiusHere, y);
+    }
+  });
+  shape.closePath();
+  const geometry = new THREE.ShapeGeometry(shape, 10);
+  const position = geometry.getAttribute("position");
+  const uv = new Float32Array(position.count * 2);
+  for (let index = 0; index < position.count; index += 1) {
+    uv[index * 2] = (position.getX(index) + halfWidth) / width;
+    uv[index * 2 + 1] = (position.getY(index) + halfHeight) / height;
+  }
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** A board with its fore-edge corners rounded (the fore-edge is +x). */
+function createRoundedBoardGeometry(width, height, thick, fore, edge) {
+  const shape = new THREE.Shape();
+  const halfWidth = width * 0.5 - edge;
+  const halfHeight = height * 0.5 - edge;
+  const r = fore - edge;
+  shape.moveTo(-halfWidth, -halfHeight);
+  shape.lineTo(halfWidth - r, -halfHeight);
+  shape.quadraticCurveTo(halfWidth, -halfHeight, halfWidth, -halfHeight + r);
+  shape.lineTo(halfWidth, halfHeight - r);
+  shape.quadraticCurveTo(halfWidth, halfHeight, halfWidth - r, halfHeight);
+  shape.lineTo(-halfWidth, halfHeight);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: thick - edge * 2,
+    bevelEnabled: true,
+    bevelThickness: edge,
+    bevelSize: edge,
+    bevelSegments: 2,
+    curveSegments: 10
+  });
+  geometry.translate(0, 0, -(thick - edge * 2) * 0.5);
+  // Same UV span as the square board, so the cloth grain keeps its scale.
+  const position = geometry.getAttribute("position");
+  const uv = geometry.getAttribute("uv");
+  for (let index = 0; index < position.count; index += 1) {
+    uv.setXY(index, position.getX(index) / width + 0.5, position.getY(index) / height + 0.5);
+  }
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -363,6 +433,22 @@ function sharedGeometry() {
   return shared.geometry;
 }
 
+// Boards with rounded fore-edge corners, and the art and endpapers cut to
+// match (a plane turned to face the inside has its fore-edge at -x).
+const ROUND_CORNER = 0.04;
+function roundedGeometry() {
+  if (shared.rounded) return shared.rounded;
+  const d = DIM;
+  shared.rounded = {
+    cover: createRoundedBoardGeometry(d.width, d.height, d.board, ROUND_CORNER, d.coverRadius),
+    surfaceFore: createFacePlaneGeometry(d.width - 0.007, d.height - 0.007, 0.0035, ROUND_CORNER - 0.0035, 1),
+    surfaceBack: createFacePlaneGeometry(d.width - 0.007, d.height - 0.007, 0.0035, ROUND_CORNER - 0.0035, -1),
+    endpaperFore: createFacePlaneGeometry(d.width - 0.045, d.height - 0.045, 0.003, ROUND_CORNER - 0.02, 1),
+    endpaperBack: createFacePlaneGeometry(d.width - 0.045, d.height - 0.045, 0.003, ROUND_CORNER - 0.02, -1)
+  };
+  return shared.rounded;
+}
+
 function addTurnIns(pivot, side, insideZ, material) {
   const { width, height } = DIM;
   const stripDepth = 0.002;
@@ -643,11 +729,151 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   penLoop.position.y = d.height * 0.16;
   body.add(penLoop);
 
+  // A metal clasp: a strap from the back board over the fore-edge, hooked to
+  // a stud on the front. Like the band, it is undone as the book opens.
+  const claspMaterial = physical({ metalness: 1, roughness: 0.3, clearcoat: 0.2, clearcoatRoughness: 0.3 });
+  const clasp = new THREE.Group();
+  clasp.name = "clasp";
+  const claspStrap = createMesh(new THREE.BufferGeometry(), claspMaterial, "clasp-strap", true, false);
+  claspStrap.rotation.z = -Math.PI * 0.5; // the join is built round +y; turn it to wrap +x
+  const claspStud = createMesh(new THREE.CylinderGeometry(0.011, 0.012, 0.006, 20), claspMaterial, "clasp-stud", true, false);
+  claspStud.rotation.x = Math.PI * 0.5;
+  clasp.add(claspStrap, claspStud);
+  body.add(clasp);
+  let claspBulk = 0;
+  function shapeClasp() {
+    if (claspBulk === bulk) return;
+    claspBulk = bulk;
+    const outer = (d.depth * bulk) * 0.5 + d.board + 0.0016;
+    claspStrap.geometry.dispose();
+    claspStrap.geometry = createBandJoin(0.05, 0.0032, d.width * 0.5, outer, 0.085);
+    claspStud.position.set(d.width * 0.5 - 0.072, 0, outer + 0.003);
+  }
+
+  // A paper pocket inside the front board, over the endpaper (the side the
+  // reader sees as soon as the book is opened).
+  const pocketMaterial = physical({ roughness: 0.92, metalness: 0, sheen: 0.04, side: THREE.DoubleSide });
+  const pocket = new THREE.Group();
+  pocket.name = "pocket";
+  const pocketHeight = d.height * 0.4;
+  const pocketFace = createMesh(shared.plane, pocketMaterial, "pocket", false, true);
+  pocketFace.scale.set(d.width - 0.06, pocketHeight, 1);
+  const pocketLip = createMesh(shared.box, pocketMaterial, "pocket-lip", false, true);
+  pocketLip.scale.set(d.width - 0.06, 0.004, 0.0024);
+  pocketLip.position.set(0, pocketHeight * 0.5, 0.0006);
+  pocket.add(pocketFace, pocketLip);
+  pocket.position.set(d.width * 0.5 - 0.004, -d.height * 0.5 + 0.026 + pocketHeight * 0.5, -d.board * 0.515 - 0.0016);
+  pocket.rotation.y = Math.PI;
+  frontPivot.add(pocket);
+
+  // A slipcase, open at the spine. The book slides out of it on its way to
+  // the studio (see `setCase`).
+  if (!shared.caseWeave) {
+    shared.caseWeave = getWeaveTexture().clone();
+    shared.caseWeave.repeat.set(10, 14);
+  }
+  const caseMaterial = physical({ roughness: 0.8, metalness: 0, sheen: 0.35, sheenRoughness: 0.7, map: shared.caseWeave });
+  const slipcase = new THREE.Group();
+  slipcase.name = "slipcase";
+  const casePanels = ["front", "back", "head", "tail", "fore"].map((name) => {
+    const panel = createMesh(shared.box, caseMaterial, `slipcase-${name}`, true, true);
+    slipcase.add(panel);
+    return panel;
+  });
+  // A printed paper label with the title, on the front of the case.
+  const caseLabelCanvas = document.createElement("canvas");
+  caseLabelCanvas.width = 512;
+  caseLabelCanvas.height = 320;
+  const caseLabelTexture = new THREE.CanvasTexture(caseLabelCanvas);
+  caseLabelTexture.colorSpace = THREE.SRGBColorSpace;
+  caseLabelTexture.anisotropy = 4;
+  const caseLabelMaterial = physical({ map: caseLabelTexture, roughness: 0.9, metalness: 0 });
+  const caseLabel = createMesh(shared.plane, caseLabelMaterial, "slipcase-label", false, true);
+  caseLabel.scale.set(d.width * 0.5, d.width * 0.5 * (320 / 512), 1);
+  slipcase.add(caseLabel);
+  let caseLabelKey = "";
+  function paintCaseLabel() {
+    const title = rig.data.title || "";
+    const author = rig.data.author || "";
+    const key = `${title}|${author}`;
+    if (key === caseLabelKey) return;
+    caseLabelKey = key;
+    const ctx = caseLabelCanvas.getContext("2d");
+    ctx.fillStyle = "#efe7d6";
+    ctx.fillRect(0, 0, 512, 320);
+    ctx.strokeStyle = "rgba(60, 40, 25, 0.55)";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(18, 18, 476, 284);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(28, 28, 456, 264);
+    ctx.fillStyle = "#2b2219";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    let size = 64;
+    ctx.font = `500 ${size}px "Cormorant Garamond", "Noto Serif SC", serif`;
+    while (size > 24 && ctx.measureText(title).width > 420) {
+      size -= 4;
+      ctx.font = `500 ${size}px "Cormorant Garamond", "Noto Serif SC", serif`;
+    }
+    ctx.fillText(title, 256, author ? 140 : 160);
+    if (author) {
+      ctx.font = `400 26px "Cormorant Garamond", "Noto Serif SC", serif`;
+      ctx.fillStyle = "#5e4c3a";
+      ctx.fillText(author, 256, 220);
+    }
+    caseLabelTexture.needsUpdate = true;
+  }
+  body.add(slipcase);
+  let caseAmount = 1;
+  function shapeCase() {
+    const wall = 0.009;
+    const gap = 0.004;
+    const inner = (d.depth * bulk) * 0.5 + d.board + gap;
+    const left = -d.width * 0.5 - 0.004;
+    const right = d.width * 0.5 + gap;
+    const top = d.height * 0.5 + gap;
+    const length = right - left;
+    const [front, back, head, tail, fore] = casePanels;
+    [[front, 1], [back, -1]].forEach(([panel, side]) => {
+      panel.scale.set(length + wall, top * 2 + wall * 2, wall);
+      panel.position.set((left + right + wall) * 0.5, 0, side * (inner + wall * 0.5));
+    });
+    [[head, 1], [tail, -1]].forEach(([panel, side]) => {
+      panel.scale.set(length + wall, wall, inner * 2);
+      panel.position.set((left + right + wall) * 0.5, side * (top + wall * 0.5), 0);
+    });
+    fore.scale.set(wall, top * 2 + wall * 2, inner * 2);
+    fore.position.set(right + wall * 0.5, 0, 0);
+    caseLabel.position.set((left + right) * 0.5 + 0.03, d.height * 0.12, inner + wall + 0.0008);
+  }
+
+  /** 1: the book sits in its slipcase; 0: it has slid out and the case is gone. */
+  function setCase(amount) {
+    caseAmount = amount;
+    const shown = Boolean(rig.data.structure?.slipcase?.show) && amount > 0.002;
+    slipcase.visible = shown;
+    if (!shown) return;
+    const eased = amount * amount * (3 - 2 * amount);
+    slipcase.position.x = (1 - eased) * d.width * 0.9;
+    caseMaterial.opacity = rig.opacity * clamp(eased * 1.6, 0, 1);
+    caseLabelMaterial.opacity = caseMaterial.opacity;
+  }
+
   /** Trim size, bulk, band and pen loop from the spec. */
   function applyStructure() {
     const structure = rig.data.structure || {};
     const size = trimScale(rig.data);
     bulk = structure.bulk || 1;
+    const rounded = structure.corners === "rounded";
+    const r = rounded ? roundedGeometry() : null;
+    frontCover.geometry = rounded ? r.cover : g.cover;
+    backCover.geometry = rounded ? r.cover : g.cover;
+    coverPlane.geometry = rounded ? r.surfaceFore : g.coverSurface;
+    foilPlane.geometry = rounded ? r.surfaceFore : g.coverSurface;
+    backPlane.geometry = rounded ? r.surfaceBack : g.coverSurface;
+    backFoilPlane.geometry = rounded ? r.surfaceBack : g.coverSurface;
+    frontEndpaper.geometry = rounded ? r.endpaperBack : g.endpaper;
+    backEndpaper.geometry = rounded ? r.endpaperFore : g.endpaper;
     body.scale.set(size, size, 1);
     block.scale.set(1, 1, bulk);
     // Stand on the same shelf line whatever the height.
@@ -670,6 +896,15 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     penLoop.position.z = -halfBlock - d.board - 0.0013;
     penLoopMaterial.color.set(structure.penLoop?.color || "#1d1813");
     penTabMaterial.color.set(structure.penLoop?.color || "#1d1813");
+    shapeClasp();
+    clasp.userData.wanted = Boolean(structure.clasp?.show);
+    claspMaterial.color.set((CLASP_METALS.find((metal) => metal.id === structure.clasp?.metal) || CLASP_METALS[0]).color);
+    pocket.visible = Boolean(structure.pocket?.show);
+    pocketMaterial.color.set(mixHex(rig.data.details?.endpaper?.color || "#efe6d4", "#3a2a1a", 0.12));
+    shapeCase();
+    caseMaterial.color.set(structure.slipcase?.color || "#3a2a20");
+    if (structure.slipcase?.show) paintCaseLabel();
+    setCase(caseAmount);
     updateBand(1, { open: frontPivot.rotation.y < -0.02 });
   }
 
@@ -684,7 +919,9 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
    * `tug`. Returns true while it is still moving.
    */
   function updateBand(delta = 1, { open = false, tug = false } = {}) {
-    const wanted = Boolean(bandParts[0].userData.wanted);
+    const bandWanted = Boolean(bandParts[0].userData.wanted);
+    const claspWanted = Boolean(clasp.userData.wanted);
+    const wanted = bandWanted || claspWanted;
     const target = open ? 1 : 0;
     const step = delta / BAND_SLIDE_SECONDS;
     bandState.slide = target > bandState.slide
@@ -705,12 +942,15 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     bandFront.position.x = bandX + shift;
     bandBack.position.x = bandX + shift;
     band.position.x = shift;
+    clasp.position.x = shift;
     // The strips stand a hair proud of the boards when pulled.
     bandFront.position.z = d.board * 0.5 + BAND_THICK * 0.5 + bandState.tug * 0.003;
     const fade = 1 - clamp((eased - 0.3) / 0.7, 0, 1);
     bandMaterial.opacity = rig.opacity * fade;
-    const shown = wanted && bandState.slide < 1;
-    bandParts.forEach((part) => { part.visible = shown; });
+    claspMaterial.opacity = rig.opacity * fade;
+    const on = bandState.slide < 1;
+    bandParts.forEach((part) => { part.visible = bandWanted && on; });
+    clasp.visible = claspWanted && on;
     return wanted && (bandState.slide !== target || tugMoving);
   }
 
@@ -855,7 +1095,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     cloth, coverArt, foilArt, spineArt, spineFoilArt, backArt, backFoilArt,
     endpaperMaterial, foreEdgeMaterial, headTailEdgeMaterial, grooveMaterial,
     pageMaterial, ...sheetMaterials, headbandMaterial, signatureMaterial, ribbonMaterial,
-    secondRibbonMaterial, bandMaterial, penLoopMaterial, penTabMaterial
+    secondRibbonMaterial, bandMaterial, penLoopMaterial, penTabMaterial, claspMaterial, pocketMaterial, caseMaterial, caseLabelMaterial
   ];
 
   /* ----- look: everything that is a material parameter rather than paint ----- */
@@ -1261,7 +1501,9 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     setLeafShadows,
     swayRibbon,
     updateBand,
-    get hasBand() { return Boolean(rig.data.structure?.band?.show); },
+    /** A band or a clasp holds it shut (it does not crack open on hover). */
+    get hasBand() { return Boolean(rig.data.structure?.band?.show || rig.data.structure?.clasp?.show); },
+    setCase,
     setGlint,
     clearLeaves,
     dispose

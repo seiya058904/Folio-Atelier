@@ -29,9 +29,20 @@ export function defaultStructure(color = "#1d1813") {
     trim: "standard",
     bulk: 1,
     band: { show: false, color: mixHex(color, "#111111", 0.6) },
-    penLoop: { show: false, color: mixHex(color, "#111111", 0.6) }
+    penLoop: { show: false, color: mixHex(color, "#111111", 0.6) },
+    // Board corners at the fore-edge: square, or rounded like a notebook.
+    corners: "square",
+    clasp: { show: false, metal: "brass" },
+    pocket: { show: false },
+    slipcase: { show: false, color: mixHex(color, "#111111", 0.35) }
   };
 }
+
+export const CLASP_METALS = [
+  { id: "brass", label: "Brass", color: "#c7a052" },
+  { id: "silver", label: "Silver", color: "#c9ccd1" },
+  { id: "iron", label: "Blackened iron", color: "#3a3936" }
+];
 
 export const PAGE_TYPES = [
   { id: "halftitle", label: "Half-title", note: "The title alone" },
@@ -436,8 +447,13 @@ export function normalizeBook(value) {
     ...defaultStructure(),
     ...structure,
     band: { ...defaultStructure().band, ...(structure.band || {}) },
-    penLoop: { ...defaultStructure().penLoop, ...(structure.penLoop || {}) }
+    penLoop: { ...defaultStructure().penLoop, ...(structure.penLoop || {}) },
+    clasp: { ...defaultStructure().clasp, ...(structure.clasp || {}) },
+    pocket: { ...defaultStructure().pocket, ...(structure.pocket || {}) },
+    slipcase: { ...defaultStructure(book.material?.color).slipcase, ...(structure.slipcase || {}) }
   };
+  if (book.structure.corners !== "rounded") book.structure.corners = "square";
+  if (!CLASP_METALS.some((metal) => metal.id === book.structure.clasp.metal)) book.structure.clasp.metal = "brass";
   if (!TRIMS.some((trim) => trim.id === book.structure.trim)) book.structure.trim = "standard";
   book.structure.bulk = Math.min(1.6, Math.max(0.55, Number(book.structure.bulk) || 1));
   book.pattern = { ...base.pattern, ...(value.pattern || {}) };
