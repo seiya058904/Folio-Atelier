@@ -9,7 +9,7 @@
 import { fontString, fontToken } from "../data/fonts.js";
 import { getImage } from "../state/images.js";
 import { layerText } from "../state/schema.js";
-import { hashSeed, rgba, seededRandom } from "../util.js";
+import { hashSeed, hexToRgb, mixHex, rgba, seededRandom } from "../util.js";
 import { drawMotif, hasMotif } from "./motifs.js";
 import { hasPattern, patternMask, stampPattern } from "./patterns.js";
 import { paintMaterialBase } from "./surface.js";
@@ -721,7 +721,118 @@ function drawMotifLayer(layers, book, motif, width, height) {
 
 /* ---------- image ---------- */
 
-function drawCoverImage(ctx, image, x, y, w, h) {
+/* ---------- image treatments: duotone, halftone, engraving ---------- */
+
+/** The treatment chosen for the front picture, with inks taken from the cloth. */
+function imageTreatment(book) {
+  const image = book.front.image;
+  const kind = image?.treatment || "none";
+  if (kind === "none") return null;
+  const cloth = book.material.color;
+  return {
+    kind,
+    id: image.id,
+    dark: mixHex(cloth, "#120e0b", 0.7),
+    light: mixHex(cloth, "#f4ecdc", 0.82)
+  };
+}
+
+// Treated pictures are cached: a drag elsewhere on the cover repaints the
+// board many times, and the treatment does not change with it.
+const treatedCache = new Map();
+
+function luminanceAt(data, index) {
+  return (data[index] * 0.2126 + data[index + 1] * 0.7152 + data[index + 2] * 0.0722) / 255;
+}
+
+const smooth = (edge0, edge1, value) => {
+  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * The picture cropped to width x height device pixels and treated: duotone
+ * maps light and dark to two inks, halftone prints it as a dot screen,
+ * engraving as lines that swell in the shadows.
+ */
+function treatedImage(image, imageId, treatment, width, height, dark, light) {
+  const key = `${imageId}|${treatment}|${width}x${height}|${dark}|${light}`;
+  if (treatedCache.has(key)) return treatedCache.get(key);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+  const sw = width / scale;
+  const sh = height / scale;
+  ctx.drawImage(image, (image.naturalWidth - sw) / 2, (image.naturalHeight - sh) / 2, sw, sh, 0, 0, width, height);
+  const pixels = ctx.getImageData(0, 0, width, height);
+  const data = pixels.data;
+  const [dr, dg, db] = hexToRgb(dark);
+  const [lr, lg, lb] = hexToRgb(light);
+  // amount: 0 is bare paper, 1 full ink.
+  const ink = (index, amount) => {
+    data[index] = lr + (dr - lr) * amount;
+    data[index + 1] = lg + (dg - lg) * amount;
+    data[index + 2] = lb + (db - lb) * amount;
+    data[index + 3] = 255;
+  };
+  // Coarse enough to read on a board seen whole, fine enough to read as a print.
+  const cell = Math.max(6, Math.round(Math.max(width, height) / 62));
+  const toneOf = (index) => smooth(0.08, 0.92, luminanceAt(data, index));
+  if (treatment === "duotone") {
+    for (let index = 0; index < data.length; index += 4) {
+      ink(index, 1 - smooth(0.04, 0.96, luminanceAt(data, index)));
+    }
+  } else if (treatment === "halftone") {
+    // The tone at each dot's centre, on a screen turned 45 degrees.
+    const tone = new Float32Array(width * height);
+    for (let index = 0, p = 0; p < tone.length; index += 4, p += 1) tone[p] = toneOf(index);
+    const c = Math.SQRT1_2;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const u = (x * c + y * c) / cell;
+        const v = (-x * c + y * c) / cell;
+        const cu = Math.floor(u) + 0.5;
+        const cv = Math.floor(v) + 0.5;
+        const cx = Math.min(width - 1, Math.max(0, Math.round((cu - cv) * c * cell)));
+        const cy = Math.min(height - 1, Math.max(0, Math.round((cu + cv) * c * cell)));
+        const radius = Math.sqrt(1 - tone[cy * width + cx]) * 0.72;
+        const distance = Math.hypot(u - cu, v - cv);
+        ink((y * width + x) * 4, 1 - smooth(radius - 0.06, radius + 0.06, distance));
+      }
+    }
+  } else if (treatment === "engraving") {
+    const spacing = Math.max(5, cell * 0.9);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = (y * width + x) * 4;
+        const darkness = 1 - toneOf(index);
+        // The lines follow a gentle wave, as an engraver's burin does.
+        const line = (((y + Math.sin(x / (spacing * 9)) * spacing * 0.6) / spacing) % 1 + 1) % 1;
+        const distance = Math.abs(line - 0.5) * 2;
+        ink(index, 1 - smooth(darkness * 0.95 - 0.12, darkness * 0.95 + 0.04, distance));
+      }
+    }
+  }
+  ctx.putImageData(pixels, 0, 0);
+  treatedCache.set(key, canvas);
+  if (treatedCache.size > 6) treatedCache.delete(treatedCache.keys().next().value);
+  return canvas;
+}
+
+function drawCoverImage(ctx, image, x, y, w, h, treatment = null) {
+  if (treatment) {
+    // Treated at the board's device resolution (capped), then placed.
+    const transform = ctx.getTransform();
+    const scaleX = Math.hypot(transform.a, transform.b);
+    const scaleY = Math.hypot(transform.c, transform.d);
+    const factor = Math.min(1, 1400 / Math.max(w * scaleX, h * scaleY, 1));
+    const width = Math.max(8, Math.round(w * scaleX * factor));
+    const height = Math.max(8, Math.round(h * scaleY * factor));
+    ctx.drawImage(treatedImage(image, treatment.id, treatment.kind, width, height, treatment.dark, treatment.light), x, y, w, h);
+    return;
+  }
   const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
   const sw = w / scale;
   const sh = h / scale;
@@ -854,9 +965,9 @@ export function paintFront(book, baseTarget, foilTarget, onAsset, commit, relief
         ctx.shadowColor = "rgba(0,0,0,0.3)";
         ctx.shadowBlur = 9;
         ctx.shadowOffsetY = 3;
-        drawCoverImage(ctx, image, x, y, w, h);
+        drawCoverImage(ctx, image, x, y, w, h, imageTreatment(book));
       } else {
-        drawCoverImage(ctx, image, 0, 0, width, height);
+        drawCoverImage(ctx, image, 0, 0, width, height, imageTreatment(book));
         ctx.globalAlpha = 1;
         const shade = ctx.createLinearGradient(0, 0, width, 0);
         shade.addColorStop(0, "rgba(0,0,0,0.2)");

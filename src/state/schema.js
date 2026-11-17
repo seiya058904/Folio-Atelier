@@ -184,6 +184,8 @@ function buildFront(layoutId, preset, color) {
     color: mixHex(color, luminance(color) < 0.3 ? "#e8dcc4" : "#1d1813", 0.55),
     x: 0.5, y: 0.4, width: 0.62, height: 0.3
   };
+  // A wax seal pressed on the board, with a letter. Off until added.
+  front.seal = { show: false, color: "#7a1c17", letter: "", x: 0.76, y: 0.82 };
   if (preset.border) front.border.style = preset.border;
   if (preset.blank) {
     front.border.style = "none";
@@ -320,8 +322,10 @@ export function applyPreset(book, presetId) {
   book.foil = foil;
   book.palette = preset.palette ? { ...preset.palette } : null;
   const image = book.front?.image || null;
+  const seal = book.front?.seal || null;
   book.front = keep(book.front, buildFront(preset.layout, preset, color));
   book.front.image = image;
+  if (seal) book.front.seal = seal;
   book.spine = keep(book.spine, buildSpine(preset, color));
   book.back = keep(book.back, buildBack(preset, color));
   book.details = buildDetails(preset, color, foil);
@@ -334,6 +338,7 @@ export function applyLayout(book, layoutId) {
   const next = buildFront(layoutId, preset, book.material.color);
   next.image = book.front?.image || null;
   if (book.front?.onlay) next.onlay = book.front.onlay;
+  if (book.front?.seal) next.seal = book.front.seal;
   book.front?.texts?.forEach((previous) => {
     const layer = next.texts.find((candidate) => candidate.id === previous.id);
     if (layer && previous.source === "custom") {
@@ -475,7 +480,10 @@ export function normalizeBook(value) {
       ...base[face],
       ...stored,
       border: { ...base[face].border, ...(stored.border || {}) },
-      ...(face === "front" ? { onlay: { ...base.front.onlay, ...(stored.onlay || {}) } } : {}),
+      ...(face === "front" ? {
+        onlay: { ...base.front.onlay, ...(stored.onlay || {}) },
+        seal: { ...base.front.seal, ...(stored.seal || {}) }
+      } : {}),
       motif: { ...base[face].motif, ...(stored.motif || {}) },
       texts: Array.isArray(stored.texts) && stored.texts.length
         ? stored.texts.map((layer) => ({ ...base[face].texts[0], vertical: false, ...layer }))

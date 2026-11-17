@@ -870,6 +870,7 @@ export function createStudioUi({ store, engine, audio }) {
       ),
       group("Border", null, ...borderEditor("front")),
       onlayGroup(),
+      sealGroup(),
       group("Ornament", null, ...motifEditor("front")),
       group("Artwork", "Use your own picture as the whole cover or as an inset plate. Foil and print sit on top.",
         h("div", { class: "upload" },
@@ -890,10 +891,50 @@ export function createStudioUi({ store, engine, audio }) {
             label: "Strength", value: image.opacity ?? 1, min: 0.1, max: 1, step: 0.01, format: percent,
             onInput: (value) => edit(() => { book().front.image.opacity = value; }, ["front"], { key: "front-image-opacity" })
           })
-        ) : null
+        ) : null,
+        image ? segmented({
+          label: "Printed as", value: image.treatment || "none",
+          options: [
+            { id: "none", label: "Photograph" }, { id: "duotone", label: "Duotone" },
+            { id: "halftone", label: "Halftone" }, { id: "engraving", label: "Engraving" }
+          ],
+          onChange: (value) => edit(() => { book().front.image.treatment = value; }, ["front"])
+        }) : null
       ),
       letteringGroup("front", "Each line can use the book's shared words or its own text.")
     ];
+  }
+
+  /** A wax seal pressed on the front board. */
+  function sealGroup() {
+    const current = book().front.seal;
+    const change = (mutate, key = null, rerender = false) => edit(() => mutate(book().front.seal), ["front"], { key, rerender });
+    return group("Wax seal", "A seal of wax pressed on the board, with a letter. It takes the first letter of the title unless you give it one.",
+      toggle({
+        label: "Wax seal", value: current.show,
+        onChange: (value) => change((target) => { target.show = value; }, null, true)
+      }),
+      current.show ? row(
+        textField({
+          label: "Letter", value: current.letter, placeholder: "From the title", maxLength: 1,
+          onInput: (value) => change((target) => { target.letter = value; }, "seal-letter")
+        }),
+        colorField({
+          label: "Wax", value: current.color, swatches: ["#7a1c17", "#1f2a44", "#2f4a2f", "#1b1714", "#b48a3a"], custom: true,
+          onInput: (value) => change((target) => { target.color = value; }, "seal-color")
+        })
+      ) : null,
+      current.show ? row(
+        slider({
+          label: "Across", value: current.x, min: 0.15, max: 0.85, step: 0.01, format: percent,
+          onInput: (value) => change((target) => { target.x = value; }, "seal-x")
+        }),
+        slider({
+          label: "Down", value: current.y, min: 0.12, max: 0.88, step: 0.01, format: percent,
+          onInput: (value) => change((target) => { target.y = value; }, "seal-y")
+        })
+      ) : null
+    );
   }
 
   /* ----- sharing ----- */

@@ -4,7 +4,17 @@ Round 1 (Phases A–F: speed, motion, decoration, structure, rooms, sharing) is 
 
 This round has three sources: the user's review of the deployed build, the parts of round 1 left unfinished (C, D and E were partial), and our own code review. Work goes phase by phase in the order below. Each phase ends with its checks, a status note at the top of this file, and one scoped commit.
 
-**Status:** G, H and I done; J and K partly done (2026-11-18); L next.
+**Status:** G, H and I done; J, K and L partly done (2026-11-18). What is left of J, K and L is listed under each phase below and carries over to round 3.
+
+- **L — partly done.**
+  - A cover picture can be printed as a photograph, duotone, halftone or engraving, with inks taken from the cloth. Each treatment is cached, so drags elsewhere on the cover do not redo it (23–98 ms on first paint).
+  - A wax seal can be pressed on the front board: an irregular disc of wax with a raised rim and a letter (the title's initial unless given), with colour and position controls.
+  - **Not done:**
+    - Several foils on one cover.
+    - Fore-edge painting.
+    - Nameplate, stickers, and a monogram generator beyond the seal's letter.
+    - Paste-paper and map endpapers, tipped-in plates, vellum interleaves, footnotes.
+    - Crop handles, SVG ornament upload.
 
 - **K — partly done.**
   - Drag a book along the shelf to move it: it lifts off and follows the pointer, and its neighbours make room. Alt + arrow keys do the same, and the move is announced to screen readers. The release does not open the book.

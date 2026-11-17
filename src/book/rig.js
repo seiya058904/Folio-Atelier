@@ -664,6 +664,79 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   frontPivot.add(frontGroove);
   body.add(frontPivot);
 
+  /* ----- wax seal ----- */
+  // A seal pressed on the front board: a rounded, slightly irregular disc of
+  // wax with a raised rim and a letter (a bump map painted per book).
+  if (!shared.seal) {
+    const shape = new THREE.Shape();
+    const random = (index) => Math.sin(index * 12.9898) * 43758.5453 % 1;
+    for (let index = 0; index <= 36; index += 1) {
+      const angle = (index / 36) * Math.PI * 2;
+      const radius = 0.062 * (1 + Math.abs(random(index + 1)) * 0.09 - 0.045);
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      if (index === 0) shape.moveTo(x, y);
+      else shape.lineTo(x, y);
+    }
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: 0.002, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.006, bevelSegments: 4, curveSegments: 4
+    });
+    const position = geometry.getAttribute("position");
+    const uv = geometry.getAttribute("uv");
+    for (let index = 0; index < position.count; index += 1) {
+      uv.setXY(index, position.getX(index) / 0.14 + 0.5, position.getY(index) / 0.14 + 0.5);
+    }
+    geometry.computeVertexNormals();
+    shared.seal = geometry;
+  }
+  const sealCanvas = document.createElement("canvas");
+  sealCanvas.width = 256;
+  sealCanvas.height = 256;
+  const sealTexture = new THREE.CanvasTexture(sealCanvas);
+  sealTexture.anisotropy = 4;
+  const sealMaterial = physical({
+    map: sealTexture, bumpMap: sealTexture, bumpScale: 0.016,
+    roughness: 0.42, metalness: 0, clearcoat: 0.45, clearcoatRoughness: 0.35, sheen: 0.2, sheenRoughness: 0.5
+  });
+  const seal = createMesh(shared.seal, sealMaterial, "wax-seal", true, true);
+  seal.scale.set(1.18, 1.18, 1);
+  frontPivot.add(seal);
+  let sealKey = "";
+
+  function applySeal() {
+    const spec = rig.data.front.seal || {};
+    seal.visible = Boolean(spec.show);
+    if (!seal.visible) return;
+    seal.position.set(d.width * (spec.x ?? 0.76), d.height * (0.5 - (spec.y ?? 0.82)), d.board * 0.5);
+    sealMaterial.color.set(spec.color || "#7a1c17");
+    const letter = (spec.letter || rig.data.title || "").trim().slice(0, 1).toUpperCase();
+    if (letter === sealKey) return;
+    sealKey = letter;
+    const ctx = sealCanvas.getContext("2d");
+    const glow = ctx.createRadialGradient(128, 118, 10, 128, 128, 128);
+    glow.addColorStop(0, "#d6d6d6");
+    glow.addColorStop(1, "#a6a6a6");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, 256, 256);
+    // The rim raised by the matrix, then a groove inside it.
+    ctx.strokeStyle = "#f2f2f2";
+    ctx.lineWidth = 14;
+    ctx.beginPath();
+    ctx.arc(128, 128, 98, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = "#7c7c7c";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(128, 128, 84, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#f4f4f4";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = '600 118px "Cormorant Garamond", "Noto Serif SC", serif';
+    ctx.fillText(letter || "\u2766", 128, 136);
+    sealTexture.needsUpdate = true;
+  }
+
   /* ----- closure band and pen loop ----- */
   // A vertical elastic band near the fore-edge, of rounded section: a strip
   // on each board, joined round the head and the tail with a radius at each
@@ -905,6 +978,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     caseMaterial.color.set(structure.slipcase?.color || "#3a2a20");
     if (structure.slipcase?.show) paintCaseLabel();
     setCase(caseAmount);
+    applySeal();
     updateBand(1, { open: frontPivot.rotation.y < -0.02 });
   }
 
@@ -1095,7 +1169,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     cloth, coverArt, foilArt, spineArt, spineFoilArt, backArt, backFoilArt,
     endpaperMaterial, foreEdgeMaterial, headTailEdgeMaterial, grooveMaterial,
     pageMaterial, ...sheetMaterials, headbandMaterial, signatureMaterial, ribbonMaterial,
-    secondRibbonMaterial, bandMaterial, penLoopMaterial, penTabMaterial, claspMaterial, pocketMaterial, caseMaterial, caseLabelMaterial
+    secondRibbonMaterial, bandMaterial, penLoopMaterial, penTabMaterial, claspMaterial, pocketMaterial, caseMaterial, caseLabelMaterial, sealMaterial
   ];
 
   /* ----- look: everything that is a material parameter rather than paint ----- */
