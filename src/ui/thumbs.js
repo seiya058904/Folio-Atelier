@@ -1,7 +1,7 @@
 // Flat previews for the interface: real covers painted by the same code that
 // paints the 3D boards, plus small ornament glyphs.
 
-import { paintFront } from "../textures/faces.js";
+import { faceSignatures, paintFront, setFastGrain } from "../textures/faces.js";
 import { drawMotif } from "../textures/motifs.js";
 import { mixHex } from "../util.js";
 
@@ -23,7 +23,12 @@ export function drawCoverThumb(canvas, book, onAsset) {
     scratchBase = target(width, height);
     scratchFoil = target(width, height);
   }
-  paintFront(book, scratchBase, scratchFoil, onAsset);
+  setFastGrain(true);
+  try {
+    paintFront(book, scratchBase, scratchFoil, onAsset);
+  } finally {
+    setFastGrain(false);
+  }
 
   // Tint the white foil mask with the foil colour and a diagonal sheen.
   const foil = scratchFoil.context;
@@ -45,12 +50,17 @@ export function drawCoverThumb(canvas, book, onAsset) {
   ctx.drawImage(scratchFoil.canvas, 0, 0);
 }
 
-/** Draw an ornament glyph in the current text colour of `canvas`. */
-export function drawMotifGlyph(canvas, key) {
+/** Everything `drawCoverThumb` shows, as a string: a key for caching it. */
+export function coverThumbKey(book) {
+  const signature = faceSignatures(book, "front");
+  return [signature.base, signature.foil, book.foil.color, book.foil.metalness].join("|");
+}
+
+/** Draw an ornament glyph in `color`. */
+export function drawMotifGlyph(canvas, key, color = "#231d17") {
   const size = canvas.width;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, size, size);
-  const color = getComputedStyle(canvas).color || "#231d17";
   if (key === "none") {
     ctx.strokeStyle = color;
     ctx.globalAlpha = 0.4;

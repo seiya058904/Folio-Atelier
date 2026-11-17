@@ -4,6 +4,7 @@
 // or pressed twice (light and dark) for a blind impression.
 
 import { seededRandom } from "../util.js";
+import { paintContext } from "./gl.js";
 
 const TAU = Math.PI * 2;
 
@@ -296,7 +297,7 @@ export function patternMask(key, pixelWidth, pixelHeight, logical, { scale = 1, 
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(pixelWidth));
   canvas.height = Math.max(1, Math.round(pixelHeight));
-  const ctx = canvas.getContext("2d");
+  const ctx = paintContext(canvas);
   ctx.setTransform(canvas.width / logical.width, 0, 0, canvas.height / logical.height, 0, 0);
   ctx.strokeStyle = "#ffffff";
   ctx.fillStyle = "#ffffff";
@@ -319,7 +320,7 @@ export function stampPattern(ctx, mask, width, height, color, alpha = 1, dx = 0,
       tintCanvas.width = mask.width;
       tintCanvas.height = mask.height;
     }
-    const tint = tintCanvas.getContext("2d");
+    const tint = paintContext(tintCanvas);
     tint.globalCompositeOperation = "copy";
     tint.drawImage(mask, 0, 0);
     tint.globalCompositeOperation = "source-in";

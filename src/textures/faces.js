@@ -4,7 +4,7 @@
 // Layouts are authored on a logical 768 × 1152 board (320 × 1536 for the spine)
 // and scaled to whatever resolution the rig asks for.
 
-import { fontString } from "../data/fonts.js";
+import { fontString, fontToken } from "../data/fonts.js";
 import { getImage } from "../state/images.js";
 import { layerText } from "../state/schema.js";
 import { rgba } from "../util.js";
@@ -54,6 +54,13 @@ function withFinish(layers, finish, color, draw) {
 
 /* ---------- boards: material, two-tone binding, all-over pattern ---------- */
 
+// Set while painting drafts and thumbnails: the grain comes from a cached
+// overlay (see `paintMaterialBase`). Full-size boards paint it afresh.
+let fastGrain = false;
+export function setFastGrain(value) {
+  fastGrain = Boolean(value);
+}
+
 const STRIP = 0.2;
 const TIP = 0.215;
 
@@ -94,7 +101,7 @@ function paintBoard(layers, target, book, face, width, height) {
   const ctx = layers.base;
   const seed = book.seed + (face === "back" ? 3 : 0);
   const twoTone = material.binding === "quarter" || material.binding === "half";
-  paintMaterialBase(ctx, width, height, material.color, material.kind, seed, { flip: hinge === "right" });
+  paintMaterialBase(ctx, width, height, material.color, material.kind, seed, { flip: hinge === "right", overlay: fastGrain });
 
   const pattern = book.pattern;
   if (pattern && hasPattern(pattern.key)) {
@@ -117,7 +124,7 @@ function paintBoard(layers, target, book, face, width, height) {
     ctx.save();
     tracePartRegion(ctx, material.binding, width, height, hinge);
     ctx.clip();
-    paintMaterialBase(ctx, width, height, material.second, material.kind, seed + 11, { flip: !left });
+    paintMaterialBase(ctx, width, height, material.second, material.kind, seed + 11, { flip: !left, overlay: fastGrain });
     ctx.restore();
     // The second covering laps over the first: a lit edge with a shadow beside it.
     const seam = (x1, y1, x2, y2, nx, ny) => {
@@ -590,7 +597,13 @@ function drawCoverImage(ctx, image, x, y, w, h) {
 
 /* ---------- boards ---------- */
 
-export function paintFront(book, baseTarget, foilTarget, onAsset) {
+/** Hand the layers named in `commit` to the GPU (both when it is omitted). */
+function commitLayers(baseTarget, foilTarget, commit) {
+  if (!commit || commit.base) baseTarget.commit();
+  if (!commit || commit.foil) foilTarget.commit();
+}
+
+export function paintFront(book, baseTarget, foilTarget, onAsset, commit) {
   const { width, height } = FACE_SIZE.front;
   const layers = { base: begin(baseTarget, FACE_SIZE.front), foil: begin(foilTarget, FACE_SIZE.front) };
   const front = book.front;
@@ -636,11 +649,10 @@ export function paintFront(book, baseTarget, foilTarget, onAsset) {
   drawMotifLayer(layers, book, front.motif, width, height);
   front.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
   drawCorners(layers.foil, book.details.corners?.style, width, height, "left");
-  baseTarget.commit();
-  foilTarget.commit();
+  commitLayers(baseTarget, foilTarget, commit);
 }
 
-export function paintBack(book, baseTarget, foilTarget) {
+export function paintBack(book, baseTarget, foilTarget, onAsset, commit) {
   const { width, height } = FACE_SIZE.back;
   const layers = { base: begin(baseTarget, FACE_SIZE.back), foil: begin(foilTarget, FACE_SIZE.back) };
   const back = book.back;
@@ -654,8 +666,7 @@ export function paintBack(book, baseTarget, foilTarget) {
   drawMotifLayer(layers, book, back.motif, width, height);
   back.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
   drawCorners(layers.foil, book.details.corners?.style, width, height, "right");
-  baseTarget.commit();
-  foilTarget.commit();
+  commitLayers(baseTarget, foilTarget, commit);
 }
 
 function drawSpineText(layers, book, layer, width, height, room) {
@@ -691,13 +702,13 @@ function drawSpineText(layers, book, layer, width, height, room) {
 
 const BAND_POSITIONS = [0.135, 0.3, 0.7, 0.865];
 
-export function paintSpine(book, baseTarget, foilTarget) {
+export function paintSpine(book, baseTarget, foilTarget, onAsset, commit) {
   const { width, height } = FACE_SIZE.spine;
   const layers = { base: begin(baseTarget, FACE_SIZE.spine), foil: begin(foilTarget, FACE_SIZE.spine) };
   const spine = book.spine;
   const material = book.material;
   const twoTone = material.binding === "quarter" || material.binding === "half";
-  paintMaterialBase(layers.base, width, height, twoTone ? material.second : material.color, material.kind, book.seed + 7, { spine: true });
+  paintMaterialBase(layers.base, width, height, twoTone ? material.second : material.color, material.kind, book.seed + 7, { spine: true, overlay: fastGrain });
 
   const pattern = book.pattern;
   if (!twoTone && pattern?.spine && hasPattern(pattern.key)) {
@@ -856,8 +867,70 @@ export function paintSpine(book, baseTarget, foilTarget) {
     const room = labelled && layer.id === "spine-title" ? labelHalf * 2 - 44 : height * 0.56;
     drawSpineText(layers, book, layer, width, height, room);
   });
-  baseTarget.commit();
-  foilTarget.commit();
+  commitLayers(baseTarget, foilTarget, commit);
+}
+
+/* ---------- signatures ---------- */
+
+// Everything a painter reads, split by the layer it lands on, so the rig can
+// skip a repaint (or just the upload of one layer) when nothing it shows has
+// changed. Anything stamped in foil goes to the foil layer; print and blind
+// impressions go to the base.
+
+const split = (finish, value, parts) => {
+  (finish === "foil" ? parts.foil : parts.base).push(value);
+};
+
+function textParts(book, layers, parts) {
+  layers.forEach((layer) => {
+    if (!layer.show) return;
+    const text = layerText(book, layer);
+    split(layer.finish, [layer, text, fontToken({ ...layer, text })], parts);
+  });
+}
+
+// Two ornaments are lettered: an initial, and a seal character.
+function motifFontToken(key, title) {
+  if (key === "monogram") return fontToken({ font: "cormorant", weight: 500, text: (title || "A").slice(0, 1) });
+  if (key === "seal") return fontToken({ font: "notoserifsc", weight: 700, text: [...(title || "A")][0] });
+  return "";
+}
+
+export function faceSignatures(book, face) {
+  const parts = { base: [], foil: [] };
+  const { material, pattern, details } = book;
+  const twoTone = material.binding === "quarter" || material.binding === "half";
+  parts.base.push(material, book.seed, details.stitch);
+  if (face === "spine") {
+    const spine = book.spine;
+    const title = spine.texts.find((layer) => layer.id === "spine-title");
+    const label = [spine.label, title?.y, title?.orient];
+    const motif = spine.emblem === "motif" ? [book.front.motif.key, book.title] : null;
+    parts.base.push(label, spine.style);
+    parts.foil.push(label);
+    if (!twoTone && pattern?.spine && hasPattern(pattern.key)) split(pattern.finish, pattern, parts);
+    split(spine.finish, [spine.style, spine.emblem, spine.color, motif], parts);
+    textParts(book, spine.texts, parts);
+  } else {
+    const side = book[face];
+    if (pattern && hasPattern(pattern.key)) split(pattern.finish, [pattern, twoTone ? material.binding : ""], parts);
+    if (face === "front") parts.base.push(side.image, side.image?.id ? Boolean(getImage(side.image.id)) : null);
+    // A pasted panel always prints its paper on the base, whatever its rule is.
+    if (side.border.style === "panel" || side.border.style === "slip") parts.base.push(side.border);
+    split(side.border.finish, side.border, parts);
+    if (hasMotif(side.motif?.key)) split(side.motif.finish, [side.motif, book.title, motifFontToken(side.motif.key, book.title)], parts);
+    textParts(book, side.texts, parts);
+    parts.foil.push(details.corners);
+  }
+  return { base: JSON.stringify(parts.base), foil: JSON.stringify(parts.foil) };
+}
+
+export function endpaperSignature(book) {
+  const { endpaper } = book.details;
+  return JSON.stringify([
+    endpaper, book.material.color, book.seed,
+    endpaper.pattern === "grid" ? [book.front.motif.key, book.title] : null
+  ]);
 }
 
 /* ---------- endpapers ---------- */

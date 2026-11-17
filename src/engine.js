@@ -16,12 +16,13 @@ import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { createBookRig, createMesh, HIT_LAYER, PRINTED_LEAVES } from "./book/rig.js";
-import { ensureFonts } from "./data/fonts.js";
+import { ensureFonts, onFontsLoaded } from "./data/fonts.js";
 import { detectQuality, lowerQuality } from "./scene/quality.js";
 import { t } from "./i18n.js";
+import { perf } from "./perf.js";
 import { bookPalette, coverFontRuns } from "./state/schema.js";
 import { bindRenderer } from "./textures/gl.js";
-import { pageFontRuns, paginate } from "./textures/pages.js";
+import { forgetMeasurements, pageFontRuns, paginate } from "./textures/pages.js";
 import { getContactShadowTexture } from "./textures/surface.js";
 import { ATELIER_PALETTE, seededRandom } from "./util.js";
 
@@ -43,8 +44,16 @@ const pointerLabelTitle = document.querySelector("#pointer-label-title");
 const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 const clamp = THREE.MathUtils.clamp;
-const damp = THREE.MathUtils.damp;
 const lerp = THREE.MathUtils.lerp;
+// Set by anything that moved the scene this frame; the loop sleeps without it.
+let motion = false;
+let cameraMotion = false;
+/** Frame-rate independent easing that also reports whether it still moves. */
+const damp = (current, target, lambda, delta) => {
+  const next = THREE.MathUtils.damp(current, target, lambda, delta);
+  if (delta > 0 && Math.abs(next - current) > delta * 0.001) motion = true;
+  return next;
+};
 const smoothstep = (value) => value * value * (3 - 2 * value);
 const smootherstep = (value) => (
   value * value * value * (value * (value * 6 - 15) + 10)
@@ -54,7 +63,41 @@ const pad = (value) => String(value).padStart(2, "0");
 // Texture resolutions, shadow size and post-processing for this device.
 let quality = detectQuality();
 let composer = null;
-const frameBudget = { time: 0, frames: 0, settled: false };
+let occlusionPass = null;
+// The drawing buffer has its own antialiasing only when nothing is composed.
+let contextAntialias = true;
+let basePixelRatio = 1;
+// Resolution multiplier: 1 at rest, lowered while moving on slow machines.
+let renderScale = 1;
+let motionScale = 1;
+const RENDER_SCALES = [1, 0.85, 0.7, 0.58];
+const SLOW_FRAME_MS = 21;
+const FAST_FRAME_MS = 17.6;
+const frameBudget = { ema: 0, streak: 0, cooldown: 0, slow: 0, upAt: 0, retry: 4000 };
+
+// The loop renders only while something moves. After the last interaction the
+// room keeps its slow ambient drift for a while, then goes fully idle.
+const AMBIENT_MS = 9000;
+const AMBIENT_FADE_MS = 2200;
+const AMBIENT_FRAME_MS = 30;
+let lastActivity = performance.now();
+let lastRenderAt = 0;
+let activeUntil = 0;
+let wakeRender = true;
+let ambient = 1;
+let ambientClock = 0;
+let shadowHold = 4;
+let dustPoints = null;
+
+// Edits are merged per book and painted once per frame.
+const pendingRepaints = new Map();
+const draftRigs = new Set();
+const DRAFT_SETTLE_MS = 170;
+let settleTimer = 0;
+// Bumped when fonts or images arrive, so printed pages know to repaint.
+let pageEpoch = 0;
+let paginateCost = 0;
+let lazyPaintPending = false;
 // A short flourish on the open book when its whole binding changes.
 let rebindTime = 1;
 
@@ -94,6 +137,7 @@ let currentViewOffsetX = 0;
 let detailSafeWidth = viewWidth * 0.6;
 let themeInitialized = false;
 let themeMoving = false;
+let themeKey = "";
 let pageRefreshTimer = 0;
 let pendingView = null;
 
@@ -274,7 +318,18 @@ function getInspectScale() {
 /* Theme                                                               */
 /* ------------------------------------------------------------------ */
 
-function applyTheme(palette, accent) {
+const PAGE_THEME_INTERVAL_MS = 180;
+let pendingPageTheme = null;
+let pageThemeAt = -1000;
+let pageThemeTimer = 0;
+
+function applyPageTheme() {
+  clearTimeout(pageThemeTimer);
+  pageThemeTimer = 0;
+  if (!pendingPageTheme) return;
+  const { palette, accent } = pendingPageTheme;
+  pendingPageTheme = null;
+  pageThemeAt = performance.now();
   const rootStyle = document.documentElement.style;
   rootStyle.setProperty("--paper", palette.paper);
   rootStyle.setProperty("--paper-deep", palette.paperDeep);
@@ -286,6 +341,19 @@ function applyTheme(palette, accent) {
   rootStyle.setProperty("--rule", `color-mix(in srgb, ${palette.ink} 24%, transparent)`);
   rootStyle.setProperty("--accent", accent);
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", palette.paper);
+}
+
+function applyTheme(palette, accent) {
+  // Restyling the whole page is not free; skip it when nothing changed.
+  const key = JSON.stringify([palette, accent]);
+  if (key === themeKey) return;
+  themeKey = key;
+  // Restyling the interface is throttled: while a colour is being dragged the
+  // 3D room follows every frame and the page catches up a few times a second.
+  pendingPageTheme = { palette, accent };
+  const wait = PAGE_THEME_INTERVAL_MS - (performance.now() - pageThemeAt);
+  if (wait <= 0) applyPageTheme();
+  else if (!pageThemeTimer) pageThemeTimer = setTimeout(applyPageTheme, wait);
 
   themeTargets.floor.set(palette.paperDeep);
   themeTargets.wall.set(palette.wall);
@@ -326,30 +394,50 @@ function rigFor(id) {
   return bookRigs.find((rig) => rig.data.id === id) || null;
 }
 
-/** Paint now with whatever faces are available, then again once webfonts land. */
-function repaintRig(rig, dirty) {
-  rig.repaint(dirty);
-  ensureFonts(coverFontRuns(rig.data)).then((loaded) => {
-    if (!loaded || !bookRigs.includes(rig)) return;
-    rig.repaint(["front", "spine", "back"]);
+/** Start loading the web fonts a cover needs; `onFontsArrived` repaints. */
+function requestCoverFonts(rig) {
+  ensureFonts(coverFontRuns(rig.data));
+}
+
+let fontsTimer = 0;
+
+/**
+ * More web fonts have finished loading. Boards whose lettering was waiting
+ * for them repaint (their signatures say so); the open book is measured and
+ * printed again, since real glyphs have different widths.
+ */
+function onFontsArrived() {
+  clearTimeout(fontsTimer);
+  fontsTimer = setTimeout(() => {
+    bookRigs.forEach((rig) => {
+      if (rig.painted) rig.repaint();
+    });
+    forgetMeasurements();
+    pageEpoch += 1;
+    if (activeBook) paginateActive();
+    shadowHold = 3;
     requestFrame();
-  });
+  }, 90);
+}
+
+/** First paint of a book's boards (books out of sight are left unpainted). */
+function paintRig(rig) {
+  rig.repaint();
+  requestCoverFonts(rig);
+  shadowHold = 3;
 }
 
 function buildRig(book) {
   const rig = createBookRig(book, {
     resolution: quality.shelf,
+    lazy: true,
     onAsset: () => {
       if (!bookRigs.includes(rig)) return;
-      rig.repaint(["front"]);
+      pageEpoch += 1;
+      if (rig.painted) rig.repaint({ force: true });
       if (rig === activeBook) schedulePageRefresh(0);
       requestFrame();
     }
-  });
-  ensureFonts(coverFontRuns(book)).then((loaded) => {
-    if (!loaded || !bookRigs.includes(rig)) return;
-    rig.repaint(["front", "spine", "back"]);
-    requestFrame();
   });
   return rig;
 }
@@ -360,6 +448,7 @@ function addBook(book, index = bookRigs.length) {
   rebuildHitTargets();
   shelfStage.add(rig.root);
   snapRigToShelfSlot(rig, index);
+  paintRig(rig);
   // A new binding settles onto the shelf from just above it.
   if (!reducedMotion) {
     rig.root.position.y += 0.62;
@@ -377,6 +466,8 @@ function removeBook(id) {
   const index = bookRigs.findIndex((rig) => rig.data.id === id);
   if (index < 0) return;
   const [rig] = bookRigs.splice(index, 1);
+  pendingRepaints.delete(rig);
+  draftRigs.delete(rig);
   rig.dispose();
   rebuildHitTargets();
   hoveredIndex = -1;
@@ -388,20 +479,59 @@ function removeBook(id) {
   requestFrame();
 }
 
-/** A book's spec changed: repaint what is dirty and keep the room in step. */
-function refreshBook(book, dirty = ["all"]) {
+/**
+ * A book's spec changed. The work is queued and done once in the next frame,
+ * however many edits arrive before it. `interactive` edits (a slider being
+ * dragged, typing) are painted at draft resolution and sharpened at rest.
+ */
+function refreshBook(book, dirty = ["all"], { interactive = false } = {}) {
   const rig = rigFor(book.id);
   if (!rig) return;
-  repaintRig(rig, dirty);
-  if (books[selectedIndex] === book) applySelectedTheme();
-  if (rig === activeBook && dirty.includes("all") && mode === "detail" && !reducedMotion) rebindTime = 0;
-  if (rig === activeBook) {
-    const touchesPages = dirty.some((key) => (
-      key === "all" || key === "pages" || key === "interior" || key === "meta"
-      || key === "front" || key === "material"
-    ));
-    if (touchesPages) schedulePageRefresh(dirty.includes("pages") ? 140 : 60);
+  const entry = pendingRepaints.get(rig) || { dirty: new Set(), draft: true };
+  dirty.forEach((key) => entry.dirty.add(key));
+  entry.draft = entry.draft && interactive;
+  pendingRepaints.set(rig, entry);
+  requestFrame();
+}
+
+function flushRepaints() {
+  if (!pendingRepaints.size) return;
+  pendingRepaints.forEach((entry, rig) => {
+    if (!bookRigs.includes(rig)) return;
+    const has = (key) => entry.dirty.has("all") || entry.dirty.has(key);
+    if (rig.painted) {
+      const draft = entry.draft && rig === activeBook;
+      const hidden = draft ? rig.hiddenFaces(camera) : null;
+      // The endpapers are inside the boards: out of sight while the book is shut.
+      if (hidden) hidden.endpaper = !readingOpen;
+      if (rig.repaint({ draft, hidden })) draftRigs.add(rig);
+      if (has("front") || has("spine") || has("back") || has("meta")) requestCoverFonts(rig);
+    }
+    if (books[selectedIndex] === rig.data) applySelectedTheme();
+    if (rig !== activeBook) return;
+    if (entry.dirty.has("all") && mode === "detail" && !reducedMotion) rebindTime = 0;
+    // The pages borrow the cover ornament and the cloth colour.
+    const motifKey = rig.data.front.motif.key;
+    const motifChanged = motifKey !== rig.pageMotif;
+    rig.pageMotif = motifKey;
+    if (has("pages") || has("interior") || has("meta") || has("material") || motifChanged) {
+      refreshPagesAfterEdit(entry.draft && (entry.dirty.has("pages") || entry.dirty.has("interior")));
+    }
+  });
+  pendingRepaints.clear();
+  shadowHold = 3;
+  if (draftRigs.size) {
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(settleDrafts, DRAFT_SETTLE_MS);
   }
+}
+
+/** The hand has rested: repaint draft boards at full resolution. */
+function settleDrafts() {
+  draftRigs.forEach((rig) => {
+    if (bookRigs.includes(rig) && rig.painted) rig.repaint();
+  });
+  draftRigs.clear();
   requestFrame();
 }
 
@@ -512,6 +642,8 @@ function updateShelfLayout(delta, elapsed) {
     }
   }
 
+  let paintBudget = 2;
+  lazyPaintPending = false;
   bookRigs.forEach((rig, index) => {
     if (rig.root.parent !== shelfStage) return;
 
@@ -538,6 +670,15 @@ function updateShelfLayout(delta, elapsed) {
     rig.contactShadow.material.opacity = rig.opacity * 0.24;
     rig.hit.visible = rig.opacity > 0.12;
     if (!rig.root.visible) return;
+    if (!rig.painted) {
+      // Books are painted as they come into view, at most two a frame.
+      if (paintBudget > 0) {
+        paintBudget -= 1;
+        paintRig(rig);
+      } else {
+        lazyPaintPending = true;
+      }
+    }
 
     const isHovered = hoveredIndex === index && mode === "hero";
     const hoverPreview = isHovered && !reducedMotion;
@@ -551,8 +692,9 @@ function updateShelfLayout(delta, elapsed) {
       updateFlexiblePage(pagePivot, 0, delta);
     });
 
-    const idle = reducedMotion ? 0 : Math.sin(elapsed * 0.72 + index * 0.8) * 0.012 * slot.focus;
-    rig.motion.position.y = damp(rig.motion.position.y, idle + (hoverPreview ? 0.035 : 0), 9, delta);
+    // The ambient bob is eased without waking the loop: it fades out by itself.
+    const idle = Math.sin(elapsed * 0.72 + index * 0.8) * 0.012 * slot.focus * ambient;
+    rig.motion.position.y = THREE.MathUtils.damp(rig.motion.position.y, idle + (hoverPreview ? 0.035 : 0), 9, delta);
     rig.motion.rotation.x = damp(rig.motion.rotation.x, hoverPreview ? pointer.ndc.y * 0.035 : 0, 10, delta);
     rig.motion.rotation.y = damp(rig.motion.rotation.y, hoverPreview ? -pointer.ndc.x * 0.035 : 0, 10, delta);
   });
@@ -572,7 +714,7 @@ function printLeaf(rig, pivot, leaf) {
   pivot.userData.leaf = leaf;
   [0, 1].forEach((side) => {
     const index = leaf * 2 + side;
-    rig.setLeafPage(pivot, side, rig.flat[index] || null, index, quality.page);
+    rig.setLeafPage(pivot, side, rig.flat[index] || null, index, quality.page, pageEpoch);
   });
 }
 
@@ -622,29 +764,64 @@ function syncLeafWindow(rig, force = false) {
 function paginateActive() {
   const rig = activeBook;
   if (!rig) return;
+  const started = performance.now();
   rig.flat = paginate(rig.data);
+  paginateCost = performance.now() - started;
+  perf.mark("paginate", paginateCost);
   rig.leafCount = Math.max(1, Math.ceil(rig.flat.length / 2));
   currentSpread = clamp(currentSpread, 0, rig.leafCount);
   syncLeafWindow(rig, true);
+  perf.mark("pages", performance.now() - started);
   emitPageState(false);
   emit("onPagination", rig.flat);
+  shadowHold = 3;
   requestFrame();
 }
 
 function preparePages() {
   const rig = activeBook;
   if (!rig) return;
+  rig.pageMotif = rig.data.front.motif.key;
   paginateActive();
-  ensureFonts(pageFontRuns(rig.data)).then((loaded) => {
-    if (loaded && rig === activeBook) paginateActive();
-  });
+  // `onFontsArrived` measures and prints again when the faces land.
+  ensureFonts(pageFontRuns(rig.data));
+}
+
+/**
+ * Reprint the pages after an edit. Typing into an open book is shown in the
+ * same frame while pagination is quick, and at a steady rhythm when the book
+ * is long; a closed book, or an edit that only tints the pages, waits for a
+ * pause instead.
+ */
+function refreshPagesAfterEdit(typing) {
+  if (typing && readingOpen) {
+    if (paginateCost < 6) schedulePageRefresh(0);
+    // Keep a pending refresh: it must not be pushed back by every keystroke.
+    else if (!pageRefreshTimer) schedulePageRefresh(clamp(paginateCost * 3, 50, 240));
+    return;
+  }
+  schedulePageRefresh(readingOpen ? 160 : 380);
 }
 
 function schedulePageRefresh(delay = 120) {
   clearTimeout(pageRefreshTimer);
+  if (delay <= 0) {
+    pageRefreshTimer = 0;
+    if (activeBook) preparePages();
+    return;
+  }
   pageRefreshTimer = setTimeout(() => {
+    pageRefreshTimer = 0;
     if (activeBook) preparePages();
   }, delay);
+}
+
+/** Pages edited while the book was shut are printed before it opens. */
+function flushPageRefresh() {
+  if (!pageRefreshTimer) return;
+  clearTimeout(pageRefreshTimer);
+  pageRefreshTimer = 0;
+  if (activeBook) preparePages();
 }
 
 function pageState() {
@@ -677,6 +854,7 @@ function emitPageState(shouldAnnounce = false) {
 function setReadingOpen(open, shouldAnnounce = true) {
   if (mode !== "detail" || readingOpen === open) return;
   cancelPageDrag();
+  if (open) flushPageRefresh();
   readingOpen = open;
   audio.playCue(readingOpen ? "open" : "close");
   if (!readingOpen) {
@@ -709,6 +887,7 @@ function turnPage(direction) {
 /** Open the book at the spread that shows a given physical page. */
 function goToPage(pageIndex) {
   if (mode !== "detail" || !activeBook) return;
+  flushPageRefresh();
   const spread = clamp(Math.ceil(pageIndex / 2), 0, spreadLimit());
   if (!readingOpen) {
     readingOpen = true;
@@ -913,6 +1092,7 @@ function openDetail(origin = null) {
   activeBook.opacity = 1;
   activeBook.fadeMaterials.forEach((material) => { material.opacity = 1; });
   activeBook.leafBase = 0;
+  if (!activeBook.painted) paintRig(activeBook);
   activeBook.setResolution(quality.detail);
   activeBook.setLeafShadows(quality.leafShadows);
   preparePages();
@@ -976,6 +1156,7 @@ function closeDetail() {
   cancelPageDrag();
   resetDetailPress();
   clearTimeout(pageRefreshTimer);
+  pageRefreshTimer = 0;
   viewTween.active = false;
   pendingView = null;
   mode = "closing";
@@ -1105,41 +1286,78 @@ function resetInspectionView() {
 
 function frame(time) {
   rafId = 0;
-  const delta = Math.min((time - lastTime) / 1000, 0.05);
-  const elapsed = time / 1000;
+  const frameStarted = performance.now();
+  const frameGap = time - lastTime;
+  const delta = Math.min(frameGap / 1000, 0.05);
   lastTime = time;
+  motion = false;
+  cameraMotion = false;
 
+  const idleFor = frameStarted - lastActivity;
+  ambient = reducedMotion ? 0 : clamp((AMBIENT_MS - idleFor) / AMBIENT_FADE_MS, 0, 1);
+  ambientClock += delta * ambient;
+
+  flushRepaints();
   if (pointerDirty) updateHover();
-  updateShelfLayout(delta, elapsed);
+  updateShelfLayout(delta, ambientClock);
   updateTransition(delta);
-  updateDust(elapsed);
+  updateDust();
   const themeIsMoving = updateTheme(delta);
 
   if (mode === "detail") {
     if (pageDrag.active) {
       pageDrag.progressVelocity = damp(pageDrag.progressVelocity, 0, 9, delta);
     }
-    if (viewTween.active) updateViewTween(delta);
-    else controls.update();
+    if (viewTween.active) {
+      updateViewTween(delta);
+      cameraMotion = true;
+    } else if (controls.update()) {
+      cameraMotion = true;
+    }
     updatePaginatedBook(activeBook, delta, getDetailOpenAmount());
     updateRebind(delta);
   }
 
-  renderFrame(delta);
-
   const shelfMoving = Math.abs(position - targetPosition) > 0.0005 || wheelIdle > 0;
-  const shouldContinue = !reducedMotion
+  const active = motion
+    || cameraMotion
     || mode === "opening"
     || mode === "closing"
     || shelfMoving
     || themeIsMoving
-    || viewTween.active;
-  if (shouldContinue && !suspended) requestFrame();
+    || viewTween.active
+    || pageDrag.active
+    || rebindTime < 1
+    || lazyPaintPending
+    || pendingRepaints.size > 0;
+  if (active) activeUntil = frameStarted + 160;
+  const busy = frameStarted < activeUntil;
+  const keepGoing = !suspended && (busy || ambient > 0);
+
+  // Ambient-only frames are drawn at a gentle rate; the last frame before
+  // sleeping is always drawn, at full resolution.
+  const due = active || wakeRender || !keepGoing || frameStarted - lastRenderAt >= AMBIENT_FRAME_MS;
+  if (due) {
+    wakeRender = false;
+    applyRenderScale(busy && keepGoing ? motionScale : 1);
+    if (motion || !keepGoing || (ambient > 0 && mode === "hero")) shadowHold = Math.max(shadowHold, 2);
+    renderFrame();
+    lastRenderAt = frameStarted;
+    perf.frame(frameGap, performance.now() - frameStarted, perf.enabled && [
+      motion ? "m" : "", cameraMotion ? "c" : "", shelfMoving ? "s" : "", themeIsMoving ? "t" : "",
+      lazyPaintPending ? "l" : "", active ? "" : "-", renderScale < 1 ? renderScale : ""
+    ].join(""));
+    watchFrameBudget(frameGap, active, frameStarted);
+  }
+
+  // Something inside the frame may already have asked for the next one.
+  if (keepGoing && !rafId) rafId = requestAnimationFrame(frame);
 }
 
 function updateRebind(delta) {
   if (rebindTime >= 1 || !activeBook) return;
   rebindTime = Math.min(1, rebindTime + delta / 0.62);
+  motion = true;
   const swing = Math.sin(Math.PI * rebindTime) * (1 - rebindTime);
   activeBook.motion.rotation.y = swing * 0.42;
   activeBook.motion.scale.setScalar(1 - Math.sin(Math.PI * rebindTime) * 0.035);
@@ -1155,53 +1373,107 @@ function updateRebind(delta) {
 
 function buildComposer() {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  // At two device pixels per CSS pixel, 2x multisampling is already clean.
   const target = new THREE.WebGLRenderTarget(size.x, size.y, {
     type: THREE.HalfFloatType,
-    samples: 4
+    samples: basePixelRatio >= 1.75 ? 2 : 4
   });
   composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
+  occlusionPass = null;
 
-  // Ambient occlusion: the gutter, the hinge, books against the shelf.
-  const occlusion = new GTAOPass(scene, camera, size.x, size.y);
-  occlusion.updateGtaoMaterial({ radius: 0.2, distanceExponent: 1.4, thickness: 1.2, scale: 1.05, samples: 12 });
-  occlusion.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
-  occlusion.blendIntensity = 0.82;
-  composer.addPass(occlusion);
+  if (quality.post) {
+    // Ambient occlusion: the gutter, the hinge, books against the shelf.
+    // It is soft by nature, so it is computed at reduced resolution.
+    const scale = quality.aoScale;
+    const occlusion = new GTAOPass(scene, camera, Math.ceil(size.x * scale), Math.ceil(size.y * scale));
+    occlusion.setSize = (width, height) => {
+      GTAOPass.prototype.setSize.call(occlusion, Math.ceil(width * scale), Math.ceil(height * scale));
+    };
+    occlusion.updateGtaoMaterial({ radius: 0.2, distanceExponent: 1.4, thickness: 1.2, scale: 1.05, samples: 12 });
+    occlusion.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6 * Math.max(scale, 0.66), rings: 2, samples: 12 });
+    occlusion.blendIntensity = 0.82;
+    composer.addPass(occlusion);
+    occlusionPass = occlusion;
+  }
 
   // Bloom and depth of field were tried here and removed: both soften the
   // printed page, and a book you are typesetting has to stay sharp.
   composer.addPass(new OutputPass());
 }
 
-function renderFrame(delta) {
-  if (composer) composer.render(delta);
+function renderFrame() {
+  // Shadows are redrawn only when something that casts one has moved.
+  renderer.shadowMap.needsUpdate = shadowHold > 0;
+  if (shadowHold > 0) shadowHold -= 1;
+  if (composer) composer.render();
   else renderer.render(scene, camera);
-  watchFrameBudget(delta);
+  if (perf.syncGpu) renderer.getContext().finish();
 }
 
-/** If the opening seconds run below ~30 fps, step down one quality tier. */
-function watchFrameBudget(delta) {
-  if (frameBudget.settled || delta <= 0 || delta >= 0.05) return;
-  frameBudget.time += delta;
-  frameBudget.frames += 1;
-  if (frameBudget.frames < 150) return;
-  const average = frameBudget.time / frameBudget.frames;
-  frameBudget.time = 0;
-  frameBudget.frames = 0;
-  if (average < 1 / 34) {
-    frameBudget.settled = true;
+/** Resolution used for this frame: reduced while moving if the machine needs it. */
+function applyRenderScale(next) {
+  if (next === renderScale || !renderer) return;
+  renderScale = next;
+  const ratio = basePixelRatio * renderScale;
+  renderer.setPixelRatio(ratio);
+  if (composer) {
+    composer.setPixelRatio(ratio);
+    composer.setSize(viewWidth, viewHeight);
+  }
+}
+
+/**
+ * Keep motion smooth. While frames run long the moving resolution steps down;
+ * after a spell of smooth frames it is tried one step higher again. Only when
+ * the lowest step is still too slow does the whole tier drop.
+ */
+function watchFrameBudget(gap, active, now) {
+  const budget = frameBudget;
+  if (!active || gap <= 0 || gap > 120) {
+    budget.streak = 0;
     return;
   }
+  budget.ema = budget.streak ? lerp(budget.ema, gap, 0.12) : gap;
+  budget.streak += 1;
+  if (budget.cooldown > 0) {
+    budget.cooldown -= 1;
+    return;
+  }
+  const step = RENDER_SCALES.indexOf(motionScale);
+  if (budget.ema > SLOW_FRAME_MS && budget.streak > 14) {
+    if (step < RENDER_SCALES.length - 1) {
+      motionScale = RENDER_SCALES[step + 1];
+      budget.cooldown = 24;
+      budget.streak = 0;
+      budget.upAt = now + budget.retry;
+      budget.retry = Math.min(budget.retry * 2, 60000);
+    } else if (budget.ema > 30) {
+      budget.slow += 1;
+      if (budget.slow > 150) {
+        budget.slow = 0;
+        stepQualityDown();
+      }
+    }
+  } else if (budget.ema < FAST_FRAME_MS && step > 0 && now > budget.upAt && budget.streak > 90) {
+    motionScale = RENDER_SCALES[step - 1];
+    budget.cooldown = 24;
+    budget.streak = 0;
+  } else if (budget.ema < SLOW_FRAME_MS) {
+    budget.slow = 0;
+  }
+}
+
+function stepQualityDown() {
   const next = lowerQuality(quality);
-  if (!next) {
-    frameBudget.settled = true;
-    return;
-  }
+  if (!next) return;
   quality = next;
-  if (!quality.post && composer) {
+  motionScale = 1;
+  frameBudget.retry = 4000;
+  if (composer) {
     composer.dispose();
     composer = null;
+    occlusionPass = null;
   }
   if (roomLights.key) {
     roomLights.key.shadow.mapSize.set(quality.shadow, quality.shadow);
@@ -1209,6 +1481,16 @@ function watchFrameBudget(delta) {
     roomLights.key.shadow.map = null;
   }
   activeBook?.setLeafShadows(quality.leafShadows);
+  // The canvas was created without its own antialiasing when it started on
+  // the composed tier, so keep a composer (without occlusion) for that.
+  if (!contextAntialias) {
+    try {
+      buildComposer();
+    } catch (error) {
+      composer = null;
+    }
+  }
+  shadowHold = 4;
   resize();
 }
 
@@ -1217,12 +1499,14 @@ function resize() {
   viewHeight = window.innerHeight;
   configureResponsiveTargets();
   renderer.setSize(viewWidth, viewHeight, false);
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, viewWidth < 820 ? 1.5 : quality.pixelRatio);
+  basePixelRatio = Math.min(window.devicePixelRatio || 1, viewWidth < 820 ? 1.5 : quality.pixelRatio);
+  const pixelRatio = basePixelRatio * renderScale;
   renderer.setPixelRatio(pixelRatio);
   if (composer) {
     composer.setPixelRatio(pixelRatio);
     composer.setSize(viewWidth, viewHeight);
   }
+  shadowHold = 4;
   camera.aspect = viewWidth / viewHeight;
   camera.updateProjectionMatrix();
 
@@ -1348,9 +1632,12 @@ async function initialize(options) {
   const woodTexturePromise = woodTextureImage.decode().then(() => true, () => false);
 
   try {
+    // With post-processing the scene is multisampled in the composer's own
+    // target, so the canvas does not need a second set of samples.
+    contextAntialias = !quality.post;
     renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      antialias: contextAntialias,
       alpha: true,
       powerPreference: "high-performance"
     });
@@ -1365,6 +1652,7 @@ async function initialize(options) {
   renderer.toneMappingExposure = 0.9;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;
   renderer.setClearColor(0x000000, 0);
 
   scene = new THREE.Scene();
@@ -1398,6 +1686,7 @@ async function initialize(options) {
   controls.maxPolarAngle = Math.PI * 0.78;
   controls.target.copy(shelfCameraTarget);
   controls.addEventListener("change", requestFrame);
+  controls.addEventListener("end", requestFrame);
   controls.addEventListener("start", () => { viewTween.active = false; });
 
   RectAreaLightUniformsLib.init();
@@ -1411,10 +1700,13 @@ async function initialize(options) {
     return rig;
   });
   rebuildHitTargets();
-  bookRigs.forEach((rig, index) => snapRigToShelfSlot(rig, index));
-
   selectedIndex = -2;
   updateSelection(0, false);
+  bookRigs.forEach((rig, index) => {
+    snapRigToShelfSlot(rig, index);
+    // Only the books in view are painted now; the rest wait their turn.
+    if (rig.opacity > 0.004) paintRig(rig);
+  });
   resize();
 
   canvas.addEventListener("pointermove", onPointerMove);
@@ -1439,6 +1731,7 @@ async function initialize(options) {
   window.addEventListener("blur", onWindowBlur);
   document.addEventListener("visibilitychange", onVisibilityChange);
   reducedMotionQuery.addEventListener("change", onReducedMotionChange);
+  onFontsLoaded(onFontsArrived);
   experience.addEventListener("pointerdown", onFirstAudioPointer, true);
   window.addEventListener("keydown", onFirstAudioKeydown, true);
   window.addEventListener("beforeunload", disposeExperience, { once: true });
@@ -1451,7 +1744,17 @@ async function initialize(options) {
       composer = null;
     }
   }
-  renderFrame(0);
+  perf.setInfo(() => ({
+    tier: quality.name,
+    post: Boolean(occlusionPass),
+    pixelRatio: Math.round(renderer.getPixelRatio() * 100) / 100,
+    scale: motionScale,
+    calls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+    textures: renderer.info.memory.textures,
+    geometries: renderer.info.memory.geometries
+  }));
+  renderFrame();
   loading.hidden = true;
   experience.classList.add("webgl-ready");
   requestFrame();
@@ -1486,7 +1789,14 @@ export const engine = {
   get selectedIndex() { return selectedIndex; },
   get activeBookId() { return activeBook?.data.id || null; },
   get pageState() { return pageState(); },
-  get pagination() { return activeBook?.flat || []; }
+  get pagination() { return activeBook?.flat || []; },
+  /** Development hooks, used by the benchmark and by tests. */
+  debug: {
+    get renderScale() { return renderScale; },
+    get motionScale() { return motionScale; },
+    set motionScale(value) { if (RENDER_SCALES.includes(value)) motionScale = value; },
+    stepQualityDown: () => stepQualityDown()
+  }
 };
 
 /* ------------------------------------------------------------------ */
@@ -1566,6 +1876,7 @@ function updateFlexiblePage(
 
   flex.curve = nextCurve;
   flex.twist = nextTwist;
+  if (!settleImmediately) motion = true;
   flex.surfaces.forEach((surface) => {
     const { position, base, direction, geometry } = surface;
     for (let vertex = 0; vertex < position.count; vertex += 1) {
@@ -2255,6 +2566,7 @@ function addDust() {
   dust.name = "paper-dust";
   dust.userData.isDust = true;
   scene.add(dust);
+  dustPoints = dust;
 }
 
 function setThemeColorsImmediately() {
@@ -2315,6 +2627,7 @@ function updateTheme(delta) {
 }
 
 function updateTransition(delta) {
+  if (mode === "opening" || mode === "closing") motion = true;
   if (mode === "opening") {
     transitionTime = Math.min(
       1,
@@ -2344,17 +2657,19 @@ function updateTransition(delta) {
   }
 }
 
-function updateDust(elapsed) {
-  if (reducedMotion) return;
-  const dust = scene.getObjectByName("paper-dust");
-  if (dust) {
-    dust.rotation.y = elapsed * 0.012;
-    dust.position.y = Math.sin(elapsed * 0.17) * 0.025;
-  }
+function updateDust() {
+  if (reducedMotion || !dustPoints) return;
+  dustPoints.rotation.y = ambientClock * 0.012;
+  dustPoints.position.y = Math.sin(ambientClock * 0.17) * 0.025;
 }
 
+/** Wake the loop: something changed, or the user did something. */
 function requestFrame() {
+  lastActivity = performance.now();
+  wakeRender = true;
   if (!rafId && !suspended) {
+    // After a sleep the first frame must not see a long gap as a slow frame.
+    lastTime = lastActivity;
     rafId = requestAnimationFrame(frame);
   }
 }

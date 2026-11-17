@@ -52,46 +52,79 @@ export function fontString(style, pixelSize) {
   return `${italic}${weight} ${Math.max(1, pixelSize).toFixed(2)}px ${font.stack}`;
 }
 
+let fontEpoch = 0;
+const fontListeners = new Set();
+document.fonts?.addEventListener?.("loadingdone", () => {
+  fontEpoch += 1;
+  fontListeners.forEach((listener) => listener(fontEpoch));
+});
+
+/** Changes whenever more web fonts have finished loading. */
+export const getFontEpoch = () => fontEpoch;
+
+export function onFontsLoaded(listener) {
+  fontListeners.add(listener);
+  return () => fontListeners.delete(listener);
+}
+
 const hasCjk = (text) => /[⺀-鿿豈-﫿＀-￯]/.test(text || "");
 
+/** The faces one styled run needs: `[shorthand, sample]` pairs. */
+function probes(run) {
+  if (!run || !run.text) return [];
+  const font = getFont(run.font);
+  const weight = nearestWeight(font, run.weight || 400);
+  const italic = run.italic && font.italic ? "italic " : "";
+  const sample = run.text.slice(0, 400);
+  const families = [font.stack.split(",")[0].trim()];
+  if (hasCjk(sample) && font.kind !== "cjk") {
+    families.push(font.kind === "serif" || font.kind === "display" ? '"Noto Serif SC"' : '"Noto Sans SC"');
+  }
+  return families.map((family) => [`${italic}${weight} 32px ${family}`, sample]);
+}
+
+function available(shorthand, sample) {
+  try {
+    return stylesheetReady && document.fonts.check(shorthand, sample);
+  } catch (error) {
+    return false;
+  }
+}
+
 /**
- * Make sure every face needed to paint the given styled runs is loaded.
+ * Whether the faces for a styled run are loaded, as a short string. Painters
+ * put it in their signatures, so a board painted with fallback glyphs is
+ * repainted by itself once the real ones arrive.
+ */
+export function fontToken(run) {
+  if (!document.fonts?.check) return "";
+  return probes(run).map(([shorthand, sample]) => (available(shorthand, sample) ? "1" : "0")).join("");
+}
+
+/**
+ * Start loading every face needed to paint the given styled runs.
  * `runs` is a list of `{ font, weight, italic, text }`.
- * Resolves `true` when something new was loaded (the caller should repaint)
- * and `false` when everything was already available.
- * Never rejects: a missing network just falls back to system faces.
+ * Resolves `true` when something new was loaded and `false` when everything
+ * was already available. Never rejects: a missing network just falls back to
+ * system faces. Listen with `onFontsLoaded` to repaint when faces arrive.
  */
 export async function ensureFonts(runs) {
   if (!document.fonts?.load) return false;
+  // Before the stylesheet arrives no family is known, and loading is a no-op.
+  if (!stylesheetReady) await stylesheetLoaded;
   const jobs = [];
   const seen = new Set();
   runs.forEach((run) => {
-    if (!run || !run.text) return;
-    const font = getFont(run.font);
-    const weight = nearestWeight(font, run.weight || 400);
-    const italic = run.italic && font.italic ? "italic " : "";
-    const sample = run.text.slice(0, 400);
-    const families = [font.stack.split(",")[0].trim()];
-    if (hasCjk(sample) && font.kind !== "cjk") {
-      families.push(font.kind === "serif" || font.kind === "display" ? '"Noto Serif SC"' : '"Noto Sans SC"');
-    }
-    families.forEach((family) => {
-      const shorthand = `${italic}${weight} 32px ${family}`;
+    probes(run).forEach(([shorthand, sample]) => {
       const key = `${shorthand}|${sample}`;
       if (seen.has(key)) return;
       seen.add(key);
-      let ready = false;
-      try {
-        ready = stylesheetReady && document.fonts.check(shorthand, sample);
-      } catch (error) {
-        ready = false;
-      }
-      if (!ready) jobs.push(document.fonts.load(shorthand, sample).catch(() => null));
+      if (!available(shorthand, sample)) jobs.push(document.fonts.load(shorthand, sample).catch(() => null));
     });
   });
   if (!jobs.length) return false;
   await Promise.race([
-    Promise.all([stylesheetLoaded, ...jobs]),
+    Promise.all(jobs),
     new Promise((resolve) => setTimeout(resolve, 3500))
   ]);
   return true;
@@ -101,12 +134,19 @@ export async function ensureFonts(runs) {
 // wait for the web-font stylesheet before trusting it.
 let stylesheetReady = false;
 const stylesheetLoaded = new Promise((resolve) => {
-  const done = () => { stylesheetReady = true; resolve(); };
+  const done = () => {
+    if (stylesheetReady) return;
+    stylesheetReady = true;
+    resolve();
+    // Anything painted so far used fallback faces.
+    fontEpoch += 1;
+    fontListeners.forEach((listener) => listener(fontEpoch));
+  };
   const link = document.querySelector("link[data-fonts]");
   if (!link || link.sheet) done();
   else {
     link.addEventListener("load", done, { once: true });
     link.addEventListener("error", done, { once: true });
-    setTimeout(done, 3000);
+    setTimeout(done, 6000);
   }
 });

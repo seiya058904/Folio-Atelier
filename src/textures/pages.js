@@ -93,6 +93,40 @@ const bodyFont = (book, size, extra = {}) => fontString({ font: book.interior.bo
 const headFont = (book, size, extra = {}) => fontString({ font: book.interior.headingFont, weight: 600, ...extra }, size);
 const SMALL = (size, weight = 500) => `${weight} ${size}px "Inter", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif`;
 
+/* ---------- measurement ---------- */
+
+// Measuring text is the slow part of pagination, and while someone types
+// almost every word is one that was measured a moment ago.
+const widthTables = new Map(); // font shorthand -> Map(text -> width)
+const flowCache = new Map(); // flow key -> page-sized chunks of lines
+const FLOW_CACHE_LIMIT = 240;
+
+function widthTable(font) {
+  let table = widthTables.get(font);
+  if (!table) {
+    if (widthTables.size > 24) widthTables.clear();
+    table = new Map();
+    widthTables.set(font, table);
+  }
+  return table;
+}
+
+function measured(ctx, table, text) {
+  let width = table.get(text);
+  if (width === undefined) {
+    if (table.size > 40000) table.clear();
+    width = ctx.measureText(text).width;
+    table.set(text, width);
+  }
+  return width;
+}
+
+/** Call when new fonts have loaded: every cached width may be wrong. */
+export function forgetMeasurements() {
+  widthTables.clear();
+  flowCache.clear();
+}
+
 /* ---------- flowing text ---------- */
 
 /**
@@ -104,7 +138,8 @@ function flowText(ctx, text, { width, indent, dropLines = 0, dropWidth = 0, inde
   const paragraphs = verse
     ? raw.replace(/\s+$/, "").split("\n")
     : raw.split(/\n+/).map((p) => p.trim()).filter(Boolean);
-  const spaceWidth = ctx.measureText(" ").width;
+  const table = widthTable(ctx.font);
+  const spaceWidth = measured(ctx, table, " ");
   const lines = [];
   let afterBreak = false;
   paragraphs.forEach((paragraph, paragraphIndex) => {
@@ -139,7 +174,7 @@ function flowText(ctx, text, { width, indent, dropLines = 0, dropWidth = 0, inde
       lineInParagraph += 1;
     };
     tokens.forEach((token) => {
-      const tokenWidth = ctx.measureText(token.text).width;
+      const tokenWidth = measured(ctx, table, token.text);
       const gap = current.length && token.space ? spaceWidth : 0;
       if (current.length && lineWidth + gap + tokenWidth > available().max) push(false);
       const lead = current.length && token.space ? spaceWidth : 0;
@@ -175,7 +210,15 @@ export function paginate(book) {
   let partNumber = 0;
 
   const flow = (text, firstTop, options) => {
-    ctx.font = bodyFont(book, metrics.size);
+    const font = bodyFont(book, metrics.size);
+    const key = [font, metrics.lineHeight, metrics.indent, metrics.indentFirst, firstTop, JSON.stringify(options), text].join("|");
+    const cached = flowCache.get(key);
+    if (cached) {
+      flowCache.delete(key);
+      flowCache.set(key, cached);
+      return cached;
+    }
+    ctx.font = font;
     ctx.letterSpacing = "0px";
     const lines = flowText(ctx, text, {
       width: TEXT_WIDTH, indent: metrics.indent, indentFirst: metrics.indentFirst, ...options
@@ -189,6 +232,8 @@ export function paginate(book) {
       index += capacity;
       top = MARGIN.top + 22;
     }
+    flowCache.set(key, chunks);
+    if (flowCache.size > FLOW_CACHE_LIMIT) flowCache.delete(flowCache.keys().next().value);
     return chunks;
   };
 
@@ -711,6 +756,14 @@ export function paintPage(book, entry, index, target, onAsset) {
     ctx.restore();
   }
   target.commit();
+}
+
+/** Everything `paintPage` reads for one entry, as a string. */
+export function pageSignature(book, entry) {
+  return JSON.stringify([
+    book.id, book.interior, book.title, book.subtitle, book.author, book.series,
+    book.front.motif.key, book.material, book.foil.preset, entry
+  ], (key, value) => (key === "label" ? undefined : value));
 }
 
 export const pageLabel = (entry, index) => (entry ? entry.label : `Page ${pad(index + 1)}`);

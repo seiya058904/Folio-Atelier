@@ -2,6 +2,8 @@
 
 Outline for the next round, from a code review of `main` (2026-11-17). Once approved, work proceeds phase by phase in this order. Performance claims below come from reading the code; profile with `?perf` (Phase A) before and after each fix.
 
+**Status:** Phase A done (2026-11-17). Measured with `?bench` on an RTX 3070 laptop, 1440 × 900, high tier, before → after: front-board slider drag 2.8 → 82 fps (edit-to-pixel 378 → 13 ms); cloth colour drag 2.2 → 56 fps (479 → 20 ms); frames while idle 330 per 2 s → 0 (after a 9 s ambient fade at 30 fps); warm tab switch ≤ 21 ms; keystroke to printed page ≥ 140 → 31 ms.
+
 **Goals:** (1) faster, lighter, more responsive; (2) smoother, richer motion; (3) far deeper DIY; (4) more varied shelves and rooms.
 
 **Principles:** real speed first, masking second — unavoidable waits are hidden with cheap, purposeful motion, never an excuse for more GPU/CPU. Respect `prefers-reduced-motion`. Every new spec field gets a default, `normalizeBook` handling, `ZH` strings and a `dirty` key. Keep no-build, no-dependency.

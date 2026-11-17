@@ -2,6 +2,7 @@
 // painters can configure anisotropy without importing the engine.
 
 import * as THREE from "three";
+import { perf } from "../perf.js";
 
 let maxAnisotropy = 8;
 
@@ -27,6 +28,15 @@ export function makeCanvas(width, height) {
 }
 
 /**
+ * A 2D context for a canvas that will be handed to WebGL. Such canvases are
+ * kept in main memory: uploading from there is several times faster than
+ * reading a GPU-backed canvas back, which is what dominated every repaint.
+ */
+export function paintContext(canvas) {
+  return canvas.getContext("2d", { willReadFrequently: true });
+}
+
+/**
  * A canvas-backed texture that can be repainted and resized in place.
  * Resizing disposes the GPU copy so Three re-allocates storage.
  */
@@ -36,7 +46,7 @@ export function createPaintTexture(width, height, options) {
   return {
     canvas,
     texture,
-    context: canvas.getContext("2d"),
+    context: paintContext(canvas),
     resize(nextWidth, nextHeight) {
       const w = Math.max(1, Math.round(nextWidth));
       const h = Math.max(1, Math.round(nextHeight));
@@ -48,6 +58,7 @@ export function createPaintTexture(width, height, options) {
     },
     commit() {
       texture.needsUpdate = true;
+      perf.upload(canvas.width * canvas.height);
     },
     dispose() {
       texture.dispose();

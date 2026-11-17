@@ -2,7 +2,7 @@
 // Edits go through the store; the engine repaints the 3D book from the same
 // change event, so the model is always the thing you are looking at.
 
-import { FONTS, getFont } from "../data/fonts.js";
+import { FONTS, getFont, onFontsLoaded } from "../data/fonts.js";
 import {
   BINDING_STYLES,
   BORDERS,
@@ -20,6 +20,7 @@ import {
   getFoil
 } from "../data/presets.js";
 import { t } from "../i18n.js";
+import { perf } from "../perf.js";
 import { addImage, getImage } from "../state/images.js";
 import {
   PAGE_TYPES,
@@ -45,7 +46,7 @@ import {
   toggle
 } from "./controls.js";
 import { ICONS, h, icon, pickFile, toast } from "./dom.js";
-import { drawCoverThumb, drawMotifGlyph } from "./thumbs.js";
+import { coverThumbKey, drawCoverThumb, drawMotifGlyph } from "./thumbs.js";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -111,15 +112,31 @@ export function createStudioUi({ store, engine, audio }) {
   let tab = "design";
   let selectedPageId = null;
   const openLayers = new Set();
-  let thumbJobs = [];
+
+  // Each tab is built once and then shown or hidden. A pane is rebuilt only
+  // when something it displays may have changed behind its back.
+  const panes = new Map(); // tab id -> { id, element, stale, scroll, thumbs }
+  let currentPane = null;
+  let buildingPane = null;
 
   const book = () => store.get(bookId);
+
+  const markStale = (except = null) => panes.forEach((pane) => {
+    if (pane.id !== except) pane.stale = true;
+  });
 
   /** Apply an edit to the open book. */
   function edit(mutate, dirty, { key = null, rerender = false } = {}) {
     if (!bookId) return;
     store.update(bookId, mutate, { dirty, key });
-    if (rerender) renderBody();
+    if (rerender) {
+      markStale(tab);
+      renderBody();
+    } else if (dirty.includes("meta") || dirty.includes("all")) {
+      // Shared words appear in the other tabs' previews.
+      markStale(tab);
+    }
+    refreshThumbsSoon();
   }
 
   /* ---------------------------------------------------------------- */
@@ -141,14 +158,15 @@ export function createStudioUi({ store, engine, audio }) {
   }
 
   function setTab(next, { focusView = true } = {}) {
-    if (next === tab && body.childElementCount) {
+    if (next === tab && currentPane) {
       if (focusView) applyTabView();
       return;
     }
+    const started = performance.now();
     tab = next;
     renderTabs();
-    renderBody();
-    body.scrollTop = 0;
+    showPane();
+    perf.mark("tab", performance.now() - started);
     if (focusView) applyTabView();
   }
 
@@ -171,47 +189,148 @@ export function createStudioUi({ store, engine, audio }) {
   }
 
   /* ---------------------------------------------------------------- */
-  /* Thumbnails (painted after layout so the panel appears at once)     */
+  /* Thumbnails                                                         */
   /* ---------------------------------------------------------------- */
 
-  function queueThumb(job) {
-    thumbJobs.push(job);
+  // A thumbnail is painted when its tile scrolls into view, a few per frame,
+  // and its picture is kept under a key made of everything it shows: the
+  // same cover is never painted twice, however often the panel is rebuilt.
+  const thumbCache = new Map(); // key -> canvas
+  const THUMB_CACHE_LIMIT = 220;
+  const thumbQueue = [];
+  let thumbPumping = false;
+  let thumbTimer = 0;
+
+  const thumbObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      const thumb = entry.target.thumb;
+      if (!thumb) return;
+      thumb.visible = entry.isIntersecting;
+      if (thumb.visible) requestThumb(thumb);
+    });
+  }, { root: body, rootMargin: "160px 0px" });
+
+  /** Register `canvas` as a thumbnail. `key()` names its content; `paint(canvas)` draws it. */
+  function thumb(canvas, key, paint) {
+    const entry = { canvas, key, paint, shown: null, visible: false, queued: false };
+    canvas.thumb = entry;
+    canvas.classList.add("is-pending");
+    buildingPane?.thumbs.push(entry);
+    return canvas;
   }
 
-  function flushThumbs() {
-    const jobs = thumbJobs;
-    thumbJobs = [];
-    let index = 0;
-    const step = () => {
-      const started = performance.now();
-      while (index < jobs.length && performance.now() - started < 8) {
-        jobs[index]();
-        index += 1;
+  function requestThumb(entry) {
+    if (entry.queued) return;
+    entry.queued = true;
+    thumbQueue.push(entry);
+    if (thumbPumping) return;
+    thumbPumping = true;
+    requestAnimationFrame(pumpThumbs);
+  }
+
+  function pumpThumbs() {
+    const started = performance.now();
+    while (thumbQueue.length && performance.now() - started < 6) {
+      const entry = thumbQueue.shift();
+      entry.queued = false;
+      const { canvas } = entry;
+      if (!canvas.isConnected) continue;
+      const key = entry.key();
+      if (key === entry.shown) continue;
+      const cached = thumbCache.get(key);
+      if (cached) {
+        const ctx = canvas.getContext("2d");
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(cached, 0, 0);
+        thumbCache.delete(key);
+        thumbCache.set(key, cached);
+      } else {
+        entry.paint(canvas);
+        const copy = document.createElement("canvas");
+        copy.width = canvas.width;
+        copy.height = canvas.height;
+        copy.getContext("2d").drawImage(canvas, 0, 0);
+        thumbCache.set(key, copy);
+        if (thumbCache.size > THUMB_CACHE_LIMIT) thumbCache.delete(thumbCache.keys().next().value);
       }
-      if (index < jobs.length) requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }
-
-  const coverCanvas = () => h("canvas", { class: "tile__art", width: 132, height: 198 });
-
-  function drawPatternGlyph(canvas, key) {
-    const size = canvas.width;
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, size, size);
-    const color = getComputedStyle(canvas).color || "#231d17";
-    if (key === "none") {
-      drawMotifGlyph(canvas, "none");
-      return;
+      entry.shown = key;
+      canvas.classList.remove("is-pending");
     }
-    const mask = patternMask(key, size, size, { width: 150, height: 150 }, { unit: 46, lineWidth: 2, seed: 3 });
-    ctx.drawImage(mask, 0, 0);
-    ctx.globalCompositeOperation = "source-in";
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, size, size);
-    ctx.globalCompositeOperation = "source-over";
+    if (thumbQueue.length) requestAnimationFrame(pumpThumbs);
+    else thumbPumping = false;
   }
+
+  /** Re-check the thumbnails on screen (their keys decide whether they repaint). */
+  function refreshThumbs() {
+    currentPane?.thumbs.forEach((entry) => {
+      if (entry.visible) requestThumb(entry);
+    });
+  }
+
+  /** After an edit: wait for a pause, so a drag is not competing with thumbnails. */
+  function refreshThumbsSoon() {
+    clearTimeout(thumbTimer);
+    thumbTimer = setTimeout(refreshThumbs, 220);
+  }
+
+  /** The book without its pages: all a cover preview needs, and cheap to copy. */
+  const coverSample = () => deepClone({ ...book(), pages: [] });
+
+  /** A cover tile. `make()` returns the book the tile should show. */
+  function coverThumb(make) {
+    const canvas = h("canvas", { class: "tile__art", width: 132, height: 198 });
+    let sample = null;
+    return thumb(canvas, () => {
+      sample = make();
+      return `cover|${coverThumbKey(sample)}`;
+    }, () => drawCoverThumb(canvas, sample, refreshThumbsSoon));
+  }
+
+  const glyphInk = () => getComputedStyle(body).getPropertyValue("--ink-soft").trim() || "#231d17";
   const glyphCanvas = () => h("canvas", { class: "tile__glyph", width: 96, height: 96 });
+
+  function motifThumb(key) {
+    const canvas = glyphCanvas();
+    let ink = "";
+    return thumb(canvas, () => {
+      ink = glyphInk();
+      return `motif|${key}|${ink}`;
+    }, () => drawMotifGlyph(canvas, key, ink));
+  }
+
+  function patternThumb(key) {
+    const canvas = glyphCanvas();
+    let ink = "";
+    return thumb(canvas, () => {
+      ink = glyphInk();
+      return `pattern|${key}|${ink}`;
+    }, () => {
+      const size = canvas.width;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, size, size);
+      if (key === "none") {
+        drawMotifGlyph(canvas, "none", ink);
+        return;
+      }
+      const mask = patternMask(key, size, size, { width: 150, height: 150 }, { unit: 46, lineWidth: 2, seed: 3 });
+      ctx.drawImage(mask, 0, 0);
+      ctx.globalCompositeOperation = "source-in";
+      ctx.fillStyle = ink;
+      ctx.fillRect(0, 0, size, size);
+      ctx.globalCompositeOperation = "source-over";
+    });
+  }
+
+  /** A swatch of a covering material in the book's cloth colour. */
+  function materialThumb(kind) {
+    const canvas = glyphCanvas();
+    return thumb(canvas, () => `material|${kind}|${book().material.color}`, () => {
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      paintMaterialBase(ctx, canvas.width, canvas.height, book().material.color, kind, 5);
+    });
+  }
 
   /* ---------------------------------------------------------------- */
   /* Reusable editors                                                   */
@@ -251,11 +370,7 @@ export function createStudioUi({ store, engine, audio }) {
         className: "tiles--motif",
         value: motif().key,
         options,
-        render: (option) => {
-          const canvas = glyphCanvas();
-          queueThumb(() => drawMotifGlyph(canvas, option.id));
-          return canvas;
-        },
+        render: (option) => motifThumb(option.id),
         onChange: (value) => edit(() => { motif().key = value; }, [face])
       }),
       row(
@@ -495,14 +610,7 @@ export function createStudioUi({ store, engine, audio }) {
       label: "Binding preset",
       value: current.preset,
       options: PRESETS,
-      render: (option) => {
-        const canvas = coverCanvas();
-        queueThumb(() => {
-          const sample = applyPreset(deepClone(book()), option.id);
-          drawCoverThumb(canvas, sample);
-        });
-        return canvas;
-      },
+      render: (option) => coverThumb(() => applyPreset(coverSample(), option.id)),
       onChange: (value) => {
         audio.playCue("select", { gain: 0.5 });
         edit(() => { applyPreset(book(), value); }, ["all"], { rerender: true });
@@ -515,25 +623,14 @@ export function createStudioUi({ store, engine, audio }) {
     const pattern = () => book().pattern;
 
     // Material swatches are painted with the same code as the boards.
-    const materialCanvases = [];
-    const paintMaterialTiles = () => materialCanvases.forEach(([canvas, kind]) => {
-      const ctx = canvas.getContext("2d");
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      paintMaterialBase(ctx, canvas.width, canvas.height, book().material.color, kind, 5);
-    });
     const materialTiles = tiles({
       label: "Covering",
       className: "tiles--motif tiles--material",
       value: current.material.kind,
       options: MATERIALS,
-      render: (option) => {
-        const canvas = glyphCanvas();
-        materialCanvases.push([canvas, option.id]);
-        return canvas;
-      },
+      render: (option) => materialThumb(option.id),
       onChange: (value) => edit(() => { book().material.kind = value; }, ["material"])
     });
-    queueThumb(paintMaterialTiles);
 
     return [
       group("The book", "These words are shared by the cover, spine, back and title page.",
@@ -548,15 +645,12 @@ export function createStudioUi({ store, engine, audio }) {
         materialTiles,
         colorField({
           label: "Colour", value: current.material.color, swatches: CLOTH_COLORS,
-          onInput: (value) => {
-            edit(() => {
-              const target = book();
-              target.material.color = value;
-              // A hand-picked colour leaves the preset's room behind.
-              target.palette = null;
-            }, ["material"], { key: "material-color" });
-            paintMaterialTiles();
-          }
+          onInput: (value) => edit(() => {
+            const target = book();
+            target.material.color = value;
+            // A hand-picked colour leaves the preset's room behind.
+            target.palette = null;
+          }, ["material"], { key: "material-color" })
         }),
         segmented({
           label: "Binding", value: current.material.binding || "full", options: BINDING_STYLES,
@@ -574,11 +668,7 @@ export function createStudioUi({ store, engine, audio }) {
           className: "tiles--motif",
           value: current.pattern.key,
           options: PATTERNS,
-          render: (option) => {
-            const canvas = glyphCanvas();
-            queueThumb(() => drawPatternGlyph(canvas, option.id));
-            return canvas;
-          },
+          render: (option) => patternThumb(option.id),
           onChange: (value) => edit(() => { pattern().key = value; }, ["material"], { rerender: true })
         }),
         current.pattern.key !== "none" ? [
@@ -665,11 +755,7 @@ export function createStudioUi({ store, engine, audio }) {
           label: "Cover layout",
           value: current.front.layout,
           options: layoutOptions,
-          render: (option) => {
-            const canvas = coverCanvas();
-            queueThumb(() => drawCoverThumb(canvas, applyLayout(deepClone(book()), option.id)));
-            return canvas;
-          },
+          render: (option) => coverThumb(() => applyLayout(coverSample(), option.id)),
           onChange: (value) => edit(() => { applyLayout(book(), value); }, ["front"], { rerender: true })
         })
       ),
@@ -1190,16 +1276,83 @@ export function createStudioUi({ store, engine, audio }) {
     pages: pagesTab
   };
 
+  function paneFor(id) {
+    let pane = panes.get(id);
+    if (!pane) {
+      pane = { id, element: h("div", { class: "pane", dataset: { tab: id }, hidden: true }), stale: true, scroll: 0, thumbs: [] };
+      panes.set(id, pane);
+      body.append(pane.element);
+    }
+    return pane;
+  }
+
+  function buildPane(pane) {
+    pane.thumbs.forEach((entry) => thumbObserver.unobserve(entry.canvas));
+    pane.thumbs = [];
+    buildingPane = pane;
+    try {
+      pane.element.replaceChildren(...TAB_BUILDERS[pane.id]().filter(Boolean));
+    } finally {
+      buildingPane = null;
+    }
+    pane.stale = false;
+    pane.thumbs.forEach((entry) => thumbObserver.observe(entry.canvas));
+  }
+
+  function activate(pane) {
+    if (currentPane && currentPane !== pane) currentPane.element.hidden = true;
+    pane.element.hidden = false;
+    currentPane = pane;
+  }
+
+  // Where the caret was, described by the control's label, so that it can be
+  // found again in a rebuilt pane.
+  function captureFocus() {
+    const element = document.activeElement;
+    if (!element || !body.contains(element)) return null;
+    const scope = element.closest(".field, .toggle, .tile, .page-item, .layer__summary");
+    const label = scope?.querySelector(".field__label, .layer__name, span")?.textContent || "";
+    const selection = typeof element.selectionStart === "number" && element.type !== "range"
+      ? [element.selectionStart, element.selectionEnd]
+      : null;
+    return { tag: element.tagName, type: element.type, value: element.dataset?.value, label, selection };
+  }
+
+  function restoreFocus(focus) {
+    if (!focus || !currentPane) return;
+    const match = [...currentPane.element.querySelectorAll(focus.tag)].find((element) => {
+      if (element.type !== focus.type || element.dataset?.value !== focus.value) return false;
+      const scope = element.closest(".field, .toggle, .tile, .page-item, .layer__summary");
+      return (scope?.querySelector(".field__label, .layer__name, span")?.textContent || "") === focus.label;
+    });
+    if (!match) return;
+    match.focus({ preventScroll: true });
+    if (focus.selection) {
+      try { match.setSelectionRange(...focus.selection); } catch (error) { /* not a text control */ }
+    }
+  }
+
+  /** Rebuild the open tab from the book (after an edit that changes its controls). */
   function renderBody({ keepScroll = true } = {}) {
     if (!book()) return;
-    const scroll = body.scrollTop;
-    thumbJobs = [];
-    const focused = document.activeElement;
-    const focusId = body.contains(focused) ? focused.id : null;
-    body.replaceChildren(...TAB_BUILDERS[tab]().filter(Boolean));
-    if (keepScroll) body.scrollTop = scroll;
-    if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
-    flushThumbs();
+    const pane = paneFor(tab);
+    const scroll = currentPane === pane ? body.scrollTop : pane.scroll;
+    const focus = captureFocus();
+    buildPane(pane);
+    activate(pane);
+    body.scrollTop = keepScroll ? scroll : 0;
+    restoreFocus(focus);
+    updateHeader();
+  }
+
+  /** Show the open tab, building it only if it has never been built or is stale. */
+  function showPane() {
+    const pane = paneFor(tab);
+    if (currentPane && currentPane !== pane) currentPane.scroll = body.scrollTop;
+    if (pane.stale) buildPane(pane);
+    activate(pane);
+    body.scrollTop = pane.scroll;
+    refreshThumbs();
     updateHeader();
   }
 
@@ -1249,9 +1402,12 @@ export function createStudioUi({ store, engine, audio }) {
     readerBar.setAttribute("aria-hidden", "false");
     saveStatus.textContent = t("Saved");
     saveStatus.dataset.state = "ok";
+    panes.forEach((pane) => {
+      pane.stale = true;
+      pane.scroll = 0;
+    });
     renderTabs();
     renderBody({ keepScroll: false });
-    body.scrollTop = 0;
   }
 
   function hide() {
@@ -1300,8 +1456,13 @@ export function createStudioUi({ store, engine, audio }) {
   store.on("change", ({ book: changed, restored }) => {
     if (changed.id !== bookId) return;
     updateHeader();
-    if (restored) renderBody({ keepScroll: true });
+    if (restored) {
+      markStale();
+      renderBody({ keepScroll: true });
+      refreshThumbsSoon();
+    }
   });
+  onFontsLoaded(refreshThumbsSoon);
   store.on("history", ({ id }) => { if (id === bookId) updateHeader(); });
   store.on("saving", ({ book: saving }) => {
     if (saving.id !== bookId) return;
@@ -1321,6 +1482,7 @@ export function createStudioUi({ store, engine, audio }) {
   function relocalize() {
     if (!bookId) return;
     saveStatus.textContent = t("Saved");
+    markStale();
     renderTabs();
     renderBody({ keepScroll: true });
     renderPageState(engine.pageState);

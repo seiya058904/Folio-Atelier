@@ -41,8 +41,13 @@ export function createAudioSystem(sources) {
   let volume = 0.55;
 
   music.loop = true;
-  music.preload = "auto";
+  // The soundtrack is fetched once the page has settled, not ahead of the
+  // first paint; a visitor who clicks sooner simply starts it loading then.
+  music.preload = "none";
   music.playsInline = true;
+  const warm = () => { music.preload = "auto"; };
+  if (window.requestIdleCallback) window.requestIdleCallback(warm, { timeout: 5000 });
+  else setTimeout(warm, 2500);
 
   try {
     const savedVolumeValue = localStorage.getItem("folio-atelier-audio-volume");

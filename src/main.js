@@ -4,6 +4,7 @@
 import { AUDIO_SOURCES, createAudioSystem } from "./audio.js";
 import { engine } from "./engine.js";
 import { getLang, localizeDocument, onLang, setLang, t } from "./i18n.js";
+import { perf } from "./perf.js";
 import { createStore } from "./state/store.js";
 import { createLibraryUi } from "./ui/library.js";
 import { createStudioUi } from "./ui/studio.js";
@@ -56,7 +57,14 @@ async function start() {
   });
 
   // Every edit repaints the book it belongs to.
-  store.on("change", ({ book, dirty }) => engine.refreshBook(book, dirty));
+  store.on("change", ({ book, dirty, interactive }) => engine.refreshBook(book, dirty, { interactive }));
+
+  if (perf.enabled) window.__folio = { engine, store };
+  if (new URLSearchParams(location.search).has("bench")) {
+    import("./dev/bench.js").then(({ runBench }) => runBench({ store, engine })).catch((error) => {
+      window.__bench = { error: String(error?.stack || error) };
+    });
+  }
 
   window.addEventListener("pagehide", () => store.flush());
   document.addEventListener("visibilitychange", () => {

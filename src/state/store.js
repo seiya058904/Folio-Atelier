@@ -1,6 +1,7 @@
 // The library: an ordered list of books with change events, autosave and
 // per-book undo / redo.
 
+import { perf } from "../perf.js";
 import { debounce, deepClone } from "../util.js";
 import { normalizeBook } from "./schema.js";
 import * as storage from "./storage.js";
@@ -108,6 +109,7 @@ export function createStore() {
     update(id, mutate, { dirty = ["all"], key = null, record = true } = {}) {
       const book = this.get(id);
       if (!book) return;
+      perf.edit();
       if (record) {
         const entry = track(id);
         const now = performance.now();
@@ -123,7 +125,7 @@ export function createStore() {
       mutate(book);
       book.updatedAt = Date.now();
       scheduleSave(book);
-      emit("change", { book, dirty });
+      emit("change", { book, dirty, interactive: Boolean(key) });
       emit("history", { id });
     },
 

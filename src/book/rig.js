@@ -6,10 +6,20 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { BOOK_FORMAT, bookPalette } from "../state/schema.js";
+import { perf } from "../perf.js";
 import { clamp } from "../util.js";
-import { FACE_SIZE, paintBack, paintEndpaper, paintFront, paintSpine } from "../textures/faces.js";
+import {
+  FACE_SIZE,
+  endpaperSignature,
+  faceSignatures,
+  paintBack,
+  paintEndpaper,
+  paintFront,
+  paintSpine,
+  setFastGrain
+} from "../textures/faces.js";
 import { createPaintTexture } from "../textures/gl.js";
-import { PAGE_SIZE, paintPage } from "../textures/pages.js";
+import { PAGE_SIZE, pageSignature, paintPage } from "../textures/pages.js";
 import {
   getContactShadowTexture,
   getHeadbandTexture,
@@ -25,6 +35,9 @@ export const FLEXIBLE_PAGE_SEGMENTS = 18;
 export const FLEXIBLE_PAGE_VERTICAL_SEGMENTS = 8;
 
 const BLANK_LEAVES = 2;
+/** Texture scale used for boards while a control is being dragged. */
+const DRAFT_SCALE = 1;
+const DRAFT_SCALE_MANY = 0.75;
 
 const shared = {
   box: new THREE.BoxGeometry(1, 1, 1),
@@ -219,7 +232,7 @@ const physical = (parameters) => new THREE.MeshPhysicalMaterial({ transparent: t
  * Build a complete book from a spec.
  * `resolution` scales every painted texture (1 = 768 px wide covers).
  */
-export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = {}) {
+export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, lazy = false } = {}) {
   const d = DIM;
   const g = sharedGeometry();
   const root = new THREE.Group();
@@ -585,44 +598,128 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
     rig.paperFace = stock;
   }
 
-  /** Repaint the canvases named in `dirty` and refresh material parameters. */
-  function repaint(dirty = ["all"]) {
-    const spec = rig.data;
-    const has = (key) => dirty.includes("all") || dirty.includes(key);
-    const boards = has("material") || has("meta");
-    if (has("front") || boards) paintFront(spec, targets.front, targets.frontFoil, onAsset);
-    if (has("spine") || boards || has("front")) paintSpine(spec, targets.spine, targets.spineFoil);
-    if (has("back") || boards) paintBack(spec, targets.back, targets.backFoil);
-    if (has("details") || has("material") || has("front") || has("all")) paintEndpaper(spec, targets.endpaper);
+  const PAINTERS = { front: paintFront, spine: paintSpine, back: paintBack };
+  // What each board currently shows: content signatures per layer and the
+  // texture scale it was painted at.
+  const shown = { front: {}, spine: {}, back: {}, endpaper: {} };
+
+  /** Paint one board if needed. Returns true if it still owes a full-size pass. */
+  function repaintFace(face, signature, { force, draft, draftScale, hidden }) {
+    const state = shown[face];
+    const changed = { base: force || state.base !== signature.base, foil: force || state.foil !== signature.foil };
+    const content = changed.base || changed.foil;
+    // A board turned away from the camera is left for the full-size pass.
+    if (draft && content && hidden) return true;
+    // Edits made while dragging are painted small; the full-size pass follows
+    // when the hand rests (a call with `draft` off).
+    let wanted = scale;
+    if (draft) wanted = content ? Math.min(scale, draftScale) : state.scale ?? scale;
+    if (!content && state.scale === wanted) return wanted < scale;
+    const base = targets[face];
+    const foil = targets[`${face}Foil`];
+    if (state.scale !== wanted) {
+      base.resize(...sized(face, wanted));
+      foil.resize(...sized(face, wanted));
+      changed.base = true;
+      changed.foil = true;
+    }
+    setFastGrain(wanted < scale);
+    try {
+      perf.paint(face, () => PAINTERS[face](rig.data, base, foil, onAsset, changed));
+    } finally {
+      setFastGrain(false);
+    }
+    state.base = signature.base;
+    state.foil = signature.foil;
+    state.scale = wanted;
+    return wanted < scale;
+  }
+
+  function repaintEndpaper(force, defer) {
+    const state = shown.endpaper;
+    const size = scale > 1 ? 2 : 1;
+    const signature = endpaperSignature(rig.data);
+    if (!force && state.base === signature && state.scale === size) return false;
+    if (defer) return true;
+    if (state.scale !== size) targets.endpaper.resize(384 * size, 576 * size);
+    perf.paint("endpaper", () => paintEndpaper(rig.data, targets.endpaper));
+    state.base = signature;
+    state.scale = size;
+    return false;
+  }
+
+  /**
+   * Bring the painted boards up to date with the spec. Each painter is skipped
+   * when what it shows has not changed. `force` repaints regardless (new fonts
+   * or images arrived). `draft` is for edits arriving in a stream: changed
+   * boards are painted at reduced resolution, and those named in `hidden`
+   * (turned away from the camera) not at all.
+   * Returns true while any board is still waiting for its full-size pass.
+   */
+  function repaint({ force = false, draft = false, hidden = null } = {}) {
+    rig.painted = true;
+    const faces = ["front", "spine", "back"];
+    const signatures = faces.map((face) => faceSignatures(rig.data, face));
+    // Several boards at once (a colour, a material) get a smaller draft.
+    const busy = signatures.filter((signature, index) => {
+      const state = shown[faces[index]];
+      return !hidden?.[faces[index]] && (state.base !== signature.base || state.foil !== signature.foil);
+    }).length;
+    const draftScale = busy > 1 ? DRAFT_SCALE_MANY : DRAFT_SCALE;
+    let pending = false;
+    faces.forEach((face, index) => {
+      if (repaintFace(face, signatures[index], { force, draft, draftScale, hidden: hidden?.[face] })) pending = true;
+    });
+    if (repaintEndpaper(force, draft && hidden?.endpaper)) pending = true;
     applyLook();
+    return pending;
+  }
+
+  const facingProbes = [
+    ["front", coverPlane, new THREE.Vector3(0, 0, 1), -0.05],
+    ["back", backPlane, new THREE.Vector3(0, 0, 1), -0.05],
+    // The spine is rounded, so it stays in sight well past edge-on.
+    ["spine", spine, new THREE.Vector3(-1, 0, 0), -0.45]
+  ];
+  const probeNormal = new THREE.Vector3();
+  const probeCentre = new THREE.Vector3();
+
+  /** Which boards are turned away from the camera: `{ front, spine, back }`. */
+  function hiddenFaces(camera) {
+    root.updateWorldMatrix(true, true);
+    const result = {};
+    facingProbes.forEach(([face, mesh, direction, limit]) => {
+      probeNormal.copy(direction).transformDirection(mesh.matrixWorld);
+      mesh.getWorldPosition(probeCentre);
+      probeCentre.subVectors(camera.position, probeCentre).normalize();
+      result[face] = probeNormal.dot(probeCentre) < limit;
+    });
+    return result;
   }
 
   /** Change the texture resolution of the painted boards. */
   function setResolution(next) {
     if (next === scale) return;
     scale = next;
-    targets.front.resize(...sized("front"));
-    targets.frontFoil.resize(...sized("front"));
-    targets.spine.resize(...sized("spine"));
-    targets.spineFoil.resize(...sized("spine"));
-    targets.back.resize(...sized("back"));
-    targets.backFoil.resize(...sized("back"));
-    targets.endpaper.resize(next > 1 ? 768 : 384, next > 1 ? 1152 : 576);
-    repaint(["all"]);
+    if (rig.painted) repaint();
   }
 
   /** Print a page on one side of a leaf (or leave it blank when `entry` is null). */
-  function setLeafPage(pivot, side, entry, index, pageScale) {
+  function setLeafPage(pivot, side, entry, index, pageScale, epoch = 0) {
     const face = pivot.userData.faces[side];
     if (!entry) {
       face.material.map = rig.paperFace;
       return;
     }
-    const width = PAGE_SIZE.width * pageScale;
-    const height = PAGE_SIZE.height * pageScale;
+    const width = Math.round(PAGE_SIZE.width * pageScale);
+    const height = Math.round(PAGE_SIZE.height * pageScale);
+    const signature = `${width}x${height}|${index}|${epoch}|${pageSignature(rig.data, entry)}`;
     if (!face.target) face.target = createPaintTexture(width, height);
     else face.target.resize(width, height);
-    paintPage(rig.data, entry, index, face.target, onAsset);
+    if (face.signature !== signature) {
+      perf.paint("page", () => paintPage(rig.data, entry, index, face.target, onAsset));
+      face.signature = signature;
+    }
     face.material.map = face.target.texture;
   }
 
@@ -640,6 +737,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
         face.material.map = rig.paperFace;
         face.target?.dispose();
         face.target = null;
+        face.signature = null;
       });
     });
   }
@@ -667,6 +765,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
     contactShadow,
     paperFace,
     opacity: 1,
+    painted: false,
     lastOffset: null,
     fadeMaterials,
     base: { width: d.width, height: d.height, depth: d.depth },
@@ -677,6 +776,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
     assignLeafSlots,
     applyLook,
     repaint,
+    hiddenFaces,
     setResolution,
     setLeafPage,
     setLeafShadows,
@@ -684,6 +784,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {} } = 
     dispose
   };
 
-  repaint(["all"]);
+  if (lazy) applyLook();
+  else repaint();
   return rig;
 }

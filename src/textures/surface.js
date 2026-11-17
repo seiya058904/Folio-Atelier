@@ -5,7 +5,7 @@
 
 import * as THREE from "three";
 import { clamp, hashSeed, seededRandom } from "../util.js";
-import { configureCanvasTexture, makeCanvas } from "./gl.js";
+import { configureCanvasTexture, makeCanvas, paintContext } from "./gl.js";
 
 const SIZE = 256;
 
@@ -307,11 +307,54 @@ export function getMaterialMaps(kind) {
  * Paint the base colour of a binding material: flat dye, edge shading and the
  * fine colour variation that makes the surface read as fabric, hide or paper.
  */
-export function paintMaterialBase(ctx, width, height, color, kind, seed, { spine = false, flip = false } = {}) {
-  const look = MATERIAL_LOOK[kind] || MATERIAL_LOOK.cloth;
-  const random = seededRandom(hashSeed(`${kind}-${seed}-${spine ? "s" : "f"}`));
+export function paintMaterialBase(ctx, width, height, color, kind, seed, { spine = false, flip = false, overlay = false } = {}) {
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, width, height);
+  // The grain does not depend on the dye. Where the same board is painted
+  // over and over (a colour being dragged, a grid of thumbnails) `overlay`
+  // keeps it as a transparent sheet and lays it on in one go, instead of
+  // rasterising thousands of strokes every time.
+  if (overlay) {
+    const transform = ctx.getTransform();
+    const pixelWidth = Math.round(width * transform.a);
+    const pixelHeight = Math.round(height * transform.d);
+    if (transform.b === 0 && transform.c === 0 && pixelWidth * pixelHeight <= GRAIN_CACHE_PIXELS) {
+      ctx.drawImage(grainOverlay(pixelWidth, pixelHeight, width, height, kind, seed, spine, flip), 0, 0, width, height);
+      return;
+    }
+  }
+  paintGrain(ctx, width, height, kind, seed, spine, flip);
+}
+
+const GRAIN_CACHE_PIXELS = 768 * 1152;
+const GRAIN_CACHE_LIMIT = 24;
+const grainCache = new Map();
+
+function grainOverlay(pixelWidth, pixelHeight, width, height, kind, seed, spine, flip) {
+  const key = [pixelWidth, pixelHeight, width, height, kind, seed, spine, flip].join("|");
+  const cached = grainCache.get(key);
+  if (cached) {
+    grainCache.delete(key);
+    grainCache.set(key, cached);
+    return cached;
+  }
+  const canvas = makeCanvas(pixelWidth, pixelHeight);
+  const ctx = paintContext(canvas);
+  ctx.setTransform(pixelWidth / width, 0, 0, pixelHeight / height, 0, 0);
+  paintGrain(ctx, width, height, kind, seed, spine, flip);
+  grainCache.set(key, canvas);
+  if (grainCache.size > GRAIN_CACHE_LIMIT) {
+    const oldest = grainCache.keys().next().value;
+    grainCache.get(oldest).width = 1;
+    grainCache.delete(oldest);
+  }
+  return canvas;
+}
+
+/** Threads, fibres or mottling, and the shading at the board edges. */
+function paintGrain(ctx, width, height, kind, seed, spine, flip) {
+  const look = MATERIAL_LOOK[kind] || MATERIAL_LOOK.cloth;
+  const random = seededRandom(hashSeed(`${kind}-${seed}-${spine ? "s" : "f"}`));
 
   const area = (width * height) / (768 * 1152);
   if (look.thread === "woven" || look.thread === "slub") {
