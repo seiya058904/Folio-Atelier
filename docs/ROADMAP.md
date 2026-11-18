@@ -4,7 +4,7 @@ Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2
 
 Started 2026-11-19 at the user's request: a flagship pass on smoothness and motion. Whatever stalls can be removed is removed; whatever wait remains is carried by purposeful motion, so the reader feels no hitch. Every press, drag, scroll and selection should answer like a system interface (immediate, follows the hand, interruptible, settles with its momentum), every control should belong to the theme (no browser-default widgets), and the model should be made more real by refining what is there, not by adding more.
 
-**Status:** W and X done (2026-11-19). Y, Z next.
+**Status:** W, X and Y done (2026-11-19). Z next.
 
 **Rules (carried over)**
 - Measure first and say what each change bought. `?bench` before and after every phase, and the stutter census (`.playwright-mcp/w-census.js`: a whole visit, every long frame attributed to its step, long-animation-frame scripts) against the previous round served from a worktree.
@@ -44,7 +44,13 @@ Considered and left: a new book "taking form" on the shelf (it already settles f
 
 ## Phase Y — System-grade interaction
 
-One spring vocabulary (`src/ui/motion.js`: interruptible, velocity-carrying springs and `linear()` CSS tokens); unified press feedback; theme-native colour picker, slider and switch in place of browser widgets; popovers, dialogs and the sheet with springs and gesture velocity; directional tab transitions; inertia for the 3D view.
+- **Real springs.** `--ease-spring` is now a spring sampled from a damped oscillator as a CSS `linear()` curve (about 9 % overshoot, one swing back), with `--spring-snappy` (1 %) and `--spring-smooth` (critically damped) beside it; browsers without `linear()` keep the old cubic curves. Every popover, chosen tile, pressed control and dialog that used the old curve now settles like a spring.
+- **No browser widgets left.** The colour picker is the atelier's own popover (`openColourPicker` in `controls.js`): a saturation and brightness field, a hue strip, the hex value and, where the browser has one, an eyedropper; it grows from its swatch, streams the colour as you drag (one per frame) and answers the arrow keys. The slider is the atelier's own (`createSlider`): press the track and the thumb springs there, the held thumb grows and shows its value, and moving the finger away from the track slows it to a half and then a quarter for fine work (the bubble says so); keys step, Shift steps ten. The volume in the top bar is the same slider.
+- **Switches slide** as well as tap; **lists choose on release**: press a list, drag to an option, let go (mouse; a touch still taps).
+- **Tabs move the way you travel**: the new tab's content comes in from the side it lies on, on the snappy spring.
+- **Hover never sticks on touch screens** (lifts and growth only where a pointer hovers).
+
+Already in place and kept: press feedback (gives at once, springs back on release), the phone sheet snapping by projected velocity, orbit damping.
 
 ## Phase Z — Detail and modelling fidelity
 

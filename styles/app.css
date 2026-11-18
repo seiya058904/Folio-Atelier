@@ -17,8 +17,11 @@
   --serif: "Cormorant Garamond", "Iowan Old Style", "Baskerville", "Noto Serif SC", "Times New Roman", serif;
   --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Helvetica, Arial, sans-serif;
   --ease-out: cubic-bezier(0.2, 0.72, 0.24, 1);
-  /* Shared with src/motion.js: a slight overshoot that settles. */
+  /* Shared with src/motion.js: a slight overshoot that settles. Where the
+     browser has linear() easing this becomes a real spring (below). */
   --ease-spring: cubic-bezier(0.34, 1.42, 0.5, 1);
+  --spring-snappy: cubic-bezier(0.2, 0.9, 0.25, 1);
+  --spring-smooth: var(--ease-out);
   --duration-press: 90ms;
   --duration-quick: 180ms;
   --duration-base: 320ms;
@@ -36,6 +39,18 @@
   --hairline-strong: color-mix(in srgb, var(--ink) 44%, transparent);
   --wash: color-mix(in srgb, var(--ink) 6%, transparent);
   --danger: #b6402c;
+}
+
+/* Springs sampled from damped oscillators (settled by the end of the
+   duration they are used with): bouncy overshoots by about 9 % and swings
+   back once, snappy by 1 %, smooth is critically damped. A pressed control,
+   a chosen tile, a popover use them the way a system interface does. */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-spring: linear(0, 0.032, 0.115, 0.229, 0.359, 0.492, 0.62, 0.736, 0.836, 0.919, 0.984, 1.031, 1.064, 1.084, 1.093, 1.094, 1.089, 1.08, 1.069, 1.056, 1.043, 1.032, 1.021, 1.012, 1.005, 1, 0.996, 0.993, 0.992, 0.991, 0.991, 0.992, 0.993, 0.994, 0.995, 0.996, 1);
+    --spring-snappy: linear(0, 0.017, 0.062, 0.126, 0.2, 0.281, 0.363, 0.443, 0.519, 0.591, 0.656, 0.714, 0.766, 0.811, 0.85, 0.883, 0.911, 0.934, 0.953, 0.968, 0.981, 0.99, 0.997, 1.002, 1.006, 1.009, 1.01, 1.011, 1.011, 1.011, 1.01, 1.01, 1.009, 1.008, 1.007, 1.006, 1);
+    --spring-smooth: linear(0, 0.024, 0.082, 0.159, 0.244, 0.33, 0.414, 0.492, 0.563, 0.627, 0.683, 0.732, 0.775, 0.811, 0.842, 0.868, 0.891, 0.909, 0.925, 0.938, 0.949, 0.958, 0.966, 0.972, 0.977, 0.981, 0.985, 0.987, 0.99, 0.992, 0.993, 0.994, 0.996, 0.996, 0.997, 0.998, 1);
+  }
 }
 
 * {
@@ -1102,52 +1117,130 @@ p {
 
 /* range */
 
-.range {
-  width: 100%;
-  height: 18px;
-  margin: 0;
-  appearance: none;
-  background: transparent;
+/* The atelier's slider (`createSlider` in controls.js). The thumb rides
+   --ratio; a press on the track springs it there, a held thumb grows and
+   shows its value, and slows for fine work when the finger moves away. */
+.slider {
+  --thumb: 14px;
+  position: relative;
+  height: 22px;
   cursor: pointer;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.range::-webkit-slider-runnable-track {
-  height: 1px;
-  background: var(--hairline-strong);
+.slider__track {
+  position: absolute;
+  top: 50%;
+  right: calc(var(--thumb) / 2);
+  left: calc(var(--thumb) / 2);
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--hairline);
+  translate: 0 -50%;
 }
 
-.range::-moz-range-track {
-  height: 1px;
-  background: var(--hairline-strong);
-}
-
-.range::-webkit-slider-thumb {
-  width: 13px;
-  height: 13px;
-  margin-top: -6px;
-  appearance: none;
-  border: 1px solid var(--ink);
-  border-radius: 50%;
-  background: var(--paper);
-  transition: background-color var(--duration-quick) var(--ease-out), transform var(--duration-quick) var(--ease-out);
-}
-
-.range::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  border: 1px solid var(--ink);
-  border-radius: 50%;
-  background: var(--paper);
-}
-
-.range:hover::-webkit-slider-thumb,
-.range:focus-visible::-webkit-slider-thumb {
+.slider__fill {
+  position: absolute;
+  inset: 0;
   background: var(--ink);
-  transform: scale(1.15);
+  transform: scaleX(var(--ratio, 0));
+  transform-origin: left center;
 }
 
-.range:focus-visible {
-  outline: 0;
+.slider__thumb {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--ratio, 0) * (100% - var(--thumb)));
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: 0 1px 3px rgba(20, 12, 6, 0.18);
+  translate: 0 -50%;
+  transition:
+    scale var(--duration-base) var(--ease-spring),
+    background-color var(--duration-quick) var(--ease-out),
+    box-shadow var(--duration-quick) var(--ease-out);
+}
+
+.slider.is-jumping .slider__thumb {
+  transition:
+    left var(--duration-base) var(--ease-spring),
+    scale var(--duration-base) var(--ease-spring),
+    background-color var(--duration-quick) var(--ease-out);
+}
+
+.slider.is-jumping .slider__fill {
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.slider:hover .slider__thumb {
+  background: var(--ink);
+}
+
+.slider.is-held .slider__thumb {
+  background: var(--ink);
+  box-shadow: 0 3px 10px rgba(20, 12, 6, 0.22);
+  scale: 1.3;
+}
+
+.slider:focus-visible .slider__thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* The value, held up above the thumb while it is held. */
+.slider__bubble {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 600 0.62rem/1.2 var(--sans);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  translate: -50% 4px;
+  scale: 0.7;
+  transform-origin: bottom center;
+  transition:
+    opacity var(--duration-quick) var(--ease-out),
+    translate var(--duration-base) var(--ease-spring),
+    scale var(--duration-base) var(--ease-spring);
+}
+
+.slider.is-held .slider__bubble {
+  opacity: 1;
+  translate: -50% 0;
+  scale: 0.77;
+}
+
+/* Fine adjustment: the bubble says how slow. */
+.slider[data-rate="0.5"] .slider__bubble::after {
+  content: " · ½";
+  opacity: 0.7;
+}
+
+.slider[data-rate="0.25"] .slider__bubble::after {
+  content: " · ¼";
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slider__thumb,
+  .slider__fill,
+  .slider__bubble,
+  .slider.is-jumping .slider__thumb,
+  .slider.is-jumping .slider__fill {
+    transition: none;
+  }
 }
 
 /* segmented */
@@ -1281,15 +1374,163 @@ p {
   place-items: center;
 }
 
-.swatch--custom input {
-  position: absolute;
-  inset: -6px;
-  width: calc(100% + 12px);
-  height: calc(100% + 12px);
-  padding: 0;
-  border: 0;
+.swatch--custom {
   cursor: pointer;
+}
+
+.swatch--custom[aria-expanded="true"] {
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3px var(--ink);
+}
+
+/* The colour picker: a saturation and brightness field, a hue strip, the hex
+   value and (where the browser has one) an eyedropper. It grows from the
+   swatch that opened it on a spring. */
+.picker {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  width: 248px;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--paper-pale) 97%, transparent);
+  color: var(--ink);
+  box-shadow: 0 18px 46px rgba(20, 12, 6, 0.24), 0 2px 6px rgba(20, 12, 6, 0.08);
   opacity: 0;
+  transform: translateY(-6px) scale(0.94);
+  transition:
+    opacity var(--duration-quick) var(--ease-out),
+    transform var(--duration-base) var(--ease-spring);
+  backdrop-filter: blur(10px);
+}
+
+.picker[data-side="above"] {
+  transform: translateY(6px) scale(0.94);
+}
+
+.picker.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+.picker__field,
+.picker__hue {
+  position: relative;
+  touch-action: none;
+  cursor: crosshair;
+  outline: none;
+}
+
+.picker__field {
+  height: 148px;
+  border-radius: 9px;
+  background:
+    linear-gradient(to top, #000, transparent),
+    linear-gradient(to right, #fff, hsl(var(--hue, 0) 100% 50%));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.picker__hue {
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #f00, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  cursor: ew-resize;
+}
+
+.picker__knob {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--colour);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+  translate: -50% -50%;
+  transition: scale var(--duration-quick) var(--ease-spring);
+}
+
+.picker__hue .picker__knob {
+  top: 50%;
+  background: hsl(var(--hue, 0) 100% 50%);
+}
+
+.picker__field.is-dragging .picker__knob,
+.picker__hue.is-dragging .picker__knob {
+  scale: 1.25;
+}
+
+.picker__field:focus-visible .picker__knob,
+.picker__hue:focus-visible .picker__knob {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent), 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.picker__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.picker__chip {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--colour);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
+}
+
+.picker__hex {
+  min-width: 0;
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: 500 0.82rem/1.2 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.picker__hex:focus {
+  border-color: var(--ink);
+  outline: none;
+}
+
+.picker__dropper {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  place-items: center;
+}
+
+/* A drop of ink falling from a pipette, drawn in CSS. */
+.picker__dropper span {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--ink);
+  border-radius: 50% 50% 50% 0;
+  rotate: -45deg;
+}
+
+.picker__dropper:hover {
+  border-color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .picker,
+  .picker__knob {
+    transition: none;
+  }
 }
 
 /* tiles: presets, layouts, motifs */
@@ -2529,50 +2770,40 @@ p {
   display: block;
 }
 
-.audio-toggle:focus-visible,
-.audio-volume:focus-visible {
+.audio-toggle:focus-visible {
   outline: 1px solid currentColor;
   outline-offset: 4px;
 }
 
-.audio-volume {
+/* The volume: the same slider, drawn in the bar's ink. */
+.slider.audio-volume {
+  --thumb: 9px;
   width: 58px;
   height: 30px;
-  margin: 0;
-  appearance: none;
   color: inherit;
-  background: transparent;
-  cursor: pointer;
 }
 
-.audio-volume::-webkit-slider-runnable-track {
+.slider.audio-volume .slider__track {
   height: 1px;
   background: color-mix(in srgb, currentColor 42%, transparent);
 }
 
-.audio-volume::-webkit-slider-thumb {
-  width: 7px;
-  height: 7px;
-  margin-top: -3px;
-  appearance: none;
-  border: 0;
-  border-radius: 50%;
+.slider.audio-volume .slider__fill,
+.slider.audio-volume .slider__thumb,
+.slider.audio-volume:hover .slider__thumb,
+.slider.audio-volume.is-held .slider__thumb {
   background: currentColor;
+}
+
+.slider.audio-volume .slider__thumb {
+  border: 0;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--paper) 80%, transparent);
 }
 
-.audio-volume::-moz-range-track {
-  height: 1px;
-  border: 0;
-  background: color-mix(in srgb, currentColor 42%, transparent);
-}
-
-.audio-volume::-moz-range-thumb {
-  width: 7px;
-  height: 7px;
-  border: 0;
-  border-radius: 50%;
-  background: currentColor;
+.slider.audio-volume .slider__bubble {
+  top: calc(100% + 9px);
+  bottom: auto;
+  transform-origin: top center;
 }
 
 @media (max-width: 880px) {
@@ -2815,6 +3046,31 @@ html[lang="zh-CN"] .empty-state__title em {
   }
 }
 
+/* Moving along the tabs: the content follows the direction of travel. */
+[data-direction="forward"] > .pane.is-entering > * {
+  animation-name: pane-in-forward;
+  animation-timing-function: var(--spring-snappy);
+}
+
+[data-direction="back"] > .pane.is-entering > * {
+  animation-name: pane-in-back;
+  animation-timing-function: var(--spring-snappy);
+}
+
+@keyframes pane-in-forward {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+}
+
+@keyframes pane-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+}
+
 /* Thumbnails waiting for their first paint breathe softly, then fade in. */
 canvas.is-pending {
   background: var(--wash);
@@ -2836,6 +3092,7 @@ canvas.is-fresh {
 
 @media (prefers-reduced-motion: reduce) {
   .pane.is-entering > *,
+  [data-direction] > .pane.is-entering > *,
   canvas.is-pending,
   canvas.is-fresh,
   .loading.is-done .loading__mark {
@@ -2936,5 +3193,20 @@ canvas.is-fresh {
     animation: none;
     background-position: 50% 100%;
     opacity: 0.7;
+  }
+}
+
+/* A finger leaves :hover behind after a tap: on screens without a hovering
+   pointer nothing lifts or grows on hover, only on press. */
+@media (hover: none) {
+  .pill-button--solid:hover,
+  .swatch:hover,
+  .tile:hover .tile__art,
+  .tile:hover .tile__glyph {
+    transform: none;
+  }
+
+  .slider:hover .slider__thumb {
+    background: var(--paper);
   }
 }

@@ -71,12 +71,11 @@ export async function runBench({ store, engine }) {
     };
   };
 
-  const slide = (input, index, count) => {
-    const min = Number(input.min);
-    const max = Number(input.max);
+  const slide = (control, index, count) => {
+    const min = Number(control.min);
+    const max = Number(control.max);
     const t = 0.5 - 0.5 * Math.cos((index / count) * Math.PI * 2);
-    input.value = String(min + (max - min) * (0.2 + t * 0.6));
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    control.setValue(min + (max - min) * (0.2 + t * 0.6));
   };
 
   const tab = async (id) => {
@@ -137,21 +136,20 @@ export async function runBench({ store, engine }) {
 
   // Slider that only changes foil material parameters.
   await tab("design");
-  result.foilSlider = await drive(90, (index) => slide(field("Metal").querySelector("input"), index, 90));
+  result.foilSlider = await drive(90, (index) => slide(field("Metal").querySelector("[role=slider]"), index, 90));
   await wait(400);
 
   // Colour picker: repaints all three boards.
-  const colour = field("Colour").querySelector("input[type=color]");
+  const colour = field("Colour").querySelector(".swatch--custom");
   result.materialColour = await drive(90, (index) => {
     const value = Math.round(100 + 60 * Math.sin(index / 9)).toString(16).padStart(2, "0");
-    colour.value = `#${value}3a6b`;
-    colour.dispatchEvent(new Event("input", { bubbles: true }));
+    colour.setColour(`#${value}3a6b`);
   });
   await wait(600);
 
   // Slider that repaints the front board.
   await tab("cover");
-  result.frontSlider = await drive(90, (index) => slide(field("Size").querySelector("input"), index, 90));
+  result.frontSlider = await drive(90, (index) => slide(field("Size").querySelector("[role=slider]"), index, 90));
   await wait(600);
 
   // Camera move with nothing else changing.

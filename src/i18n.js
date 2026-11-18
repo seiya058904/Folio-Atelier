@@ -159,6 +159,10 @@ const ZH = {
   "Add a line": "添加一行",
   "Lettering": "文字",
   "Custom colour": "自定义颜色",
+  "Saturation and brightness": "饱和度与明度",
+  "Hue": "色相",
+  "Hex colour": "十六进制色值",
+  "Pick a colour from the screen": "从屏幕上取色",
 
   /* ----- design tab ----- */
   "The book": "这本书",

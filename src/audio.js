@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { createSlider } from "./ui/controls.js";
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 export const AUDIO_SOURCES = Object.freeze({
@@ -12,7 +13,7 @@ export const AUDIO_SOURCES = Object.freeze({
 
 const audioControls = document.querySelector("#audio-controls");
 const audioToggle = document.querySelector("#audio-toggle");
-const audioVolume = document.querySelector("#audio-volume");
+let audioVolume = document.querySelector("#audio-volume");
 const audioStatus = document.querySelector("#audio-status");
 
 export function createAudioSystem(sources) {
@@ -83,7 +84,7 @@ export function createAudioSystem(sources) {
   function updateInterface() {
     audioToggle.setAttribute("aria-pressed", String(muted));
     audioToggle.setAttribute("aria-label", t(muted ? "Turn sound on" : "Mute sound"));
-    audioVolume.value = String(volume);
+    audioVolume.setValue?.(volume);
     audioControls.dataset.state = muted ? "muted" : unlocked ? "playing" : "ready";
     audioStatus.textContent = muted
       ? t("Sound muted")
@@ -180,7 +181,6 @@ export function createAudioSystem(sources) {
 
   function dispose() {
     audioToggle.removeEventListener("click", onToggleClick);
-    audioVolume.removeEventListener("input", onVolumeInput);
     music.pause();
     music.removeAttribute("src");
     music.load();
@@ -195,12 +195,15 @@ export function createAudioSystem(sources) {
     setMuted(!muted);
   }
 
-  function onVolumeInput(event) {
-    setVolume(event.currentTarget.value);
-  }
+  // The atelier's own slider in place of the placeholder in the page.
+  const volumeSlider = createSlider({
+    id: "audio-volume", label: "Sound volume", value: volume, min: 0, max: 1, step: 0.05,
+    format: (value) => `${Math.round(value * 100)}%`, onInput: (value) => setVolume(value), className: "audio-volume"
+  });
+  audioVolume.replaceWith(volumeSlider);
+  audioVolume = volumeSlider;
 
   audioToggle.addEventListener("click", onToggleClick);
-  audioVolume.addEventListener("input", onVolumeInput);
   updateInterface();
 
   return {

@@ -2,6 +2,7 @@
 // back with the new value; none of them know about books or the store.
 
 import { t } from "../i18n.js";
+import { hexToRgb, rgbToHex } from "../util.js";
 import { h } from "./dom.js";
 
 let controlCount = 0;
@@ -52,27 +53,125 @@ export function textArea({ label, value = "", placeholder = "", tall = false, on
 
 export function slider({ label, value, min, max, step = 0.01, format = (v) => v, onInput }) {
   const id = nextId("range");
+  const labelId = `${id}-label`;
   const output = h("span", { class: "field__value", text: format(value) });
+  const control = createSlider({ id, labelledBy: labelId, value, min, max, step, format, onInput: (next) => {
+    output.textContent = format(next);
+    onInput(next);
+  } });
   return h("div", { class: "field" },
     h("div", { class: "field__head" },
-      h("label", { class: "field__label", for: id, text: t(label) }),
+      h("span", { class: "field__label", id: labelId, text: t(label) }),
       output
     ),
-    h("input", {
-      id,
-      class: "range",
-      type: "range",
-      min,
-      max,
-      step,
-      value,
-      oninput: (event) => {
-        const next = Number(event.target.value);
-        output.textContent = format(next);
-        onInput(next);
-      }
-    })
+    control
   );
+}
+
+/**
+ * The atelier's slider (no browser widget). Press anywhere on the track and
+ * the thumb springs there; drag and it follows the finger; move the finger
+ * away from the track while dragging and it slows for fine adjustment (a
+ * half, then a quarter, as on a phone). The thumb grows and shows its value
+ * while held. Arrow keys step, Shift steps ten, Home and End go to the ends.
+ * `setValue(v)` on the element sets it as if dragged (used by the bench).
+ */
+export function createSlider({ id, labelledBy, label = "", value, min, max, step = 0.01, format = (v) => v, onInput, className = "" }) {
+  const thumb = h("span", { class: "slider__thumb" }, h("span", { class: "slider__bubble", "aria-hidden": "true" }));
+  const fill = h("span", { class: "slider__fill" });
+  const root = h("div", {
+    id,
+    class: `slider ${className}`.trim(),
+    role: "slider",
+    tabindex: "0",
+    "aria-valuemin": String(min),
+    "aria-valuemax": String(max),
+    "aria-labelledby": labelledBy || null,
+    "aria-label": labelledBy ? null : t(label)
+  }, h("span", { class: "slider__track" }, fill), thumb);
+  const bubble = thumb.firstChild;
+  const decimals = Math.max(0, (String(step).split(".")[1] || "").length);
+  const snap = (next) => {
+    const stepped = Math.round((next - min) / step) * step + min;
+    return Number(Math.min(max, Math.max(min, stepped)).toFixed(decimals));
+  };
+  let current = snap(Number(value));
+
+  function show() {
+    const ratio = max > min ? (current - min) / (max - min) : 0;
+    root.style.setProperty("--ratio", String(ratio));
+    root.setAttribute("aria-valuenow", String(current));
+    root.setAttribute("aria-valuetext", String(format(current)));
+    bubble.textContent = format(current);
+  }
+
+  function set(next) {
+    const snapped = snap(next);
+    if (snapped === current) return;
+    current = snapped;
+    show();
+    onInput(current);
+  }
+  show();
+
+  root.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    root.focus({ preventScroll: true, focusVisible: false });
+    root.setPointerCapture(event.pointerId);
+    const box = root.getBoundingClientRect();
+    const onThumb = Math.abs(event.clientX - thumb.getBoundingClientRect().left - thumb.offsetWidth / 2) < 14;
+    // A press on the track: the thumb springs to it (the CSS eases --ratio).
+    if (!onThumb) {
+      root.classList.add("is-jumping");
+      set(min + ((event.clientX - box.left) / box.width) * (max - min));
+      setTimeout(() => root.classList.remove("is-jumping"), 260);
+    }
+    root.classList.add("is-held");
+    let lastX = event.clientX;
+    let exact = current;
+    const move = (moveEvent) => {
+      root.classList.remove("is-jumping");
+      // Further from the track, finer: full speed, a half, a quarter.
+      const away = Math.abs(moveEvent.clientY - (box.top + box.height / 2));
+      const rate = away > 120 ? 0.25 : away > 60 ? 0.5 : 1;
+      root.dataset.rate = String(rate);
+      exact = Math.min(max, Math.max(min, exact + ((moveEvent.clientX - lastX) / box.width) * (max - min) * rate));
+      lastX = moveEvent.clientX;
+      set(exact);
+    };
+    const end = () => {
+      root.classList.remove("is-held");
+      delete root.dataset.rate;
+      root.removeEventListener("pointermove", move);
+      root.removeEventListener("pointerup", end);
+      root.removeEventListener("pointercancel", end);
+    };
+    root.addEventListener("pointermove", move);
+    root.addEventListener("pointerup", end);
+    root.addEventListener("pointercancel", end);
+  });
+
+  root.addEventListener("keydown", (event) => {
+    const big = (max - min) / 10;
+    const by = {
+      ArrowRight: step, ArrowUp: step, ArrowLeft: -step, ArrowDown: -step,
+      PageUp: big, PageDown: -big
+    }[event.key];
+    let next = null;
+    if (by !== undefined) next = current + (event.shiftKey && Math.abs(by) === step ? by * 10 : by);
+    else if (event.key === "Home") next = min;
+    else if (event.key === "End") next = max;
+    if (next === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    set(next);
+  });
+
+  root.setValue = (next) => set(Number(next));
+  root.min = min;
+  root.max = max;
+  return root;
 }
 
 /* ----- select: a button and a popover list in the panel's own style ----- */
@@ -198,7 +297,31 @@ export function select({ label, value, options, onChange, preview = null, face =
     onChange(current);
   }
 
-  button.addEventListener("click", () => (list ? close() : open()));
+  // As in a system menu: press, drag to an option, let go to choose it.
+  // (Mouse only; a touch opens on tap and chooses on a second tap.)
+  let pressed = null;
+  button.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "mouse" || event.button !== 0 || list) return;
+    pressed = { x: event.clientX, y: event.clientY, at: performance.now() };
+    button.dataset.pressOpened = "1";
+    open();
+  });
+  document.addEventListener("pointerup", (event) => {
+    if (!pressed || event.pointerType !== "mouse") return;
+    const press = pressed;
+    pressed = null;
+    const item = event.target.closest?.(".select__option");
+    const dragged = Math.hypot(event.clientX - press.x, event.clientY - press.y) > 6 || performance.now() - press.at > 320;
+    if (list && item && list.contains(item) && dragged) choose(Number(item.dataset.index));
+  });
+  button.addEventListener("click", (event) => {
+    // The press already opened the list.
+    if (event.detail && list && !pressed && openSelect?.owner === button && button.dataset.pressOpened === "1") {
+      delete button.dataset.pressOpened;
+      return;
+    }
+    list ? close() : open();
+  });
   button.addEventListener("blur", () => close());
   button.addEventListener("keydown", (event) => {
     const key = event.key;
@@ -321,9 +444,34 @@ export function segmented({ label, value, options, onChange }) {
 }
 
 export function toggle({ label, value, onChange }) {
+  const input = h("input", { type: "checkbox", role: "switch", checked: Boolean(value), onchange: (event) => onChange(event.target.checked) });
+  // The knob can be slid as well as tapped: a drag past a few pixels sets the
+  // switch to the side it was slid towards.
+  let slide = null;
+  input.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    slide = { x: event.clientX, to: null };
+    input.setPointerCapture(event.pointerId);
+  });
+  input.addEventListener("pointermove", (event) => {
+    if (!slide) return;
+    const dx = event.clientX - slide.x;
+    if (Math.abs(dx) > 5) slide.to = dx > 0;
+  });
+  input.addEventListener("click", (event) => {
+    const to = slide?.to;
+    slide = null;
+    if (to === null || to === undefined) return;
+    // During the click the box already shows the toggled state. Slid towards
+    // the side it is already on: cancel (it stays). Otherwise the toggle is
+    // what was asked for.
+    if (!input.checked !== to) return;
+    event.preventDefault();
+  });
+  input.addEventListener("pointercancel", () => { slide = null; });
   return h("label", { class: "toggle" },
     h("span", { class: "field__label", text: t(label) }),
-    h("input", { type: "checkbox", checked: Boolean(value), onchange: (event) => onChange(event.target.checked) })
+    input
   );
 }
 
@@ -344,17 +492,30 @@ export function colorField({ label, value, swatches = [], metal = false, custom 
     style: { "--swatch": item.color }
   }));
   buttons.forEach((button, index) => button.style.setProperty("--swatch", items[index].color));
-  const picker = custom ? h("label", { class: "swatch swatch--custom", title: t("Custom colour") },
-    h("span", { class: "sr-only", text: `${t(label)}: ${t("Custom colour")}` }),
-    h("input", {
-      type: "color",
-      value: /^#[0-9a-f]{6}$/i.test(value) ? value : "#888888",
-      oninput: (event) => {
-        mark("");
-        onInput(event.target.value, true);
-      }
-    })
-  ) : null;
+  // The last swatch opens the atelier's own colour picker (no system dialog).
+  let customColour = /^#[0-9a-f]{6}$/i.test(value) ? value : "#888888";
+  const picker = custom ? h("button", {
+    type: "button",
+    class: "swatch swatch--custom",
+    title: t("Custom colour"),
+    "aria-label": `${t(label)}: ${t("Custom colour")}`,
+    "aria-haspopup": "dialog",
+    "aria-expanded": "false"
+  }) : null;
+  if (picker) {
+    picker.setColour = (next) => {
+      customColour = next;
+      mark("");
+      onInput(next, true);
+    };
+  }
+  picker?.addEventListener("click", () => {
+    openColourPicker(picker, customColour, (next) => {
+      customColour = next;
+      mark("");
+      onInput(next, true);
+    });
+  });
   const container = h("div", { class: "swatches", role: "radiogroup", "aria-label": t(label) }, buttons, picker);
   const mark = radioGroup(container, buttons, value, (next) => onInput(next, false));
   return h("div", { class: "field" },
@@ -379,3 +540,204 @@ export function tiles({ label, value, options, render, className = "", onChange 
   radioGroup(container, buttons, value, onChange);
   return container;
 }
+
+/* ----- colour picker: a popover in the panel's own style ----- */
+
+function hexToHsv(hex) {
+  const [r, g, b] = hexToRgb(hex).map((value) => value / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let hue = 0;
+  if (d) {
+    if (max === r) hue = ((g - b) / d) % 6;
+    else if (max === g) hue = (b - r) / d + 2;
+    else hue = (r - g) / d + 4;
+    hue *= 60;
+    if (hue < 0) hue += 360;
+  }
+  return { h: hue, s: max ? d / max : 0, v: max };
+}
+
+function hsvToHex({ h: hue, s, v }) {
+  const c = v * s;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = v - c;
+  const [r, g, b] = hue < 60 ? [c, x, 0] : hue < 120 ? [x, c, 0] : hue < 180 ? [0, c, x]
+    : hue < 240 ? [0, x, c] : hue < 300 ? [x, 0, c] : [c, 0, x];
+  return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
+}
+
+let openPicker = null;
+
+/**
+ * Open the colour picker under `anchor`, starting from `value`. `onInput`
+ * receives every colour as it is chosen (a drag streams them, like a slider).
+ */
+export function openColourPicker(anchor, value, onInput) {
+  if (openPicker?.anchor === anchor) {
+    openPicker.close();
+    return;
+  }
+  openPicker?.close();
+  openSelect?.close();
+  const hsv = hexToHsv(value);
+  let sent = value.toLowerCase();
+
+  const fieldKnob = h("span", { class: "picker__knob" });
+  const field = h("div", {
+    class: "picker__field", tabindex: "0", role: "slider",
+    "aria-label": t("Saturation and brightness"), "aria-valuemin": "0", "aria-valuemax": "100"
+  }, fieldKnob);
+  const hueKnob = h("span", { class: "picker__knob" });
+  const hue = h("div", {
+    class: "picker__hue", tabindex: "0", role: "slider",
+    "aria-label": t("Hue"), "aria-valuemin": "0", "aria-valuemax": "360"
+  }, hueKnob);
+  const chip = h("span", { class: "picker__chip", "aria-hidden": "true" });
+  const hex = h("input", {
+    class: "picker__hex", type: "text", maxLength: 7, spellcheck: false, autocomplete: "off",
+    "aria-label": t("Hex colour")
+  });
+  const dropper = "EyeDropper" in window ? h("button", {
+    type: "button", class: "picker__dropper", title: t("Pick a colour from the screen"), "aria-label": t("Pick a colour from the screen")
+  }, h("span", { "aria-hidden": "true" })) : null;
+  const panel = h("div", { class: "picker", role: "dialog", "aria-label": t("Custom colour") },
+    field, hue, h("div", { class: "picker__row" }, chip, hex, dropper));
+
+  let frame = 0;
+  function show({ typing = false } = {}) {
+    const colour = hsvToHex(hsv);
+    panel.style.setProperty("--hue", String(hsv.h));
+    panel.style.setProperty("--colour", colour);
+    fieldKnob.style.left = `${hsv.s * 100}%`;
+    fieldKnob.style.top = `${(1 - hsv.v) * 100}%`;
+    hueKnob.style.left = `${(hsv.h / 360) * 100}%`;
+    field.setAttribute("aria-valuenow", String(Math.round(hsv.s * 100)));
+    field.setAttribute("aria-valuetext", `${Math.round(hsv.s * 100)}%, ${Math.round(hsv.v * 100)}%`);
+    hue.setAttribute("aria-valuenow", String(Math.round(hsv.h)));
+    if (!typing) hex.value = colour;
+    // One colour per frame however fast the pointer moves.
+    if (colour !== sent && !frame) {
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const next = hsvToHex(hsv);
+        if (next === sent) return;
+        sent = next;
+        onInput(next);
+      });
+    }
+  }
+
+  function drag(surface, apply) {
+    surface.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      surface.focus({ preventScroll: true, focusVisible: false });
+      surface.setPointerCapture(event.pointerId);
+      surface.classList.add("is-dragging");
+      const move = (moveEvent) => {
+        const box = surface.getBoundingClientRect();
+        apply(
+          Math.min(1, Math.max(0, (moveEvent.clientX - box.left) / box.width)),
+          Math.min(1, Math.max(0, (moveEvent.clientY - box.top) / box.height))
+        );
+        show();
+      };
+      const end = () => {
+        surface.classList.remove("is-dragging");
+        surface.removeEventListener("pointermove", move);
+        surface.removeEventListener("pointerup", end);
+        surface.removeEventListener("pointercancel", end);
+      };
+      surface.addEventListener("pointermove", move);
+      surface.addEventListener("pointerup", end);
+      surface.addEventListener("pointercancel", end);
+      move(event);
+    });
+  }
+  drag(field, (x, y) => { hsv.s = x; hsv.v = 1 - y; });
+  drag(hue, (x) => { hsv.h = Math.min(359.9, x * 360); });
+
+  const nudge = (event, horizontal, vertical) => {
+    const big = event.shiftKey ? 10 : 1;
+    const dx = { ArrowRight: 1, ArrowLeft: -1 }[event.key] || 0;
+    const dy = { ArrowUp: 1, ArrowDown: -1 }[event.key] || 0;
+    if (!dx && !dy) return;
+    event.preventDefault();
+    horizontal(dx * big);
+    vertical(dy * big);
+    show();
+  };
+  field.addEventListener("keydown", (event) => nudge(event,
+    (step) => { hsv.s = Math.min(1, Math.max(0, hsv.s + step / 100)); },
+    (step) => { hsv.v = Math.min(1, Math.max(0, hsv.v + step / 100)); }));
+  hue.addEventListener("keydown", (event) => nudge(event,
+    (step) => { hsv.h = (hsv.h + step + 360) % 360; },
+    (step) => { hsv.h = (hsv.h + step + 360) % 360; }));
+  hex.addEventListener("input", () => {
+    const text = hex.value.trim();
+    const full = /^#?[0-9a-f]{6}$/i.test(text) ? `#${text.replace("#", "")}` : null;
+    if (!full) return;
+    Object.assign(hsv, hexToHsv(full));
+    show({ typing: true });
+  });
+  dropper?.addEventListener("click", async () => {
+    try {
+      const { sRGBHex } = await new window.EyeDropper().open();
+      Object.assign(hsv, hexToHsv(sRGBHex));
+      show();
+    } catch (error) { /* cancelled */ }
+  });
+
+  function place() {
+    const box = anchor.getBoundingClientRect();
+    const width = 248;
+    const height = panel.offsetHeight || 260;
+    const below = innerHeight - box.bottom - 12 >= height;
+    panel.style.left = `${Math.max(8, Math.min(box.left + box.width / 2 - width / 2, innerWidth - width - 8))}px`;
+    panel.style.top = below ? `${box.bottom + 10}px` : `${Math.max(8, box.top - 10 - height)}px`;
+    panel.dataset.side = below ? "below" : "above";
+    // The panel grows from the swatch that opened it.
+    const origin = box.left + box.width / 2 - parseFloat(panel.style.left);
+    panel.style.transformOrigin = `${origin}px ${below ? "0" : "100%"}`;
+  }
+
+  function close({ restore = false } = {}) {
+    if (openPicker?.panel !== panel) return;
+    openPicker = null;
+    cancelAnimationFrame(frame);
+    anchor.setAttribute("aria-expanded", "false");
+    panel.classList.remove("is-open");
+    if (restore) anchor.focus({ preventScroll: true });
+    if (reducedMotion.matches) panel.remove();
+    else setTimeout(() => panel.remove(), 200);
+  }
+
+  panel.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close({ restore: true });
+    }
+  });
+  document.body.append(panel);
+  show();
+  place();
+  anchor.setAttribute("aria-expanded", "true");
+  openPicker = { anchor, panel, close };
+  requestAnimationFrame(() => {
+    panel.classList.add("is-open");
+    field.focus({ preventScroll: true });
+  });
+}
+
+document.addEventListener("pointerdown", (event) => {
+  if (!openPicker) return;
+  if (openPicker.panel.contains(event.target) || openPicker.anchor.contains(event.target)) return;
+  openPicker.close();
+}, true);
+document.addEventListener("scroll", (event) => {
+  if (openPicker && !openPicker.panel.contains(event.target)) openPicker.close();
+}, true);
+window.addEventListener("resize", () => openPicker?.close());

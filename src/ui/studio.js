@@ -234,6 +234,10 @@ export function createStudioUi({ store, engine, audio }) {
       return;
     }
     const started = performance.now();
+    // The new tab's content comes in from the side it lies on.
+    const from = TABS.findIndex((entry) => entry.id === tab);
+    const to = TABS.findIndex((entry) => entry.id === next);
+    body.dataset.direction = from < 0 || from === to ? "" : to > from ? "forward" : "back";
     tab = next;
     renderTabs();
     showPane();
@@ -1852,7 +1856,9 @@ export function createStudioUi({ store, engine, audio }) {
     const selection = typeof element.selectionStart === "number" && element.type !== "range"
       ? [element.selectionStart, element.selectionEnd]
       : null;
-    return { tag: element.tagName, type: element.type, value: element.dataset?.value, label, selection };
+    // Sliders are elements of their own kind (role), not inputs.
+    const tag = element.getAttribute("role") === "slider" ? "[role='slider']" : element.tagName;
+    return { tag, type: element.type, value: element.dataset?.value, label, selection };
   }
 
   function restoreFocus(focus) {
