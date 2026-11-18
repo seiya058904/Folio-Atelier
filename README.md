@@ -168,7 +168,7 @@ From the Design tab: save a **picture** of the view (PNG), a **turntable** of th
 
 No framework, bundler or backend: native ES modules, [Three.js](https://threejs.org/) 0.165 from a CDN, and IndexedDB for storage.
 
-Each book is one serialisable `BookSpec`. The rig paints every surface from that spec onto canvases — a base layer for dyed material and print, a mask that the metallic foil material uses (white for the main foil, magenta for the second), and a height map for stamping depth — so any edit repaints only the surfaces it touches while the model stays on screen. Edits are merged and painted once per frame (at draft size while dragging), and the render loop sleeps when nothing moves: an idle studio draws no frames. Add `?perf` to see frame times and what each repaint costs. Only four leaves carry printed pages; as you read through a longer book, the leaf at the bottom of one pile is moved under the other and printed with the pages about to come into view.
+Each book is one serialisable `BookSpec`. The rig paints every surface from that spec onto canvases — a base layer for dyed material and print, a mask that the metallic foil material uses (white for the main foil, magenta for the second), and a height map for stamping depth — so any edit repaints only the surfaces it touches while the model stays on screen. Edits are merged and painted once per frame (at draft size while dragging), and the render loop sleeps when nothing moves: an idle studio draws no frames. A worker paints a material's grain ahead of need (the book being opened, the binding under the pointer), and a board repainted with something new cross-fades from its previous picture on the GPU instead of popping. The controls are the atelier's own — colour picker, sliders with fine adjustment, switches, lists — moving on sampled springs. Add `?perf` to see frame times and what each repaint costs. Only four leaves carry printed pages; as you read through a longer book, the leaf at the bottom of one pile is moved under the other and printed with the pages about to come into view.
 
 <details>
 <summary><strong>⚙️ Expand run-locally, module map &amp; rendering tiers</strong></summary>
@@ -193,7 +193,7 @@ Then open <http://localhost:4173>. An internet connection is needed for the pinn
 | [`src/engine.js`](src/engine.js) | Room, shelf, cameras, shelf ⇄ studio state machine, page interaction |
 | [`src/book/rig.js`](src/book/rig.js) | The hardcover: boards, rounded spine, hinges, leaves, edges, foil layers |
 | [`src/scene/quality.js`](src/scene/quality.js) | Rendering tiers |
-| [`src/textures/`](src/textures/) | Procedural painters: materials, covers, patterns, ornaments, typesetting, pages |
+| [`src/textures/`](src/textures/) | Procedural painters: materials, covers, patterns, ornaments, typesetting, pages; `grain-worker.js` paints material grain off the main thread |
 | [`src/state/`](src/state/) | `BookSpec` schema, store with undo, IndexedDB, images, manuscript import |
 | [`src/data/`](src/data/) | Starting bindings and typefaces |
 | [`src/ui/`](src/ui/) | Shelf interface, studio workbench, controls |
