@@ -120,6 +120,15 @@ const PAGE_DEFAULTS = {
   blank: () => ({})
 };
 
+/** True for a page that still shows the starter words a new book comes with. */
+export function isStarterPage(page) {
+  return Object.values(WORDS).some((w) => (
+    (page.type === "chapter" && page.title === w.firstChapter && page.text === w.opening)
+    || (page.type === "chapter" && page.title === w.secondChapter && !page.text)
+    || (page.type === "quote" && page.text === w.firstQuote)
+  ));
+}
+
 export function createPage(type, fields = {}) {
   const make = PAGE_DEFAULTS[type] || PAGE_DEFAULTS.blank;
   return { id: uid("pg"), type: PAGE_DEFAULTS[type] ? type : "blank", ...make(), ...fields };

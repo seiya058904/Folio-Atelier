@@ -163,6 +163,11 @@ let readingFit = 0;
 // screen height; 0.5 is what the inspection view was laid out for).
 let sheetShare = 0.5;
 let sheetShown = 0.5;
+// Reading mode: the workbench withdraws and the open spread fills the screen
+// (`readingAmount` eases the framing between the two).
+let readingMode = false;
+let readingAmount = 0;
+let quietTimer = 0;
 let detailSafeWidth = viewWidth * 0.6;
 let themeInitialized = false;
 let themeMoving = false;
@@ -1376,6 +1381,8 @@ function emitPageState(shouldAnnounce = false) {
 
 function setReadingOpen(open, shouldAnnounce = true) {
   if (mode !== "detail" || readingOpen === open) return;
+  // Shutting the book ends reading mode.
+  if (!open && readingMode) setReadingMode(false);
   cancelPageDrag();
   flushLeafQueue();
   if (open) flushPageRefresh();
@@ -1906,6 +1913,7 @@ function finishOpening() {
 
 function closeDetail() {
   if (mode !== "detail") return;
+  if (readingMode) setReadingMode(false);
   audio.playCue(readingOpen ? "close" : "select", {
     gain: readingOpen ? 1 : 0.72
   });
@@ -1996,7 +2004,9 @@ const VIEWS = {
   spine: { turn: -1.74, tilt: 0, zoom: 0.94 },
   back: { turn: Math.PI - 0.42, tilt: 0, zoom: 1 },
   details: { turn: 1.02, tilt: -0.36, zoom: 1.06 },
-  pages: { turn: -0.2, tilt: -0.1, zoom: 1.08 }
+  pages: { turn: -0.2, tilt: -0.1, zoom: 1.08 },
+  // Square on to the spread, looking a little down onto it, as a reader does.
+  reading: { turn: 0, tilt: -0.3, zoom: 1 }
 };
 
 function focusView(name) {
@@ -2008,6 +2018,11 @@ function focusView(name) {
   const home = new THREE.Spherical().setFromVector3(
     scratchVector.copy(inspectCameraPosition).sub(inspectCameraTarget)
   );
+  // Reading looks square onto the pages, whichever way the book is turned.
+  if (name === "reading" && activeBook) {
+    const facing = scratchVector.set(0, 0, 1).applyQuaternion(activeBook.root.quaternion);
+    view.turn = Math.atan2(facing.x, facing.z) - home.theta;
+  }
   viewTween.from.setFromVector3(scratchVector.copy(camera.position).sub(controls.target));
   viewTween.fromTarget.copy(controls.target);
   viewTween.to.set(
@@ -2075,6 +2090,7 @@ function frame(time) {
   updateLeaving(delta);
   updateTransition(delta);
   if (mode !== "detail" && readingFit > 0) updateReadingFit(delta);
+  if (mode !== "detail" && readingAmount > 0) updateReadingAmount(delta);
   updateDust();
   const themeIsMoving = updateTheme(delta);
 
@@ -2091,6 +2107,7 @@ function frame(time) {
     updatePaginatedBook(activeBook, delta, getDetailOpenAmount());
     updateReadingFit(delta);
     updateSheetShare(delta);
+    updateReadingAmount(delta);
     updateRebind(delta);
     updateRibbon(delta);
     updateGlint(delta);
@@ -2444,9 +2461,11 @@ function onKeyDown(event) {
   if (event.defaultPrevented || document.querySelector("dialog[open]")) return;
   const typing = isTyping(event.target);
 
+  if (readingMode) rouse();
   if (event.key === "Escape" && mode === "detail") {
     event.preventDefault();
     if (typing) event.target.blur();
+    else if (readingMode) setReadingMode(false);
     else closeDetail();
     return;
   }
@@ -2637,6 +2656,9 @@ async function initialize(options) {
   canvas.addEventListener("pointercancel", onPagePointerEnd, { capture: true });
   canvas.addEventListener("lostpointercapture", onPagePointerEnd, { capture: true });
   window.addEventListener("pointerup", onWindowPagePointerEnd);
+  window.addEventListener("pointerdown", onReadingPointerDown, true);
+  window.addEventListener("pointerup", onReadingPointerUp, true);
+  window.addEventListener("pointermove", () => { if (readingMode) rouse(); }, { passive: true });
   window.addEventListener("pointercancel", onWindowPagePointerEnd);
   experience.addEventListener("wheel", onWheel, { passive: false });
   canvas.addEventListener("webglcontextlost", handleContextLost);
@@ -2718,6 +2740,8 @@ export const engine = {
   focusView,
   resetView: resetInspectionView,
   setSheetShare,
+  setReadingMode,
+  get readingMode() { return readingMode; },
   resize,
   showFallback,
   get mode() { return mode; },
@@ -2970,7 +2994,7 @@ function resetPageDrag() {
   pageDrag.direction = 0;
   pageDrag.kind = null;
   canvas.classList.remove("is-page-dragging");
-  controls.enabled = mode === "detail";
+  controls.enabled = mode === "detail" && !readingMode;
   if (
     capturedPointerId !== null
     && canvas.hasPointerCapture?.(capturedPointerId)
@@ -3365,6 +3389,30 @@ function readingFrame() {
   return { zoom, shift: -(shut * 0.5) * pixelsPerWorld * zoom };
 }
 
+const plainCamera = new THREE.PerspectiveCamera();
+const spinePoint = new THREE.Vector3();
+
+/**
+ * Reading mode: the open spread as large as fits the whole screen, with its
+ * spine at the centre. Works out where the spine falls with an unshifted,
+ * unzoomed copy of the camera, then the zoom and the offset that centre it.
+ */
+function readingModeFrame() {
+  if (!activeBook) return { zoom: 1, x: 0, y: 0 };
+  const distance = Math.max(0.5, camera.position.distanceTo(activeBook.root.position));
+  const worldHeight = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
+  const pixelsPerWorld = viewHeight / worldHeight;
+  const scale = activeBook.root.scale.x;
+  const spread = activeBook.base.width * scale * 2.08 * pixelsPerWorld;
+  const tall = activeBook.base.height * scale * 1.1 * pixelsPerWorld;
+  const zoom = clamp(Math.min((viewWidth * 0.9) / spread, (viewHeight * 0.8) / tall), 0.5, 1.9);
+  plainCamera.copy(camera);
+  plainCamera.zoom = 1;
+  plainCamera.clearViewOffset();
+  activeBook.frontPivot.getWorldPosition(spinePoint).project(plainCamera);
+  return { zoom, x: spinePoint.x * zoom * viewWidth * 0.5, y: -spinePoint.y * zoom * viewHeight * 0.5 };
+}
+
 function applyDetailViewOffset() {
   let zoom = 1;
   let shift = 0;
@@ -3380,8 +3428,15 @@ function applyDetailViewOffset() {
     zoom *= clamp(room / 0.5, 0.42, 1.3);
     lift = (sheetShown - 0.5) * 0.5 * viewHeight;
   }
+  let offset = currentViewOffsetX + shift;
+  if (readingAmount > 0) {
+    const full = readingModeFrame();
+    const eased = ease.smooth(readingAmount);
+    zoom = lerp(zoom, full.zoom, eased);
+    offset = lerp(offset, full.x, eased);
+    lift = lerp(lift, full.y, eased);
+  }
   camera.zoom = zoom;
-  const offset = currentViewOffsetX + shift;
   if (Math.abs(offset) < 0.5 && Math.abs(lift) < 0.5) {
     camera.clearViewOffset();
     return;
@@ -3404,6 +3459,78 @@ function setSheetShare(share, immediate = false) {
     applyDetailViewOffset();
   }
   requestFrame();
+}
+
+function updateReadingAmount(delta) {
+  const want = readingMode && mode === "detail" ? 1 : 0;
+  if (readingAmount === want) {
+    // The camera may still be swinging round to face the pages: keep the spread centred.
+    if (want && cameraMotion) applyDetailViewOffset();
+    return;
+  }
+  readingAmount = reducedMotion ? want : damp(readingAmount, want, 5.5, delta);
+  if (Math.abs(readingAmount - want) < 0.002) readingAmount = want;
+  applyDetailViewOffset();
+  motion = true;
+}
+
+/*
+ * Reading mode. The panel withdraws, the book opens if it was shut and turns
+ * square to the reader, and the spread is framed on the whole screen. Pages
+ * turn with the arrow keys, a tap on either side, a swipe, or a drag of the
+ * page itself; the controls fade while the reader reads. Escape leaves.
+ */
+function setReadingMode(on) {
+  on = Boolean(on) && mode === "detail";
+  if (on === readingMode) return;
+  readingMode = on;
+  experience.classList.toggle("is-reading", on);
+  cancelPageDrag();
+  controls.enabled = !on;
+  if (on) {
+    if (!readingOpen) setReadingOpen(true, false);
+    focusView("reading");
+    announce(t("Reading. Use the arrow keys or tap either side to turn the page; Escape to leave."));
+  } else {
+    experience.classList.remove("is-quiet");
+    focusView("front");
+  }
+  rouse();
+  emit("onReadingMode", on);
+  requestFrame();
+}
+
+/** The reader moved: bring the controls back, and fade them again after a pause. */
+function rouse() {
+  clearTimeout(quietTimer);
+  experience.classList.remove("is-quiet");
+  if (readingMode) quietTimer = setTimeout(() => experience.classList.add("is-quiet"), 2600);
+}
+
+// A tap on either side of the screen turns the page; a swipe does too.
+const readingTap = { pointerId: null, x: 0, y: 0, at: 0 };
+
+function onReadingPointerDown(event) {
+  rouse();
+  if (!readingMode || event.target !== canvas || event.isPrimary === false) return;
+  Object.assign(readingTap, { pointerId: event.pointerId, x: event.clientX, y: event.clientY, at: performance.now() });
+}
+
+function onReadingPointerUp(event) {
+  if (!readingMode || readingTap.pointerId !== event.pointerId) return;
+  readingTap.pointerId = null;
+  // A page that was really dragged turns itself; a tap on a page is a tap.
+  if (pageDrag.active && (pageDrag.committed || pageDrag.direction !== 0)) return;
+  const dx = event.clientX - readingTap.x;
+  const dy = event.clientY - readingTap.y;
+  const quick = performance.now() - readingTap.at < 450;
+  if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4 && quick) {
+    turnPage(dx < 0 ? 1 : -1);
+  } else if (Math.hypot(dx, dy) < 8 && quick) {
+    const side = event.clientX / viewWidth;
+    if (side > 0.6) turnPage(1);
+    else if (side < 0.4) turnPage(-1);
+  }
 }
 
 function updateSheetShare(delta) {

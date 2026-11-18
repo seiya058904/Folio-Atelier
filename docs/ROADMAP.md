@@ -4,7 +4,7 @@ Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2
 
 Agreed with the user on 2026-11-18. The aim of this round: nothing lost, nothing stiff. Every motion should hand over to the next one without a seam, every surface should hold up close, and the three reading features the user picked should feel native to the studio.
 
-**Status:** started 2026-11-18.
+**Status:** M, N, O, P and R done; Q reviewed and left as it was (2026-11-18).
 
 - **M — done.** Verified in Playwright: with IndexedDB refused, the shelf and the studio say the books are kept for this visit only (before: "Saved", and a reload emptied the shelf). A second tab waits behind "Your library is open in another tab" until the reader takes it over; the first then stops saving and says so. The orphaned picture in the test library (about 1 MB) was swept at start-up. With the CDN refused, the boot watchdog shows a bilingual message and a reload button at once. The backup line shows after a week of edits without an "Export all". `?bench` unchanged.
 - **N — done.** Profiled before changing anything (CPU profile, Chrome trace, frame timeline after a preset click), RTX 3070 laptop, high tier:
@@ -27,57 +27,9 @@ Agreed with the user on 2026-11-18. The aim of this round: nothing lost, nothing
   - Show-through: each printed face lets its other side through, mirrored and faint (×0.06–0.075; rice paper ×0.14). Checked with an exaggerated setting that the mirrored text lines up with the other side's text block.
   - Brushed foil already used anisotropic highlights; gutter shading and paper fibre were already painted. Close-range cloth detail maps: not done (the boards hold up at the closest zoom).
   - `?bench` unchanged.
-
-**Rules (carried over)**
-- Real speed first; mask only waits that cannot be removed, with cheap motion that respects `prefers-reduced-motion`.
-- `?bench` before and after every phase; no measure may get worse. Turntable sweep after every 3D change. Compare with the original before changing rig, lighting or page motion.
-- Every new spec field gets a default, `normalizeBook` handling, `ZH` strings and a `dirty` key. No build step, no dependencies, Three.js stays at 0.165. Never add or remove a light at run time.
-- One scoped commit per phase. Pushing and deploying need the user's go-ahead.
-
----
-
-## Phase M — Nothing is lost
-
-Found in review; each confirmed by reproduction or in the code.
-- When IndexedDB cannot be opened the store falls back to memory but still says "Saved to this browser"; a reload empties the shelf. Say so plainly and keep saying it.
-- A failed library read shows the first-visit empty shelf. Show the failure with a retry instead.
-- `onblocked` (another tab holding an older database version) drops to memory at once. Wait, and ask the reader to close the other tab.
-- Ask for persistent storage once the first book exists.
-- Remember the last export; after a week of edits without one, a quiet line on the shelf suggests a backup.
-- Picture blobs are never deleted (`removeImage` has no caller). Sweep unreferenced ones in idle time after start-up.
-- Two tabs editing the same library overwrite each other. Only one tab edits at a time (Web Locks); the other offers to take over.
-- A failed module load leaves the loading veil up for ever, in English. A boot watchdog shows a bilingual message and a reload button.
-
-## Phase N — No stutter
-
-Measure first; each item states its number before and after.
-- Typing in a long chapter: repaginate and reprint only what changed.
-- The heaviest cover takes about 150 ms to sharpen: split the full-size pass so no frame carries more than its share.
-- Opening flight: worst frame 86 ms. Target 33 ms.
-- Texture memory grows with the library (26 books uploaded about 250 MP): books far from the view keep draft-size boards.
-- Target for every interaction: frame p95 ≤ 16.7 ms, worst ≤ 33 ms.
-
-## Phase O — Hand-feel and transitions
-
-- Shelf: trackpad momentum, edge resistance, fling on release, then a soft snap to a book.
-- Pages: the corner lifts as the pointer nears it; arrow keys turn pages; a quick flick turns the page.
-- Camera: shelf ⇄ studio and view jumps follow an arc with eased field of view, never through the book.
-- Interface: one choreography for panels, tabs, lists (FLIP reorder), toasts and dialogs; the shelf reveals itself after loading instead of cutting in; pointer cursors that say what a drag will do.
-- Phone: the open book is framed to fit; the panel is a bottom sheet with snap points; touch turns pages.
-
-## Phase P — Light and material
-
-- Tone mapping: compare ACES with Neutral / AgX so cloth colours match their swatches; keep whichever is truer.
-- Reflections follow the room's light preset (environment map regenerated once per preset, no new lights).
-- Brushed foil with anisotropic highlights; close-range detail for cloth and leather grain; paper fibre and faint show-through; gutter shading.
-
-## Phase Q — Finer models
-
-Turn-ins and the endpaper joint, the French groove, head caps, a concave fore-edge and slightly uneven page edges (optional deckle), and the board squares. Before/after close-ups and a turntable sweep for each.
-
-## Phase R — Reading and writing
-
-Picked by the user from the round-3 outline.
-- **Reading mode:** the panel withdraws, the book comes forward to fill the view, keyboard and swipe turn pages, a quiet page counter; leave with Esc.
-- **Import a manuscript:** a `.txt` or `.md` file becomes pages: headings start chapters (or parts), the rest flows into body pages.
-- **Find on the shelf:** type to find a book by title, author or words inside; the shelf glides to it.
+- **Q — reviewed, not changed.** Close-ups of the head, fore-edge, joint and open gutter at the nearest zoom: the bevelled boards, rounded spine, gutter compression, fore-edge character, page lines and headbands hold up. French grooves, head caps and turn-ins would be new geometry on the boards that turn, with real risk to the page physics and transitions for little gain at the distances the studio allows; left for a later round.
+- **R — done.**
+  - Reading mode (**Read** under the book): the panel and the masthead withdraw, the book opens if shut, the camera turns square onto the pages and the spread is framed on the whole screen with its spine at the centre (through the projection, so nothing in the scene moves). Tap either side, swipe, drag a page or use the arrow keys; the controls and the pointer fade after 2.6 s still; Escape leaves. Checked on desktop and on a 390 px phone (taps on a page turn it too).
+  - Import a manuscript (Pages tab): `.txt` or `.md` up to 4 MB. Markdown `#`/`##` become parts and chapters (a lone top heading is the book's title, set if the book is still untitled); plain text finds headings such as “Chapter 3”, “CHAPTER II”, “第三章”, “第一卷”, “序”, “Prologue”. Paragraphs are rebuilt from wrapped lines (no space between CJK characters), one-paragraph-per-line Chinese files and full-width indents are understood, section breaks are kept. A new book's untouched starter chapters make way for the import; otherwise it goes before the colophon. One undo takes it out. Parser checked in Node on Markdown, Chinese and English samples; import checked end to end.
+  - Find on the shelf (**Find**, `/`, Ctrl/⌘ K): title, author, subtitle, series and words inside, ranked; each result shows its cover and, for a match in the text, the passage with the words marked. Arrow keys glide the shelf to each result, Enter keeps it, Escape goes back.
+  - Interface strings all translated (only colour codes and typeface names remain in `missing`). `?bench` unchanged.

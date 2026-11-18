@@ -123,6 +123,12 @@ p {
   content: "";
   opacity: 0.6;
   pointer-events: none;
+  transition: opacity var(--duration-scene) var(--ease-out);
+}
+
+/* Reading: the room draws in around the book. */
+.experience.is-reading::after {
+  opacity: 1;
 }
 
 /* A breath of film grain keeps flat walls from looking synthetic. */
@@ -438,6 +444,60 @@ p {
     opacity: 0;
     transform: translateY(16px);
   }
+}
+
+/* ---------- reading mode: the workbench withdraws ---------- */
+
+.mode-detail.is-reading .studio {
+  opacity: 0;
+  transform: translateX(48px);
+  pointer-events: none;
+}
+
+.is-reading .masthead,
+.is-reading .audio-controls {
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+}
+
+.mode-detail.is-reading:not(.is-opening) .reader-bar {
+  left: 50%;
+  transition:
+    opacity var(--duration-slow) var(--ease-out),
+    transform var(--duration-scene) var(--ease-out),
+    left var(--duration-scene) var(--ease-out),
+    background-color var(--duration-tint) var(--ease-out);
+}
+
+.is-reading #toggle-book,
+.is-reading #reset-view {
+  display: none;
+}
+
+/* While the reader reads, the controls (and the pointer) fade away. */
+.mode-detail.is-reading.is-quiet:not(.is-opening) .reader-bar {
+  opacity: 0;
+  transform: translate(-50%, 10px);
+}
+
+.is-reading.is-quiet #scene {
+  cursor: none;
+}
+
+.reader-bar__read {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.reader-bar__read svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
 }
 
 /* ---------- empty shelf ---------- */
@@ -1893,6 +1953,152 @@ p {
   transform: scale(0.96);
 }
 
+/* ---------- finder: a book by title, author or words inside ---------- */
+
+.finder {
+  position: absolute;
+  top: clamp(64px, 12vh, 120px);
+  left: 50%;
+  z-index: 30;
+  display: grid;
+  width: min(calc(100vw - 2 * var(--edge)), 520px);
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--paper-pale) 88%, transparent);
+  box-shadow: 0 24px 60px color-mix(in srgb, var(--ink) 18%, transparent), 0 2px 8px color-mix(in srgb, var(--ink) 8%, transparent);
+  backdrop-filter: blur(18px) saturate(1.1);
+  transform: translateX(-50%);
+  transform-origin: 50% 0;
+  animation: finder-in var(--duration-base) var(--ease-out) both;
+}
+
+@keyframes finder-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px) scale(0.98);
+  }
+}
+
+.finder.is-leaving {
+  opacity: 0;
+  transform: translate(-50%, -6px) scale(0.985);
+  transition: opacity var(--duration-quick) var(--ease-out), transform var(--duration-quick) var(--ease-out);
+}
+
+.finder__field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+}
+
+.finder__field svg {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: var(--ink-soft);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.finder__input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 1.28rem;
+  outline: none;
+}
+
+.finder__input::placeholder {
+  color: color-mix(in srgb, var(--ink-soft) 70%, transparent);
+}
+
+.finder kbd {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+}
+
+.finder__results {
+  display: grid;
+  max-height: min(56vh, 460px);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.finder__results:empty {
+  display: none;
+}
+
+.finder__result {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  animation: pane-in var(--duration-base) var(--ease-out) both;
+  transition: background-color var(--duration-quick) var(--ease-out);
+}
+
+.finder__result[aria-selected="true"] {
+  background: var(--wash);
+}
+
+.finder__result canvas {
+  width: 30px;
+  height: 45px;
+  border-radius: 2px 3px 3px 2px;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--ink) 22%, transparent);
+}
+
+.finder__title {
+  overflow: hidden;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder__meta {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-size: 0.66rem;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder__meta mark,
+.finder__title mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: inherit;
+}
+
+.finder__empty {
+  margin: 0;
+  padding: 4px 12px 10px;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+}
+
 /* Something to answer before going on: the room dims behind a card. */
 .interrupt {
   position: fixed;
@@ -2129,6 +2335,14 @@ p {
       transform var(--duration-scene) var(--ease-out),
       height var(--duration-base) var(--ease-out),
       background-color var(--duration-tint) var(--ease-out);
+  }
+
+  .mode-detail.is-reading .studio {
+    transform: translateY(100%);
+  }
+
+  .mode-detail.is-reading .reader-bar {
+    bottom: calc(var(--edge) + env(safe-area-inset-bottom, 0px));
   }
 
   .mode-detail.is-sheet-high .reader-bar {

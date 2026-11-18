@@ -383,7 +383,23 @@ const ZH = {
   "Your books were last exported {when}. Clearing site data would remove them.": "上次导出书库是{when}。清除网站数据会删掉这些书。",
   "Your books live only in this browser. Export a copy to keep them safe.": "你的书只保存在这个浏览器里。导出一份副本更安心。",
   "Not now": "稍后",
-  "Resize the panel": "调整面板高度"
+  "Resize the panel": "调整面板高度",
+  "Read": "阅读",
+  "Leave reading": "退出阅读",
+  "Bring in a manuscript": "导入文稿",
+  "Find": "查找",
+  "Find a book": "查找书籍",
+  "Title, author or words inside": "书名、作者或书中文字",
+  "Books found": "找到的书",
+  "No book on the shelf matches “{query}”.": "书架上没有与“{query}”相符的书。",
+  "In the text": "书中",
+  "Import a .txt or .md file": "导入 .txt 或 .md 文件",
+  "Headings become chapters: ## in Markdown (with # for parts), or lines such as “Chapter 3” or “第三章” in plain text. Undo takes the import out again.": "标题会变成章节：Markdown 用 ##（# 为卷），纯文本中“第三章”“Chapter 3”这样独占一行的标题也能识别。撤销即可把导入的内容整个移除。",
+  "That manuscript is too large to import (4 MB at most).": "文稿太大，无法导入（最多 4 MB）。",
+  "No text was found in that file.": "这个文件里没有找到文字。",
+  "Imported “{name}”: 1 chapter.": "已导入《{name}》：1 章。",
+  "Imported “{name}”: {count} chapters.": "已导入《{name}》：{count} 章。",
+  "Reading. Use the arrow keys or tap either side to turn the page; Escape to leave.": "阅读模式。用方向键或轻点屏幕两侧翻页，按 Esc 退出。"
 };
 
 function detect() {

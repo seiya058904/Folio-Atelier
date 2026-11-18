@@ -141,7 +141,8 @@ async function start() {
           library.refresh();
         }
       },
-      onPageState: (state) => studio?.renderPageState(state)
+      onPageState: (state) => studio?.renderPageState(state),
+      onReadingMode: (on) => studio?.renderReading(on)
     }
   });
   if (!ready) return;

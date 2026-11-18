@@ -120,6 +120,7 @@
       <nav class="index-nav" aria-label="Library" data-i18n-attrs="aria-label">
         <div class="room-panel" id="room-panel" role="group" aria-label="Room" data-i18n-attrs="aria-label" hidden></div>
         <div class="index-nav__actions">
+          <button class="link-button" id="find-book" type="button" aria-haspopup="dialog" aria-controls="finder" title="/" data-i18n>Find</button>
           <button class="link-button" id="room-button" type="button" aria-expanded="false" aria-controls="room-panel" data-i18n>Room</button>
           <button class="link-button" id="import-book" type="button" data-i18n>Import</button>
           <button class="link-button" id="export-library" type="button" data-i18n>Export all</button>
@@ -169,6 +170,10 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 3.5 4.5 4.5-4.5 4.5"></path></svg>
       </button>
       <span class="reader-bar__rule" aria-hidden="true"></span>
+      <button class="link-button reader-bar__read" id="reading-mode" type="button" aria-pressed="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4.2C6.6 3.2 4.6 2.9 2.5 3.2v8.6c2.1-.3 4.1 0 5.5 1 1.4-1 3.4-1.3 5.5-1V3.2c-2.1-.3-4.1 0-5.5 1Zm0 0v8.8"></path></svg>
+        <span id="reading-mode-label" data-i18n>Read</span>
+      </button>
       <button class="link-button" id="toggle-book" type="button" aria-pressed="false" data-i18n>Open book</button>
       <button class="link-button" id="reset-view" type="button" data-i18n>Reset view</button>
     </div>
@@ -218,6 +223,19 @@
 
     <input id="import-file" type="file" accept=".folio,.json,application/json" hidden>
     <input id="image-file" type="file" accept="image/*" hidden>
+    <input id="manuscript-file" type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" hidden>
+
+    <!-- Find a book on the shelf by its title, author or words inside. -->
+    <div class="finder" id="finder" role="dialog" aria-label="Find a book" data-i18n-attrs="aria-label" hidden>
+      <label class="finder__field">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6"></circle><path d="m10.4 10.4 3.6 3.6"></path></svg>
+        <span class="sr-only" data-i18n>Find a book</span>
+        <input class="finder__input" id="finder-input" type="text" role="combobox" aria-expanded="true" aria-controls="finder-results" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Title, author or words inside" data-i18n-attrs="placeholder">
+        <kbd>Esc</kbd>
+      </label>
+      <ol class="finder__results" id="finder-results" role="listbox" aria-label="Books found" data-i18n-attrs="aria-label"></ol>
+      <p class="finder__empty" id="finder-empty" hidden></p>
+    </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>

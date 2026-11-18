@@ -23,6 +23,7 @@ import { t } from "../i18n.js";
 import { whenIdle } from "../motion.js";
 import { perf } from "../perf.js";
 import { addImage, getImage } from "../state/images.js";
+import { parseManuscript } from "../state/manuscript.js";
 import {
   PAGE_TYPES,
   TRIMS,
@@ -31,7 +32,8 @@ import {
   applyPreset,
   createPage,
   layerText,
-  secondFoilFor
+  secondFoilFor,
+  isStarterPage
 } from "../state/schema.js";
 import { PAGE_INKS, PAGE_SIZE, paintPage } from "../textures/pages.js";
 import { buildPdf, encodeGif } from "../share.js";
@@ -110,6 +112,7 @@ export function createStudioUi({ store, engine, audio }) {
   const undoButton = $("#undo");
   const redoButton = $("#redo");
   const closeButton = $("#close-detail");
+  const manuscriptInput = $("#manuscript-file");
   const readerBar = $("#reader-bar");
   const previousPage = $("#previous-page");
   const nextPage = $("#next-page");
@@ -1584,6 +1587,50 @@ export function createStudioUi({ store, engine, audio }) {
       setTimeout(() => jumpToPage(page.id), 260);
     };
 
+    /*
+     * A manuscript becomes pages: parts, chapters, and any opening text as a
+     * body page. The starter chapters of a new book make way for it;
+     * otherwise it goes before the colophon. One edit, so one undo.
+     */
+    const importManuscript = async () => {
+      const file = await pickFile(manuscriptInput);
+      if (!file) return;
+      if (file.size > 4_000_000) {
+        toast(t("That manuscript is too large to import (4 MB at most)."));
+        return;
+      }
+      let parsed = null;
+      try {
+        parsed = parseManuscript(await file.text(), { name: file.name });
+      } catch (error) {
+        parsed = null;
+      }
+      const sections = parsed?.sections || [];
+      if (!sections.length) {
+        toast(t("No text was found in that file."));
+        return;
+      }
+      const pages = sections.map((section) => {
+        if (section.kind === "part") return createPage("part", { title: section.title, text: section.text });
+        if (section.kind === "body") return createPage("body", { heading: "", text: section.text });
+        return createPage("chapter", { title: section.title, text: section.text });
+      });
+      selectedPageId = pages.find((page) => page.type === "chapter")?.id || pages[0].id;
+      const untitled = !book().title || book().title === t("Untitled");
+      edit(() => {
+        const list = book().pages;
+        const starters = list.filter(isStarterPage);
+        let at = starters.length ? list.indexOf(starters[0]) : list.length;
+        if (!starters.length && list[list.length - 1]?.type === "colophon") at = list.length - 1;
+        starters.forEach((page) => list.splice(list.indexOf(page), 1));
+        list.splice(Math.min(at, list.length), 0, ...pages);
+        if (parsed.title && untitled) book().title = parsed.title;
+      }, parsed.title && untitled ? ["pages", "meta"] : ["pages"], { rerender: true });
+      const chapters = pages.filter((page) => page.type === "chapter").length;
+      toast(t(chapters === 1 ? "Imported “{name}”: 1 chapter." : "Imported “{name}”: {count} chapters.", { name: file.name, count: chapters }));
+      setTimeout(() => jumpToPage(selectedPageId), 260);
+    };
+
     return [
       group("Pages", "Select a page to edit it and to turn the book to it. Drag to reorder.",
         pageList(),
@@ -1593,6 +1640,11 @@ export function createStudioUi({ store, engine, audio }) {
           h("div", { class: "add-pages" }, PAGE_TYPES.map((type) => h("button", {
             class: "chip", type: "button", title: t(type.note), text: t(type.label), onclick: () => addPage(type.id)
           })))
+        ),
+        h("div", { class: "field manuscript" },
+          h("span", { class: "field__label", text: t("Bring in a manuscript") }),
+          h("button", { class: "link-button", type: "button", text: t("Import a .txt or .md file"), onclick: importManuscript }),
+          h("p", { class: "group__hint", text: t("Headings become chapters: ## in Markdown (with # for parts), or lines such as “Chapter 3” or “第三章” in plain text. Undo takes the import out again.") })
         )
       ),
       group("Typography", "Applies to every page in the book.",
@@ -1967,6 +2019,17 @@ export function createStudioUi({ store, engine, audio }) {
   previousPage.addEventListener("click", () => engine.turnPage(-1));
   nextPage.addEventListener("click", () => engine.turnPage(1));
   toggleBook.addEventListener("click", () => engine.toggleReading());
+  const readingButton = $("#reading-mode");
+  const readingLabel = $("#reading-mode-label");
+  readingButton.addEventListener("click", () => engine.setReadingMode(!engine.readingMode));
+
+  /** Reading mode on or off: the button says how to leave, and the panel leaves the tab order. */
+  function renderReading(on) {
+    readingLabel.textContent = t(on ? "Leave reading" : "Read");
+    readingButton.setAttribute("aria-pressed", String(on));
+    if (bookId) panel.inert = on;
+    if (on && panel.contains(document.activeElement)) readingButton.focus({ preventScroll: true });
+  }
   $("#reset-view").addEventListener("click", () => engine.resetView());
 
   tabsElement.addEventListener("keydown", (event) => {
@@ -2033,7 +2096,8 @@ export function createStudioUi({ store, engine, audio }) {
     renderTabs(true);
     renderBody({ keepScroll: true });
     renderPageState(engine.pageState);
+    renderReading(engine.readingMode);
   }
 
-  return { show, hide, relocalize, renderPageState, focus: () => closeButton.focus({ preventScroll: true }) };
+  return { show, hide, relocalize, renderPageState, renderReading, focus: () => closeButton.focus({ preventScroll: true }) };
 }

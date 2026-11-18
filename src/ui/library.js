@@ -376,6 +376,178 @@ export function createLibraryUi({ store, engine, audio }) {
     return book;
   }
 
+  /* ----- find a book: by title, author, series or words inside ----- */
+
+  // Type to find; the shelf glides to each result as it is chosen with the
+  // arrow keys, Enter keeps it, Escape goes back to where the reader was.
+  const finder = $("#finder");
+  const finderInput = $("#finder-input");
+  const finderResults = $("#finder-results");
+  const finderEmpty = $("#finder-empty");
+  const findButton = $("#find-book");
+  const finderThumbs = new Map(); // book id -> { stamp, canvas }
+  let finderMatches = [];
+  let finderActive = 0;
+  let finderTimer = 0;
+  let finderFrom = -1;
+
+  const fold = (text) => String(text || "").toLowerCase();
+  const pageWords = (page) => [page.title, page.heading, page.text, page.caption, page.attribution, page.imprint]
+    .filter(Boolean).join("\n");
+
+  function searchBooks(query) {
+    const needle = fold(query.trim());
+    if (!needle) return [];
+    const found = [];
+    store.books.forEach((book, index) => {
+      const title = fold(book.title);
+      let score = title.startsWith(needle) ? 100 : title.includes(needle) ? 80 : 0;
+      let snippet = null;
+      if (!score && [book.author, book.subtitle, book.series].some((field) => fold(field).includes(needle))) score = 60;
+      if (!score) {
+        for (const page of book.pages) {
+          const words = pageWords(page);
+          const at = fold(words).indexOf(needle);
+          if (at >= 0) {
+            score = 30;
+            snippet = { words, at };
+            break;
+          }
+        }
+      }
+      if (score) found.push({ book, index, score, snippet });
+    });
+    return found.sort((a, b) => b.score - a.score || a.index - b.index).slice(0, 8);
+  }
+
+  /** `text` with the first `needle` marked. */
+  function marked(text, needle) {
+    const at = fold(text).indexOf(fold(needle));
+    if (!needle || at < 0) return [text];
+    return [text.slice(0, at), h("mark", { text: text.slice(at, at + needle.length) }), text.slice(at + needle.length)];
+  }
+
+  function finderThumb(book) {
+    const stamp = book.updatedAt || book.createdAt || 0;
+    let entry = finderThumbs.get(book.id);
+    if (!entry || entry.stamp !== stamp) {
+      const canvas = h("canvas", { width: 60, height: 90, "aria-hidden": "true" });
+      drawCoverThumb(canvas, book);
+      entry = { stamp, canvas };
+      finderThumbs.set(book.id, entry);
+    }
+    return entry.canvas;
+  }
+
+  function renderFinder() {
+    const query = finderInput.value;
+    finderMatches = searchBooks(query);
+    finderActive = 0;
+    finderResults.replaceChildren(...finderMatches.map((match, position) => {
+      const { book, snippet } = match;
+      let meta;
+      if (snippet) {
+        const start = Math.max(0, snippet.at - 24);
+        const piece = snippet.words.slice(start, snippet.at + query.trim().length + 44).replace(/\s+/g, " ");
+        meta = [t("In the text"), " · ", start > 0 ? "…" : "", ...marked(piece, query.trim()), "…"];
+      } else {
+        meta = [...marked([book.author, bindingLabel(book)].filter(Boolean).join("  ·  "), query.trim())];
+      }
+      return h("li", {
+        class: "finder__result",
+        id: `finder-option-${position}`,
+        role: "option",
+        "aria-selected": String(position === 0),
+        style: { animationDelay: `calc(var(--stagger) * ${(position * 0.3).toFixed(2)})` },
+        onpointerenter: () => setFinderActive(position, false),
+        onclick: () => chooseFinder(position)
+      },
+        finderThumb(book),
+        h("div", {},
+          h("div", { class: "finder__title" }, ...marked(book.title, snippet ? "" : query.trim())),
+          h("div", { class: "finder__meta" }, ...meta)
+        ));
+    }));
+    finderInput.setAttribute("aria-activedescendant", finderMatches.length ? "finder-option-0" : "");
+    finderEmpty.hidden = Boolean(finderMatches.length) || !query.trim();
+    finderEmpty.textContent = t("No book on the shelf matches “{query}”.", { query: query.trim() });
+  }
+
+  function setFinderActive(position, preview = true) {
+    if (!finderMatches.length) return;
+    finderActive = (position + finderMatches.length) % finderMatches.length;
+    finderResults.querySelectorAll("[role='option']").forEach((option, index) => {
+      option.setAttribute("aria-selected", String(index === finderActive));
+      if (index === finderActive) option.scrollIntoView({ block: "nearest" });
+    });
+    finderInput.setAttribute("aria-activedescendant", `finder-option-${finderActive}`);
+    // The shelf glides to the book under consideration.
+    if (preview) engine.select(finderMatches[finderActive].index);
+  }
+
+  function chooseFinder(position) {
+    const match = finderMatches[position];
+    if (!match) return;
+    finderFrom = -1;
+    closeFinder();
+    engine.select(match.index, findButton);
+    renderSelection();
+  }
+
+  function openFinder() {
+    if (engine.mode !== "hero" || !store.books.length || !finder.hidden) return;
+    finderFrom = engine.selectedIndex;
+    finder.classList.remove("is-leaving");
+    finder.hidden = false;
+    findButton.setAttribute("aria-expanded", "true");
+    finderInput.value = "";
+    renderFinder();
+    finderInput.focus({ preventScroll: true });
+  }
+
+  function closeFinder({ restore = false, refocus = true } = {}) {
+    if (finder.hidden || finder.classList.contains("is-leaving")) return;
+    if (restore && finderFrom >= 0 && finderFrom !== engine.selectedIndex) engine.select(finderFrom);
+    finderFrom = -1;
+    findButton.setAttribute("aria-expanded", "false");
+    finder.classList.add("is-leaving");
+    setTimeout(() => {
+      finder.hidden = true;
+      finder.classList.remove("is-leaving");
+    }, 180);
+    if (refocus) findButton.focus({ preventScroll: true });
+  }
+
+  finderInput.addEventListener("input", () => {
+    clearTimeout(finderTimer);
+    finderTimer = setTimeout(renderFinder, 60);
+  });
+  finderInput.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setFinderActive(finderActive + (event.key === "ArrowDown" ? 1 : -1));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      chooseFinder(finderActive);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeFinder({ restore: true });
+    }
+  });
+  findButton.addEventListener("click", () => (finder.hidden ? openFinder() : closeFinder({ restore: true })));
+  document.addEventListener("pointerdown", (event) => {
+    if (!finder.hidden && !finder.contains(event.target) && event.target !== findButton) closeFinder({ refocus: false });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || engine.mode !== "hero" || document.querySelector("dialog[open]")) return;
+    const typing = event.target instanceof HTMLElement && event.target.closest("input, textarea, [contenteditable='true']");
+    const shortcut = (event.key === "/" && !typing) || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k");
+    if (!shortcut) return;
+    event.preventDefault();
+    openFinder();
+  });
+
   /* ----- the room: shelf and light, kept for this library ----- */
 
   const ROOM_KEY = "folio-atelier-room";

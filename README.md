@@ -113,6 +113,7 @@ Four trim sizes — pocket, crown octavo, standard and large — and a thickness
       <h3>Write it, and it is typeset</h3>
       <p>Fourteen page templates: half-title, title page, dedication, epigraph, contents, part title, chapter opener, body text, verse, pull quote, plate, colophon, blank, and notebook pages — lined, dot grid or squared, as many as you like.</p>
       <p>Long text flows onto as many pages as it needs. The contents page builds itself, and <code>***</code> on its own line sets a section break.</p>
+      <p><strong>Import a manuscript</strong> from a <code>.txt</code> or <code>.md</code> file: headings become parts and chapters (<code>#</code> / <code>##</code>, or lines such as “Chapter 3” or “第三章”), and the rest flows in as text.</p>
       <p>Choose leading, chapter-opening style, page-number position and ink colour. Latin and CJK text are both set properly.</p>
     </td>
   </tr>
@@ -122,9 +123,12 @@ Four trim sizes — pocket, crown octavo, standard and large — and a thickness
 
 | Action | How |
 | --- | --- |
+| **Browse the shelf** | Scroll, or drag the shelf (swipe on a phone): it carries on with your hand and settles on a book |
+| **Find a book** | **Find**, or press `/` or Ctrl/⌘ K: title, author or words inside; the shelf glides to each result |
 | **Orbit and zoom** | Drag and scroll (or touch gestures) |
 | **Open or close the cover** | Click the book, or **Open book** / **Close book** |
-| **Turn pages** | Drag a page edge for curved page-turn physics, or use the arrows |
+| **Turn pages** | Drag a page (its corner lifts as you near the edge), or use the arrows |
+| **Read** | **Read** under the book: the panel steps aside and the spread fills the screen; tap either side, swipe or use the arrow keys; Esc to leave |
 | **Jump the camera** | Front, spine, back, or the edges |
 | **Undo / redo** | The arrows at the top of the studio panel |
 | **Switch language** | **EN / 中** at the top of the page |
@@ -148,9 +152,9 @@ Each book also chooses the language of its own printed labels, so a book can say
 
 ## 📚 Keep a Library
 
-Books save automatically in your browser (IndexedDB). Duplicate or delete a volume, **export** it — or **export all** the books, their pictures and the room in one `.folio` file — and **import** it on another device or browser. Nothing is uploaded anywhere.
+Books save automatically in your browser (IndexedDB). Duplicate or delete a volume, **export** it — or **export all** the books, their pictures and the room in one `.folio` file — and **import** it on another device or browser. Nothing is uploaded anywhere. The shelf reminds you, quietly, when a week of work has gone by without a backup; if the browser refuses to keep anything (some private modes), it says so plainly. One tab edits the library at a time, so two tabs never save over each other.
 
-The **Room** panel on the shelf sets the scene for the whole library: a walnut, oak, painted, black-steel or floating-ledge shelf, in studio, morning, golden-hour or night light (with a desk lamp, and a darker interface). The room keeps its colours whichever book you look at, unless you ask it to **follow the book**. **Drag a book** along the shelf, or press Alt and an arrow key, to put your library in order; the order is kept.
+The **Room** panel on the shelf sets the scene for the whole library: a walnut, oak, painted, black-steel or floating-ledge shelf, in studio, morning, golden-hour or night light (with a desk lamp, and a darker interface). The room keeps its colours whichever book you look at, unless you ask it to **follow the book**. **Drag a book** along the shelf (on a touch screen, hold it first), or press Alt and an arrow key, to put your library in order; the order is kept.
 
 ## 📤 Share a Book
 
@@ -190,7 +194,7 @@ Then open <http://localhost:4173>. An internet connection is needed for the pinn
 | [`src/book/rig.js`](src/book/rig.js) | The hardcover: boards, rounded spine, hinges, leaves, edges, foil layers |
 | [`src/scene/quality.js`](src/scene/quality.js) | Rendering tiers |
 | [`src/textures/`](src/textures/) | Procedural painters: materials, covers, patterns, ornaments, typesetting, pages |
-| [`src/state/`](src/state/) | `BookSpec` schema, store with undo, IndexedDB, images |
+| [`src/state/`](src/state/) | `BookSpec` schema, store with undo, IndexedDB, images, manuscript import |
 | [`src/data/`](src/data/) | Starting bindings and typefaces |
 | [`src/ui/`](src/ui/) | Shelf interface, studio workbench, controls |
 | [`src/i18n.js`](src/i18n.js) | English / Simplified Chinese interface strings |
