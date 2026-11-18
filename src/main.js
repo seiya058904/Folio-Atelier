@@ -70,6 +70,8 @@ function loadingStage(amount) {
 
 async function start() {
   window.__folioStarted = true;
+  // Booted: a later update may heal itself again (see the watchdog in index.html).
+  try { sessionStorage.removeItem("folio-atelier-healed"); } catch (error) { /* private mode */ }
   loadingStage(0.28);
   clearTimeout(window.__folioBootTimer);
   document.querySelector("#interrupt").hidden = true;

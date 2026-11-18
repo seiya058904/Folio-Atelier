@@ -291,10 +291,39 @@
         var button = document.getElementById("interrupt-action");
         button.textContent = copy.reload;
         button.hidden = false;
-        button.onclick = function () { location.reload(); };
+        button.onclick = function () { button.disabled = true; fresh(); };
         element.hidden = false;
       }
-      window.__folioBootFailed = function () { show(true); };
+      // Fetch this page's scripts and styles again past the HTTP cache, then
+      // reload: right after an update the browser may hold some old modules
+      // beside new ones, and a plain reload would assemble the same mix.
+      function fresh() {
+        var urls = [new URL("./src/main.js", location.href).href];
+        try {
+          performance.getEntriesByType("resource").forEach(function (entry) {
+            if (entry.name.indexOf(location.origin) === 0 && /\.(js|css)(\?|$)/.test(entry.name)) urls.push(entry.name);
+          });
+        } catch (error) {}
+        Promise.all(urls.map(function (url) {
+          return fetch(url, { cache: "reload" }).catch(function () {});
+        })).then(function () { location.reload(); });
+      }
+      // A module that does not match its neighbours fails to link: heal once
+      // by itself, quietly; if that does not help, say so.
+      function failed() {
+        if (window.__folioStarted) return;
+        var healed = false;
+        try {
+          healed = sessionStorage.getItem("folio-atelier-healed") === "1";
+          sessionStorage.setItem("folio-atelier-healed", "1");
+        } catch (error) { healed = true; }
+        if (healed) show(true);
+        else fresh();
+      }
+      window.addEventListener("error", function (event) {
+        if (!window.__folioStarted && /SyntaxError|module|export/i.test(String(event && event.message))) failed();
+      });
+      window.__folioBootFailed = failed;
       window.__folioBootTimer = setTimeout(function () { show(false); }, 20000);
     })();
   </script>
