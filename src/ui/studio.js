@@ -352,6 +352,19 @@ export function createStudioUi({ store, engine, audio }) {
   /** The book without its pages: all a cover preview needs, and cheap to copy. */
   const coverSample = () => deepClone({ ...book(), pages: [] });
 
+  /** Prefetch the grain of the book `make(value)` when a tile is hovered or pressed. */
+  function aheadOfClick(container, make) {
+    let last = null;
+    const guess = (event) => {
+      const value = event.target.closest?.("[data-value]")?.dataset.value;
+      if (!value || value === last) return;
+      last = value;
+      engine.prefetchGrain(make(value));
+    };
+    container.addEventListener("pointerover", guess);
+    container.addEventListener("pointerdown", guess);
+  }
+
   /** A cover tile. `make()` returns the book the tile should show. */
   function coverThumb(make) {
     const canvas = h("canvas", { class: "tile__art", width: 132, height: 198 });
@@ -748,6 +761,15 @@ export function createStudioUi({ store, engine, audio }) {
       options: MATERIALS,
       render: (option) => materialThumb(option.id),
       onChange: (value) => edit(() => { book().material.kind = value; }, ["material"])
+    });
+    // The pointer resting on a tile (or a finger coming down on it) is a
+    // good guess at the next click: its grain is painted ahead, off the main
+    // thread, so the board only has to copy it.
+    aheadOfClick(presetTiles, (id) => applyPreset(coverSample(), id));
+    aheadOfClick(materialTiles, (id) => {
+      const sample = coverSample();
+      sample.material.kind = id;
+      return sample;
     });
 
     return [

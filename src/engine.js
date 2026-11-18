@@ -21,10 +21,11 @@ import { detectQuality, lowerQuality } from "./scene/quality.js";
 import { t } from "./i18n.js";
 import { ease, stepSpring, whenIdle } from "./motion.js";
 import { perf } from "./perf.js";
-import { bookPalette, coverFontRuns } from "./state/schema.js";
+import { bookPalette, coverFontRuns, createBook } from "./state/schema.js";
 import { bindRenderer } from "./textures/gl.js";
+import { prefetchBoardGrain } from "./textures/faces.js";
 import { forgetMeasurements, pageFontRuns, paginate } from "./textures/pages.js";
-import { getContactShadowTexture } from "./textures/surface.js";
+import { MATERIAL_LOOK, getContactShadowTexture, getMaterialMaps } from "./textures/surface.js";
 import { ATELIER_PALETTE, seededRandom } from "./util.js";
 
 const WOOD_TEXTURE_URL = "./assets/walnut.webp";
@@ -699,6 +700,8 @@ function warmStep(deadline) {
   // still (an ambient frame may wait, nobody sees it) or when it is overdue.
   const still = position === targetPosition && wheelIdle <= 0;
   const roomy = deadline.didTimeout || (still && deadline.timeRemaining() > 2);
+  // The book at rest in front is the likeliest to be opened.
+  if (still && bookRigs[selectedIndex]) prefetchBoardGrain(bookRigs[selectedIndex].data, quality.detail);
   const near = bookRigs
     .map((rig, index) => [Math.abs(index - targetPosition), rig])
     .filter(([distance]) => distance <= WARM_RANGE)
@@ -744,6 +747,36 @@ function compileQuietly(object) {
   return done;
 }
 
+/* ----- the first book: compiled before it is made ----- */
+
+// On an empty shelf nothing has been compiled, and the first book used to pay
+// for every program it needs (well over a second on ANGLE) in the frame it
+// appeared. A stand-in binding is compiled in idle time instead, with its
+// studio variants, and kept (unpainted, never drawn) until a real book holds
+// the same programs.
+let standIn = null;
+
+function prewarmFirstBook() {
+  if (standIn || bookRigs.length || !renderer || suspended) return;
+  const rig = createBookRig(createBook(), { resolution: quality.shelf, lazy: true });
+  standIn = rig;
+  const variants = rig.shaderVariants();
+  whenIdle(() => {
+    if (standIn !== rig || !renderer) return;
+    compileQuietly(rig.root).then(() => whenIdle(() => {
+      if (standIn === rig && renderer) compileQuietly(variants);
+    }, 2000));
+  }, 2000);
+}
+
+function releaseStandIn() {
+  if (!standIn) return;
+  const rig = standIn;
+  standIn = null;
+  // Once the real book has drawn, its own materials hold the programs.
+  setTimeout(() => rig.dispose(), 4000);
+}
+
 /* ----- shader variants for the studio ----- */
 
 // Edits in the studio can switch a material feature on or off (a silk cloth
@@ -755,6 +788,17 @@ let variantsWarm = false;
 function prewarmVariants() {
   if (variantsWarm || !activeBook || !renderer || mode !== "detail") return;
   variantsWarm = true;
+  // Every covering's normal and roughness maps (about 20 ms of arithmetic
+  // each, the first time), one per quiet moment, so choosing one is a copy.
+  const kinds = Object.keys(MATERIAL_LOOK);
+  const mapsNext = (deadline) => {
+    while (kinds.length && (deadline.didTimeout || deadline.timeRemaining() > 24)) {
+      getMaterialMaps(kinds.shift());
+      if (deadline.didTimeout) break;
+    }
+    if (kinds.length) whenIdle(mapsNext, 3000);
+  };
+  whenIdle(mapsNext, 3000);
   const stands = [...activeBook.shaderVariants().children];
   const release = (batch) => batch.forEach((stand) => {
     // Keep the material (it holds the program); let go of the book's canvases.
@@ -792,6 +836,7 @@ function buildRig(book) {
 }
 
 function addBook(book, index = bookRigs.length, { from = null } = {}) {
+  releaseStandIn();
   const rig = buildRig(book);
   bookRigs.splice(index, 0, rig);
   rebuildHitTargets();
@@ -835,6 +880,7 @@ function removeBook(id) {
   }
   rebuildHitTargets();
   hoveredIndex = -1;
+  if (!bookRigs.length) whenIdle(prewarmFirstBook, 3000);
   const shifted = selectedIndex > index ? selectedIndex - 1 : selectedIndex;
   const next = clamp(shifted, 0, Math.max(0, bookRigs.length - 1));
   selectedIndex = -2;
@@ -918,8 +964,11 @@ function scheduleSettle(delay) {
  * while a book flies between the shelf and the studio.
  */
 function settleDrafts() {
-  if (mode === "opening" || mode === "closing") {
-    settleTimer = setTimeout(settleDrafts, 120);
+  // Not while the book flies, nor during the rebinding swing of a preset:
+  // a full-size board is tens of milliseconds, and a frame lost in motion is
+  // seen where one lost at rest is not. The draft carries the swing.
+  if (mode === "opening" || mode === "closing" || rebindTime < 1) {
+    settleTimer = setTimeout(settleDrafts, rebindTime < 1 ? 60 : 120);
     return;
   }
   const order = [...draftRigs].sort((a, b) => Number(b === activeBook) - Number(a === activeBook));
@@ -1181,9 +1230,9 @@ function leafBaseFor(rig, spread) {
   return clamp(spread - 2, 0, Math.max(0, rig.leafCount - PRINTED_LEAVES));
 }
 
-function printLeaf(rig, pivot, leaf) {
+function printLeaf(rig, pivot, leaf, sides = [0, 1]) {
   pivot.userData.leaf = leaf;
-  [0, 1].forEach((side) => {
+  sides.forEach((side) => {
     const index = leaf * 2 + side;
     rig.setLeafPage(pivot, side, rig.flat[index] || null, index, quality.page, pageEpoch);
   });
@@ -1232,16 +1281,21 @@ let leafQueueHandle = 0;
 
 function flushLeafQueue() {
   while (leafQueue.length) {
-    const { rig, pivot, leaf } = leafQueue.shift();
-    if (rig.leaves.includes(pivot) && bookRigs.includes(rig)) printLeaf(rig, pivot, leaf);
+    const { rig, pivot, leaf, side } = leafQueue.shift();
+    if (rig.leaves.includes(pivot) && bookRigs.includes(rig)) printLeaf(rig, pivot, leaf, [side]);
   }
+}
+
+/** One page (one side of a leaf) per idle moment: each is tens of milliseconds. */
+function queueLeaf(rig, pivot, leaf) {
+  leafQueue.push({ rig, pivot, leaf, side: 0 }, { rig, pivot, leaf, side: 1 });
 }
 
 function drainLeafQueue() {
   leafQueueHandle = 0;
   const job = leafQueue.shift();
   if (!job) return;
-  if (job.rig.leaves.includes(job.pivot) && bookRigs.includes(job.rig)) printLeaf(job.rig, job.pivot, job.leaf);
+  if (job.rig.leaves.includes(job.pivot) && bookRigs.includes(job.rig)) printLeaf(job.rig, job.pivot, job.leaf, [job.side]);
   shadowHold = Math.max(shadowHold, 1);
   requestFrame();
   if (leafQueue.length) leafQueueHandle = whenIdle(drainLeafQueue, 400);
@@ -1253,7 +1307,7 @@ function queueLeafWindow(rig) {
   rig.leafBase = leafBaseFor(rig, currentSpread);
   rig.assignLeafSlots();
   for (let order = 0; order < PRINTED_LEAVES; order += 1) {
-    leafQueue.push({ rig, pivot: rig.leaves[order], leaf: rig.leafBase + order });
+    queueLeaf(rig, rig.leaves[order], rig.leafBase + order);
   }
 }
 
@@ -1293,7 +1347,7 @@ function syncLeafWindow(rig, force = false) {
       const leaf = base + order;
       const inView = readingOpen && (leaf === currentSpread || leaf === currentSpread - 1);
       if (inView) printLeaf(rig, rig.leaves[order], leaf);
-      else leafQueue.push({ rig, pivot: rig.leaves[order], leaf });
+      else queueLeaf(rig, rig.leaves[order], leaf);
     }
     startLeafQueue();
   }
@@ -1854,6 +1908,8 @@ function openDetail(origin = null) {
   resetDetailPress();
   focusReturnTarget = origin instanceof HTMLElement && origin !== canvas ? origin : null;
   activeBook = bookRigs[selectedIndex];
+  // Its studio-size grain is painted off the main thread during the flight.
+  prefetchBoardGrain(activeBook.data, quality.detail);
   activeBook.contactShadow.visible = false;
   activeBook.root.visible = true;
   activeBook.opacity = 1;
@@ -2085,11 +2141,18 @@ function resetInspectionView() {
 /* Frame loop                                                          */
 /* ------------------------------------------------------------------ */
 
+let typicalGap = 1000 / 60;
+
 function frame(time) {
   rafId = 0;
   const frameStarted = performance.now();
   const frameGap = time - lastTime;
-  const delta = Math.min(frameGap / 1000, 0.05);
+  // A lone long frame (a board painted, a texture uploaded) is absorbed:
+  // motion carries on from where it was by about one ordinary frame instead
+  // of jumping ahead by the whole gap. A steadily slow device keeps real time.
+  const spike = frameGap > typicalGap * 2.2;
+  if (!spike && frameGap > 0 && frameGap < 100) typicalGap += (frameGap - typicalGap) * 0.1;
+  const delta = Math.min((spike ? typicalGap * 1.5 : frameGap) / 1000, 0.05);
   lastTime = time;
   motion = false;
   cameraMotion = false;
@@ -2725,6 +2788,8 @@ async function initialize(options) {
     beginArrival();
     loading.classList.add("is-done");
     scheduleWarmup();
+    // After the room has come in, so the arrival never waits on it.
+    if (!bookRigs.length) setTimeout(() => whenIdle(prewarmFirstBook, 4000), 2600);
     // The night lamp's materials, so choosing the night light does not stall.
     if (lamp) whenIdle(() => compileQuietly(lamp), 3000);
     setTimeout(() => { loading.hidden = true; }, reducedMotion ? 0 : 560);
@@ -2748,6 +2813,13 @@ export const engine = {
   addBook,
   removeBook,
   refreshBook,
+  /** The new-book dialog is open: have the first book's programs ready. */
+  prepareFirstBook: () => { if (!standIn && !bookRigs.length) whenIdle(prewarmFirstBook, 300); },
+  /** Paint a book's grain ahead, draft and studio size (a likely next edit). */
+  prefetchGrain: (book) => {
+    prefetchBoardGrain(book, 1);
+    prefetchBoardGrain(book, quality.detail);
+  },
   select: selectIndex,
   navigate,
   openDetail,

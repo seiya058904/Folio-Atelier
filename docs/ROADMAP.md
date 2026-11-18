@@ -1,45 +1,46 @@
-# Folio Atelier — Roadmap, round 4 (Phases S–V)
+# Folio Atelier — Roadmap, round 5 (Phases W–Z)
 
-Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2.md) (G–L), [round 3](roadmap-round-3.md) (M–R).
+Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2.md) (G–L), [round 3](roadmap-round-3.md) (M–R), [round 4](roadmap-round-4.md) (S–V).
 
-Started 2026-11-18 at the user's request to take the next round as far as it goes. It begins with a real-browser review (Ego, real GPU, DPR 1.5) of everything round 3 built, and with the stalls round 3 left: the frames after a preset or a landing.
+Started 2026-11-19 at the user's request: a flagship pass on smoothness and motion. Whatever stalls can be removed is removed; whatever wait remains is carried by purposeful motion, so the reader feels no hitch. Every press, drag, scroll and selection should answer like a system interface (immediate, follows the hand, interruptible, settles with its momentum), every control should belong to the theme (no browser-default widgets), and the model should be made more real by refining what is there, not by adding more.
 
-**Status:** S, T, U and V done and deployed to GitHub Pages (2026-11-19, `c0c2c64`; live walkthrough in Playwright and Ego passed).
+**Status:** W done (2026-11-19). X, Y, Z next.
 
 **Rules (carried over)**
-- Measure first and say what each change bought. `?bench` before and after every phase; turntable sweep after any 3D change; compare with the original before changing rig, lighting or page motion.
-- New spec fields get a default, `normalizeBook` handling, `ZH` strings and a `dirty` key. No build step, no dependencies, Three.js stays at 0.165, no lights added at run time.
-- One scoped commit per phase. Pushing and deploying need the user's go-ahead.
+- Measure first and say what each change bought. `?bench` before and after every phase, and the stutter census (`.playwright-mcp/w-census.js`: a whole visit, every long frame attributed to its step, long-animation-frame scripts) against the previous round served from a worktree.
+- Masking never pays for extra GPU/CPU and never stands in for a cost that can be removed. `prefers-reduced-motion` gets a fade or a cut.
+- No build step, no dependencies, Three.js stays at 0.165, no lights added at run time. New strings get `ZH` entries. One scoped commit per phase; pushing and deploying need the user's go-ahead.
 
----
+## Phase W — Stutter census and real costs
 
-## Phase S — The real cost of a repaint
+Census of a whole visit (first visit, create, every tab, ten presets, every covering, every paper, manuscript import, reading and turning, back to the shelf, a second book, shelf drag, find, delete), same script against round 4:
 
-- **S — done.** Measured on an RTX 3070 laptop, high tier, Playwright; reviewed by eye in Ego.
-  - Round 3 put the stalls after a preset down to the GPU. A browser-wide trace showed otherwise: `CanvasRenderingContext2D::FinalizeFrame` (up to 95 ms, 379 ms in all after one click). Chrome rasterises a 2D canvas lazily, so a painter's JavaScript looked cheap (1–3 ms) while its pixels cost 25–66 ms per board at studio size, paid at the end of the frame.
-  - Most of it was the material grain. It never depends on the dye, so studio-size grain is now cached like the small sheets (four of them); and its soft parts — leather and velvet mottling, the shading at the board edges and foot — are drawn on a quarter-size sheet and laid on once. A board repaint went from 24–66 ms to 2–9 ms; the first paint of a material from up to 67 ms to 19–32 ms. Checked pixel by pixel against the previous painter: mean difference under 1.2 of 255, at most 7.
-  - Each printed page drew its paper (2,400 fibres, 1,200 flecks) afresh, for every page and every keystroke. Four sheets per stock are kept and laid down. Typing: frame p95 25.7 → 13.7 ms, key to page 27 → 15 ms.
-  - Board textures keep their other size (draft or studio) as a spare, so going back and forth no longer allocates GPU storage. (It turned out not to be what stalled; kept because it is free.)
-  - After a preset (Midnight): long frames 8 → 4, worst 151 → 85 ms (the first full-size board of a new material, once). After landing in the studio: long frames 7 → 2, worst 72 → 36 ms.
-  - Real-browser review found grainy ambient occlusion along page edges, worst in reading mode, where the spread is magnified: GTAO now has a short distance fall-off and a wider denoise (shelf contact shadows unchanged, compared side by side), and reading mode lightens it further. Reading mode left too little margin round the spread, and its framing could miss the last frame of the camera's swing: both fixed.
-  - `?bench` unchanged elsewhere.
+| | Round 4 | W |
+| --- | --- | --- |
+| Frames over 33 ms | 96 | 36 |
+| Frames over 50 ms | 43 | 14 |
+| Worst frame | 1371 ms (first book) | 249 ms (boot, under the veil) |
 
-## Phase T — Finer models
+- **First book: 1.4–1.8 s frozen frame gone.** On an empty shelf nothing was compiled, so the first book paid for every program in the frame it appeared. A stand-in binding (`prewarmFirstBook`) is compiled in idle time after the room comes in, and again as soon as the new-book dialog opens; it is never drawn and is let go once the real book holds the same programs.
+- **New-book dialog: 160–190 ms → instant.** The preset covers were all painted when it opened; now they are painted in idle time after boot, two at most per quiet moment.
+- **Board grain off the main thread.** `paintGrain` moved to `textures/grain.js` (pure 2D canvas); `textures/grain-worker.js` paints it on an OffscreenCanvas and hands back a bitmap for the grain cache (`prefetchGrain`). It is asked for ahead of need: the book resting in front on the shelf, the book being opened (during the flight), and the preset or covering under the pointer (draft and studio size). The worker's pixels are identical to the main thread's; a cached board copies in 2 ms instead of 20–45.
+- **Covering maps prepared in studio idle time** (`getMaterialMaps`, about 20 ms each the first time).
+- **Pages printed one side per idle moment** (`queueLeaf`), not a whole leaf (50–80 ms) at once.
+- **Sharpening waits for the rebinding swing** of a preset: the draft carries the swing, full-size boards are painted once the book is still.
+- **Spike absorption.** A lone long frame advances motion by about one ordinary frame instead of the whole gap (`typicalGap` in `frame`), so an animation never jumps; a steadily slow device keeps real time.
 
-- **T — done.** The French groove: a shallow channel along the joint of both boards, 4.6 % of the board in from the spine — a soft trough with a lit far lip on the picture, and pressed into the relief layer where the book has one, so on leather it moves with the light. Stab-bound books (sewn through the board) have none. Checked in close-ups of cloth and debossed leather. Texture only: no geometry on the turning boards. Head caps and turn-ins remain geometry work, still not worth the risk.
+Bench at parity or better (cold shelf wheel p95 18.1 → 12.3 ms in the same session).
 
-## Phase U — One continuous motion
+Left for X: the click frame of a whole-book change (draft paint and upload, 50–70 ms) and the full-size boards after it (30–45 ms each, rasterising and uploading) are real work; they now land when the book is still, and X carries the change with motion.
 
-- **U — done.** Recorded the hand-overs as screencasts and read them frame by frame.
-  - Entering reading mode, the camera's swing landed in about half a second and the framing then drifted for another 0.8 s (it eased on its own curve). The framing now runs on the camera's timeline — same length, same curve — so the two land together (about 650 ms).
-  - Leaving reading mode returns to the view the reader was on (spine, back, edges), not always the front.
-  - Correction to S: the wider AO denoise (16 samples × 3 rings) doubled the denoise on every frame and cost the cold shelf sweep a frame step (p95 12.3 → 18.2 ms, found by A/B against round 3 in a separate worktree). It is back to 12 × 2 with a wider radius at the same cost; the distance fall-off, which is what cleaned the page edges, stays. The soft grain sheet is now used only where it pays (studio size, or mottled materials).
-  - `?bench` back on the round-3 numbers everywhere; typing keeps S's gain (frame p95 13.4 ms, key to page 15 ms).
+## Phase X — Carry the remaining waits
 
-## Phase V — Finish
+Cross-fade from the previous board to the new one (draft → sharp, preset, material, font arrival) instead of a pop; the rebinding swing timed with it; a new book that takes form on the shelf; skeleton rows and inked-in pages for imports; a boot veil tied to the real loading stages.
 
-- **V — done.** From the Ego review and a last walk through:
-  - In English the seven studio tabs needed 450 px in a 340 px panel: STRUCTURE and PAGES were out of sight with no sign they were there. The tabs are set a little closer (they now fit from a 432 px panel, a 1440 px window); in a narrower panel the strip scrolls sideways, the side with more fades out, a mouse wheel scrolls it, and the open tab is always brought into view. Chinese always fits.
-  - Reading is now a visit: leaving it puts back what was there, so a book that was shut when reading began is shut again, and the camera returns to the view it came from (before, a shut book entered from the spine view came back open and seen edge-on). Leaving the studio from reading lets the flight home shut the book, with no separate close on the way.
-  - Engine notes for the cached grain, paper sheets and texture spares added to `CLAUDE.md`, with the rule for measuring a 2D painter (force the flush).
-  - `?bench`: the machine was noisier on this second day, so the shelf sweep was compared against round 3 in a separate worktree, interleaved: current p95 18.5 ms against 24.2 and 30.2 ms for round 3, average frame equal. No regression.
+## Phase Y — System-grade interaction
+
+One spring vocabulary (`src/ui/motion.js`: interruptible, velocity-carrying springs and `linear()` CSS tokens); unified press feedback; theme-native colour picker, slider and switch in place of browser widgets; popovers, dialogs and the sheet with springs and gesture velocity; directional tab transitions; inertia for the 3D view.
+
+## Phase Z — Detail and modelling fidelity
+
+Close-up turntable review against the original; refine the 3–5 least convincing parts (board edges and corners, fore-edge, headbands, turn-ins, leaf bend, contact shadow) through textures, normals and parameters only.

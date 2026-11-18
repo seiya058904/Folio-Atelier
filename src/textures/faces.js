@@ -12,7 +12,7 @@ import { layerText } from "../state/schema.js";
 import { hashSeed, hexToRgb, mixHex, rgba, seededRandom } from "../util.js";
 import { drawMotif, hasMotif } from "./motifs.js";
 import { hasPattern, patternMask, stampPattern } from "./patterns.js";
-import { paintMaterialBase } from "./surface.js";
+import { paintMaterialBase, prefetchGrain } from "./surface.js";
 import { breakText, drawLine, fitDisplayText, isCjk, lineString, setTracking } from "./text.js";
 
 export const FACE_SIZE = {
@@ -155,6 +155,25 @@ function withFinish(layers, element, draw) {
   }
   // Foil and blind stamps are pressed with a heated die; print lies flat.
   if (layers.relief && finish !== "ink") draw(layers.relief, layers.tone);
+}
+
+/**
+ * Ask for a book's board grain at `scale` ahead of painting (off the main
+ * thread). The calls mirror `paintMaterialBase` in `paintBoard` and
+ * `paintSpine`, which must stay in step with this.
+ */
+export function prefetchBoardGrain(book, scale) {
+  const material = book.material;
+  const twoTone = material.binding === "quarter" || material.binding === "half";
+  const board = FACE_SIZE.front;
+  const px = (size) => [Math.round(size.width * scale), Math.round(size.height * scale), size.width, size.height];
+  ["front", "back"].forEach((face) => {
+    const seed = book.seed + (face === "back" ? 3 : 0);
+    const flip = face === "back";
+    prefetchGrain(...px(board), material.kind, seed, false, flip);
+    if (twoTone) prefetchGrain(...px(board), material.kind, seed + 11, false, flip);
+  });
+  prefetchGrain(...px(FACE_SIZE.spine), material.kind, book.seed + 7, true, false);
 }
 
 /* ---------- boards: material, two-tone binding, all-over pattern ---------- */

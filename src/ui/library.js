@@ -12,6 +12,7 @@ import {
   duplicateBook,
   normalizeBook
 } from "../state/schema.js";
+import { whenIdle } from "../motion.js";
 import { pad, uid } from "../util.js";
 import { segmented, toggle } from "./controls.js";
 import { clearNotice, confirmDialog, downloadBlob, h, notice, pickFile, toast } from "./dom.js";
@@ -102,19 +103,56 @@ export function createLibraryUi({ store, engine, audio }) {
     });
   }
 
-  function paintPresetThumbs() {
-    const samples = [];
-    presetGrid.querySelectorAll("canvas").forEach((canvas) => {
-      const book = sampleBook(canvas.dataset.preset);
-      samples.push(book);
-      drawCoverThumb(canvas, book);
-    });
+  // The preset covers are painted in idle time after the shelf is up (a
+  // couple of milliseconds each, twenty-odd of them), not when the dialog
+  // opens; they are painted again once the cover faces have arrived.
+  let pendingThumbs = [];
+  let thumbsIdle = 0;
+  let thumbFonts = false;
+
+  function paintThumb(canvas) {
+    drawCoverThumb(canvas, sampleBook(canvas.dataset.preset));
+  }
+
+  let thumbsQueued = false;
+
+  function queuePresetThumbs() {
+    thumbsQueued = true;
+    pendingThumbs = [...presetGrid.querySelectorAll("canvas")];
+    scheduleThumbs();
+  }
+
+  function scheduleThumbs() {
+    if (thumbsIdle || !pendingThumbs.length) return;
+    thumbsIdle = whenIdle(paintThumbsIdle, 3000);
+  }
+
+  function paintThumbsIdle(deadline) {
+    thumbsIdle = 0;
+    // A cover is several milliseconds (more for the first of a pattern):
+    // never more than two in one quiet moment.
+    for (let painted = 0; pendingThumbs.length && painted < 2; painted += 1) {
+      if (painted && (deadline.didTimeout || deadline.timeRemaining() < 12)) break;
+      paintThumb(pendingThumbs.shift());
+    }
+    if (pendingThumbs.length) scheduleThumbs();
+    else loadThumbFonts();
+  }
+
+  function loadThumbFonts() {
+    if (thumbFonts) return;
+    thumbFonts = true;
+    const samples = PRESETS.map((preset) => sampleBook(preset.id));
     ensureFonts(samples.flatMap(coverFontRuns)).then((loaded) => {
-      if (!loaded || !dialog.open) return;
-      presetGrid.querySelectorAll("canvas").forEach((canvas) => {
-        drawCoverThumb(canvas, sampleBook(canvas.dataset.preset));
-      });
+      if (loaded) queuePresetThumbs();
     });
+  }
+
+  /** Opening the dialog: whatever idle time has not painted yet is painted now. */
+  function paintPresetThumbs() {
+    if (!thumbsQueued) queuePresetThumbs();
+    pendingThumbs.splice(0).forEach(paintThumb);
+    loadThumbFonts();
   }
 
   function choosePreset(id) {
@@ -128,6 +166,8 @@ export function createLibraryUi({ store, engine, audio }) {
   }
 
   function buildPresetGrid() {
+    thumbFonts = false;
+    thumbsQueued = false;
     presetGrid.replaceChildren(...PRESETS.map((preset) => {
       const canvas = h("canvas", { class: "tile__art", width: 192, height: 288, dataset: { preset: preset.id } });
       return h("button", {
@@ -162,6 +202,7 @@ export function createLibraryUi({ store, engine, audio }) {
     choosePreset(chosenPreset);
     dialog.returnValue = "cancel";
     dialog.showModal();
+    engine.prepareFirstBook();
     paintPresetThumbs();
     nameInput.focus();
   }
@@ -609,6 +650,7 @@ export function createLibraryUi({ store, engine, audio }) {
 
   buildPresetGrid();
   wirePresetGrid();
+  setTimeout(queuePresetThumbs, 2500);
   $("#create-first").addEventListener("click", openNewBookDialog);
   $("#new-book").addEventListener("click", openNewBookDialog);
   $("#import-first").addEventListener("click", importBook);
@@ -645,6 +687,7 @@ export function createLibraryUi({ store, engine, audio }) {
       renderNotices();
       if (!roomPanel.hidden) renderRoomPanel();
       buildPresetGrid();
+      queuePresetThumbs();
       choosePreset(chosenPreset);
       refresh();
     },
