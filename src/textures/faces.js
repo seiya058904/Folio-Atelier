@@ -944,6 +944,43 @@ function applyWear(layers, book, width, height, face) {
 
 /* ---------- boards ---------- */
 
+// The French groove: a shallow channel pressed along the joint, a few
+// millimetres from the spine, where a case-bound board hinges. A soft trough
+// with a lit far lip on the picture; where the book has a relief layer it is
+// pressed in for real, so it moves with the light. Stab-bound books, sewn
+// through the board, have none.
+const GROOVE = 0.046;
+
+function pressGroove(layers, book, hinge, width, height) {
+  if (book.details.stitch?.show) return;
+  const left = hinge === "left";
+  const x = left ? width * GROOVE : width * (1 - GROOVE);
+  const away = left ? 1 : -1;
+  const ctx = layers.base;
+  ctx.save();
+  const trough = ctx.createLinearGradient(x - 7, 0, x + 7, 0);
+  trough.addColorStop(0, "rgba(0,0,0,0)");
+  trough.addColorStop(0.42, "rgba(0,0,0,0.15)");
+  trough.addColorStop(0.58, "rgba(0,0,0,0.15)");
+  trough.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = trough;
+  ctx.fillRect(x - 7, 0, 14, height);
+  ctx.fillStyle = "rgba(255,255,255,0.07)";
+  ctx.fillRect(away > 0 ? x + 4.5 : x - 6.1, 0, 1.6, height);
+  ctx.restore();
+  if (layers.relief) {
+    const relief = layers.relief;
+    relief.save();
+    const dip = relief.createLinearGradient(x - 6, 0, x + 6, 0);
+    dip.addColorStop(0, RELIEF_LEVEL);
+    dip.addColorStop(0.5, "#585858");
+    dip.addColorStop(1, RELIEF_LEVEL);
+    relief.fillStyle = dip;
+    relief.fillRect(x - 6, 0, 12, height);
+    relief.restore();
+  }
+}
+
 /** Hand the layers named in `commit` to the GPU (both when it is omitted). */
 function commitLayers(baseTarget, foilTarget, commit) {
   if (!commit || commit.base) baseTarget.commit();
@@ -1002,6 +1039,7 @@ export function paintFront(book, baseTarget, foilTarget, onAsset, commit, relief
   drawMotifLayer(layers, book, front.motif, width, height);
   front.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
   drawCorners(layers.foil, book.details.corners?.style, width, height, "left");
+  pressGroove(layers, book, "left", width, height);
   applyWear(layers, book, width, height, "front");
   commitLayers(baseTarget, foilTarget, commit);
   reliefTarget?.commit();
@@ -1026,6 +1064,7 @@ export function paintBack(book, baseTarget, foilTarget, onAsset, commit, reliefT
   drawMotifLayer(layers, book, back.motif, width, height);
   back.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
   drawCorners(layers.foil, book.details.corners?.style, width, height, "right");
+  pressGroove(layers, book, "right", width, height);
   applyWear(layers, book, width, height, "back");
   commitLayers(baseTarget, foilTarget, commit);
   reliefTarget?.commit();
@@ -1305,6 +1344,8 @@ export function faceSignatures(book, face) {
   const { material, pattern, details } = book;
   const twoTone = material.binding === "quarter" || material.binding === "half";
   parts.base.push(material, book.seed, details.stitch, book.wear);
+  // The French groove is pressed into the relief too, except on a stab-bound book.
+  parts.relief.push(Boolean(details.stitch?.show));
   if (book.wear?.scuff) parts.foil.push(book.wear.scuff);
   if (face === "spine") {
     const spine = book.spine;
