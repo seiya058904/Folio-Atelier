@@ -9,6 +9,13 @@ const IMAGES = "images";
 
 let dbPromise = null;
 let memory = null;
+// Called when another tab holds an older version of the database open and the
+// upgrade has to wait, and when another tab asks this one to let go of it.
+const handlers = { blocked: null, versionchange: null };
+
+export function onStorageEvent(name, handler) {
+  handlers[name] = handler;
+}
 
 function openDb() {
   if (dbPromise) return dbPromise;
@@ -25,9 +32,19 @@ function openDb() {
       if (!db.objectStoreNames.contains(BOOKS)) db.createObjectStore(BOOKS, { keyPath: "id" });
       if (!db.objectStoreNames.contains(IMAGES)) db.createObjectStore(IMAGES, { keyPath: "id" });
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      // A newer version opened in another tab: let it upgrade, and say so here.
+      db.onversionchange = () => {
+        db.close();
+        handlers.versionchange?.();
+      };
+      resolve(db);
+    };
     request.onerror = () => resolve(null);
-    request.onblocked = () => resolve(null);
+    // Another tab still has the old version open. Falling back to memory here
+    // would lose every edit made in this tab, so wait for it to close.
+    request.onblocked = () => handlers.blocked?.();
   }).then((db) => {
     if (!db) memory = { [BOOKS]: new Map(), [IMAGES]: new Map() };
     return db;
@@ -51,6 +68,16 @@ async function run(storeName, mode, operation) {
 }
 
 export const isPersistent = async () => Boolean(await openDb());
+
+/** Ask the browser not to clear the library under storage pressure. Once. */
+export async function requestPersistence() {
+  try {
+    if (!navigator.storage?.persist || await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch (error) {
+    return false;
+  }
+}
 
 export async function loadBooks() {
   const books = await run(BOOKS, "readonly", (store, map) => (
@@ -83,6 +110,13 @@ export async function loadImage(id) {
     store ? store.get(id) : map.get(id)
   ));
   return record?.blob || null;
+}
+
+export async function listImageIds() {
+  const ids = await run(IMAGES, "readonly", (store, map) => (
+    store ? store.getAllKeys() : [...map.keys()]
+  ));
+  return ids || [];
 }
 
 export function deleteImage(id) {

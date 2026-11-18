@@ -46,6 +46,7 @@ export function debounce(fn, wait) {
     clearTimeout(timer);
     fn(...args);
   };
+  debounced.cancel = () => clearTimeout(timer);
   return debounced;
 }
 

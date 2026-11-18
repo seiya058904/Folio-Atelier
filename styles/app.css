@@ -1732,6 +1732,191 @@ p {
     transform var(--duration-quick) var(--ease-out);
 }
 
+/* A lasting line on the shelf: books not being kept, a backup worth making. */
+.notice {
+  position: absolute;
+  top: calc(var(--edge) - 6px);
+  left: 50%;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(calc(100vw - 2 * var(--edge)), 560px);
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--paper-pale) 78%, transparent);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
+  font-size: 0.7rem;
+  line-height: 1.35;
+  backdrop-filter: blur(14px) saturate(1.1);
+  transform: translateX(-50%);
+  animation: notice-in var(--duration-slow) var(--ease-out) both;
+  transition:
+    opacity var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out),
+    background-color var(--duration-tint) var(--ease-out);
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px) scale(0.98);
+  }
+}
+
+.notice.is-leaving {
+  opacity: 0;
+  transform: translate(-50%, -8px) scale(0.98);
+  transition-duration: var(--duration-quick);
+}
+
+/* The studio has its own save line; the shelf's notice steps aside. */
+.mode-detail .notice {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -12px);
+}
+
+.notice__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.notice[data-tone="warn"] .notice__dot,
+.notice[data-tone="error"] .notice__dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent);
+  animation: notice-pulse 2.4s var(--ease-out) infinite;
+}
+
+@keyframes notice-pulse {
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+.notice__text {
+  min-width: 0;
+  color: var(--ink-soft);
+}
+
+.notice__action {
+  flex: none;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-quick) var(--ease-out),
+    transform var(--duration-press) var(--ease-out);
+}
+
+.notice__action:first-of-type {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.notice__action:hover {
+  background: var(--wash);
+}
+
+.notice__action:first-of-type:hover {
+  background: color-mix(in srgb, var(--ink) 86%, var(--accent));
+}
+
+.notice__action:active {
+  transform: scale(0.96);
+}
+
+/* Something to answer before going on: the room dims behind a card. */
+.interrupt {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  padding: var(--edge);
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
+  place-items: center;
+  backdrop-filter: blur(10px);
+  animation: interrupt-in var(--duration-slow) var(--ease-out) both;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+
+.interrupt.is-leaving {
+  opacity: 0;
+}
+
+@keyframes interrupt-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.interrupt__card {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  max-width: 30em;
+  text-align: center;
+  animation: interrupt-rise var(--duration-entrance) var(--ease-out) both;
+}
+
+@keyframes interrupt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+.interrupt__mark {
+  position: relative;
+  width: 38px;
+  height: 48px;
+  margin-bottom: 6px;
+  border: 1px solid var(--ink);
+  border-radius: 2px 5px 5px 2px;
+}
+
+.interrupt__mark::before {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: 6px;
+  width: 1px;
+  background: var(--ink);
+  content: "";
+  opacity: 0.45;
+}
+
+.interrupt__title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.interrupt__text {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+  font-family: var(--serif);
+  font-size: 1.08rem;
+  line-height: 1.5;
+  text-wrap: balance;
+}
+
 .loading {
   position: absolute;
   inset: 0;

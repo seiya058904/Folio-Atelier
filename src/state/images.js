@@ -2,7 +2,7 @@
 // decoded once into ImageBitmaps / <img> elements that the painters can draw.
 
 import { uid } from "../util.js";
-import { deleteImage, loadImage, saveImage } from "./storage.js";
+import { deleteImage, listImageIds, loadImage, saveImage } from "./storage.js";
 
 const cache = new Map(); // id -> HTMLImageElement | "loading" | null
 const waiters = new Map(); // id -> Set<fn>
@@ -89,7 +89,22 @@ export function removeImage(id) {
   return deleteImage(id);
 }
 
-/** Every image id a book refers to. */
+/**
+ * Delete stored pictures no book refers to any more (replaced covers, removed
+ * plates, deleted books). Run once at start-up, before anything can add one:
+ * undo history lives only for a visit, so nothing else can still need them.
+ * Copies of a book share their pictures, which is why this goes by reference
+ * rather than deleting with a book. Resolves with the number removed.
+ */
+export async function sweepImages(books) {
+  const used = new Set(books.flatMap(bookImageIds));
+  const stored = await listImageIds();
+  const unused = stored.filter((id) => !used.has(id) && !cache.has(id));
+  for (const id of unused) await deleteImage(id);
+  return unused.length;
+}
+
+/** Every image id a book refers to. Keep in step with every field that holds one. */
 export function bookImageIds(book) {
   const ids = new Set();
   if (book.front?.image?.id) ids.add(book.front.image.id);

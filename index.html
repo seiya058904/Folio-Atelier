@@ -219,6 +219,7 @@
     <input id="image-file" type="file" accept="image/*" hidden>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
     <div class="sr-only" id="live-region" aria-live="polite"></div>
 
     <section class="static-fallback" id="static-fallback" aria-labelledby="fallback-title">
@@ -235,8 +236,48 @@
         <p data-i18n>Preparing the atelier</p>
       </div>
     </div>
+    <!-- Something the reader must answer before going on. -->
+    <section class="interrupt" id="interrupt" role="alertdialog" aria-modal="true" aria-labelledby="interrupt-title" aria-describedby="interrupt-text" hidden>
+      <div class="interrupt__card">
+        <div class="interrupt__mark" aria-hidden="true"></div>
+        <h2 class="interrupt__title" id="interrupt-title"></h2>
+        <p class="interrupt__text" id="interrupt-text"></p>
+        <button class="pill-button pill-button--solid" id="interrupt-action" type="button" hidden></button>
+      </div>
+    </section>
   </main>
 
-  <script type="module" src="./src/main.js"></script>
+  <script>
+    // Boot watchdog. If the modules fail to load, or take far too long, say so
+    // in the reader's language instead of leaving the loading veil up for ever.
+    (function () {
+      var query = location.search;
+      var zh = /[?&]lang=zh\b/.test(query) || (!/[?&]lang=en\b/.test(query) && (function () {
+        try {
+          var stored = localStorage.getItem("folio-atelier-lang");
+          if (stored === "en" || stored === "zh") return stored === "zh";
+        } catch (error) {}
+        return /^zh\b/i.test(navigator.language || "");
+      })());
+      var copy = zh
+        ? { fail: "工坊没能加载", slow: "加载比平常慢", failText: "有一部分程序没能下载，可能是网络中断了。你的书仍然保存在这个浏览器里。", slowText: "网络似乎很慢。可以继续等待，也可以重新加载。", reload: "重新加载" }
+        : { fail: "The atelier could not load", slow: "This is taking longer than usual", failText: "Part of the program did not download, perhaps because the connection dropped. Your books are still kept in this browser.", slowText: "The connection seems slow. Keep waiting, or reload.", reload: "Reload" };
+      function show(failed) {
+        if (window.__folioStarted) return;
+        var element = document.getElementById("interrupt");
+        if (!element) return;
+        document.getElementById("interrupt-title").textContent = failed ? copy.fail : copy.slow;
+        document.getElementById("interrupt-text").textContent = failed ? copy.failText : copy.slowText;
+        var button = document.getElementById("interrupt-action");
+        button.textContent = copy.reload;
+        button.hidden = false;
+        button.onclick = function () { location.reload(); };
+        element.hidden = false;
+      }
+      window.__folioBootFailed = function () { show(true); };
+      window.__folioBootTimer = setTimeout(function () { show(false); }, 20000);
+    })();
+  </script>
+  <script type="module" src="./src/main.js" onerror="window.__folioBootFailed()"></script>
 </body>
 </html>

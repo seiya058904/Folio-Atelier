@@ -364,7 +364,25 @@ const ZH = {
   "Justified": "两端对齐", "Drop capitals": "首字下沉", "Running heads": "页眉", "Page numbers": "页码",
   "Type *** on a line of its own for a section break.": "单独一行输入 *** 可插入分节符。",
   "Chapter {n} · {title}": "第 {n} 章 · {title}",
-  "Part {n} · {title}": "第 {n} 卷 · {title}"
+  "Part {n} · {title}": "第 {n} 卷 · {title}",
+  // Keeping the library safe.
+  "Not saved — kept for this visit only": "未保存——仅保留到本次访问结束",
+  "Your library is open in another tab": "书库已在另一个标签页中打开",
+  "Only one tab can edit your books at a time, so that neither saves over the other.": "同一时间只能有一个标签页编辑你的书，以免互相覆盖。",
+  "Use it here": "在此使用",
+  "Your library moved to another tab": "书库已转到另一个标签页",
+  "Your books are being edited in another tab now. Nothing more is saved from this one.": "你的书现在在另一个标签页中编辑，这里不再保存任何改动。",
+  "Waiting for another tab": "正在等待另一个标签页",
+  "Close the other Folio Atelier tab and your library will open here.": "关闭另一个 Folio Atelier 标签页后，书库就会在这里打开。",
+  "Folio Atelier was updated in another tab": "Folio Atelier 已在另一个标签页中更新",
+  "Reload to keep working with the new version. Your books are saved.": "重新加载即可使用新版本继续工作。你的书都已保存。",
+  "Reload": "重新加载",
+  "{n} days ago": "{n} 天前",
+  "Your library could not be read. Nothing is lost yet: reload to try again.": "书库暂时无法读取，内容并未丢失。请重新加载再试。",
+  "This browser is not letting the atelier save. Books made now last until the tab closes; export them to keep them.": "此浏览器不允许工坊保存。现在做的书只保留到标签页关闭，请导出以留存。",
+  "Your books were last exported {when}. Clearing site data would remove them.": "上次导出书库是{when}。清除网站数据会删掉这些书。",
+  "Your books live only in this browser. Export a copy to keep them safe.": "你的书只保存在这个浏览器里。导出一份副本更安心。",
+  "Not now": "稍后"
 };
 
 function detect() {

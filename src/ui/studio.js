@@ -1818,8 +1818,7 @@ export function createStudioUi({ store, engine, audio }) {
     panel.setAttribute("aria-hidden", "false");
     readerBar.inert = false;
     readerBar.setAttribute("aria-hidden", "false");
-    saveStatus.textContent = t("Saved");
-    saveStatus.dataset.state = "ok";
+    showSaved();
     panes.forEach((pane) => {
       pane.stale = true;
       pane.scroll = 0;
@@ -1886,20 +1885,33 @@ export function createStudioUi({ store, engine, audio }) {
     if (saving.id !== bookId) return;
     saveStatus.textContent = t("Saving…");
   });
+  /** The resting status: saved, or plainly not, when the browser keeps nothing. */
+  function showSaved(detail = false) {
+    if (!store.persistent) {
+      saveStatus.textContent = t("Not saved — kept for this visit only");
+      saveStatus.dataset.state = "error";
+      return;
+    }
+    saveStatus.textContent = t(detail ? "Saved to this browser" : "Saved");
+    saveStatus.dataset.state = "ok";
+  }
+
   store.on("saved", ({ book: saved }) => {
     if (saved.id !== bookId) return;
-    saveStatus.textContent = t("Saved to this browser");
-    saveStatus.dataset.state = "ok";
+    showSaved(true);
   });
   store.on("save-state", ({ ok }) => {
-    saveStatus.textContent = t(ok ? "Saved to this browser" : "Not saved — storage is unavailable");
-    saveStatus.dataset.state = ok ? "ok" : "error";
+    if (ok) showSaved(true);
+    else {
+      saveStatus.textContent = t("Not saved — storage is unavailable");
+      saveStatus.dataset.state = "error";
+    }
   });
 
   /** Redraw everything that carries words, after the language changes. */
   function relocalize() {
     if (!bookId) return;
-    saveStatus.textContent = t("Saved");
+    showSaved();
     markStale();
     renderTabs(true);
     renderBody({ keepScroll: true });

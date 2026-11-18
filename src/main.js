@@ -5,11 +5,64 @@ import { AUDIO_SOURCES, createAudioSystem } from "./audio.js";
 import { engine } from "./engine.js";
 import { getLang, localizeDocument, onLang, setLang, t } from "./i18n.js";
 import { perf } from "./perf.js";
+import { sweepImages } from "./state/images.js";
+import { onStorageEvent, requestPersistence } from "./state/storage.js";
 import { createStore } from "./state/store.js";
+import { interrupt } from "./ui/dom.js";
 import { createLibraryUi } from "./ui/library.js";
 import { createStudioUi } from "./ui/studio.js";
 
+const LOCK = "folio-atelier-library";
+const TAKE_OVER = "folio-atelier-take-over";
+
+/**
+ * Hold the library lock for the life of the page. Resolves with whether it was
+ * granted; `onLost` runs if another tab later takes it over.
+ */
+function holdLibrary(options, onLost) {
+  return new Promise((resolve) => {
+    navigator.locks.request(LOCK, options, (lock) => {
+      resolve(Boolean(lock));
+      return lock ? new Promise(() => {}) : undefined;
+    }).catch((error) => {
+      if (error?.name === "AbortError") onLost();
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * One tab edits the library at a time, or two tabs would each save their own
+ * copy of a book over the other's. A second tab waits until the reader
+ * chooses to use it instead; the first then stops saving and says so.
+ */
+async function claimLibrary(onLost) {
+  if (!navigator.locks?.request) return;
+  let takeOver = false;
+  try {
+    takeOver = sessionStorage.getItem(TAKE_OVER) === "1";
+    sessionStorage.removeItem(TAKE_OVER);
+  } catch (error) {
+    // Without session storage the reader is simply asked again.
+  }
+  if (await holdLibrary(takeOver ? { steal: true } : { ifAvailable: true }, onLost)) return;
+  await new Promise((resolve) => {
+    const lift = interrupt({
+      title: t("Your library is open in another tab"),
+      text: t("Only one tab can edit your books at a time, so that neither saves over the other."),
+      action: t("Use it here"),
+      onAction: () => holdLibrary({ steal: true }, onLost).then(() => {
+        lift();
+        resolve();
+      })
+    });
+  });
+}
+
 async function start() {
+  window.__folioStarted = true;
+  clearTimeout(window.__folioBootTimer);
+  document.querySelector("#interrupt").hidden = true;
   localizeDocument();
   const langToggle = document.querySelector("#lang-toggle");
   const markLang = () => { langToggle.dataset.lang = getLang(); };
@@ -18,7 +71,50 @@ async function start() {
 
   const audio = createAudioSystem(AUDIO_SOURCES);
   const store = createStore();
+
+  const lost = () => {
+    store.freeze();
+    interrupt({
+      title: t("Your library moved to another tab"),
+      text: t("Your books are being edited in another tab now. Nothing more is saved from this one."),
+      action: t("Use it here"),
+      onAction: () => {
+        try { sessionStorage.setItem(TAKE_OVER, "1"); } catch (error) { /* asked again */ }
+        location.reload();
+      }
+    });
+  };
+  await claimLibrary(lost);
+
+  // An older copy of the atelier in another tab can hold the database back.
+  let liftBlocked = null;
+  onStorageEvent("blocked", () => {
+    liftBlocked = interrupt({
+      title: t("Waiting for another tab"),
+      text: t("Close the other Folio Atelier tab and your library will open here.")
+    });
+  });
+  onStorageEvent("versionchange", () => {
+    store.freeze();
+    interrupt({
+      title: t("Folio Atelier was updated in another tab"),
+      text: t("Reload to keep working with the new version. Your books are saved."),
+      action: t("Reload"),
+      onAction: () => location.reload()
+    });
+  });
   await store.init();
+  liftBlocked?.();
+  // Pictures no book uses any more (replaced, removed, deleted with a book).
+  if (store.persistent && !store.readError) sweepImages(store.books).catch(() => {});
+  // Ask the browser to keep the library through storage pressure, once there is one.
+  if (store.books.length) requestPersistence();
+  else {
+    const stop = store.on("add", () => {
+      stop();
+      requestPersistence();
+    });
+  }
 
   let library = null;
   let studio = null;

@@ -3,7 +3,7 @@
 
 import { PRESETS, getPreset } from "../data/presets.js";
 import { ensureFonts } from "../data/fonts.js";
-import { t } from "../i18n.js";
+import { getLang, t } from "../i18n.js";
 import { bookImageIds, getImageBlob, restoreImage } from "../state/images.js";
 import {
   bindingLabel,
@@ -14,7 +14,7 @@ import {
 } from "../state/schema.js";
 import { pad, uid } from "../util.js";
 import { segmented, toggle } from "./controls.js";
-import { confirmDialog, downloadBlob, h, pickFile, toast } from "./dom.js";
+import { clearNotice, confirmDialog, downloadBlob, h, notice, pickFile, toast } from "./dom.js";
 import { drawCoverThumb } from "./thumbs.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -89,6 +89,7 @@ export function createLibraryUi({ store, engine, audio }) {
   function refresh() {
     renderMarkers();
     renderSelection();
+    renderNotices();
   }
 
   /* ----- begin a book ----- */
@@ -247,6 +248,74 @@ export function createLibraryUi({ store, engine, audio }) {
     const payload = { format: "folio-atelier-library", version: 3, exportedAt: new Date().toISOString(), room: engine.room, books };
     downloadBlob(new Blob([JSON.stringify(payload)], { type: "application/json" }), "folio-library.folio");
     toast(t("Exported {count} books.", { count: books.length }));
+    writeBackup({ at: Date.now() });
+    renderNotices();
+  }
+
+  /* ----- notices: books not being kept, a backup worth making ----- */
+
+  const BACKUP_KEY = "folio-atelier-backup";
+  const DAY = 86_400_000;
+  const BACKUP_AFTER = 7 * DAY;
+  const readBackup = () => {
+    try { return JSON.parse(localStorage.getItem(BACKUP_KEY)) || {}; } catch (error) { return {}; }
+  };
+  const writeBackup = (patch) => {
+    try { localStorage.setItem(BACKUP_KEY, JSON.stringify({ ...readBackup(), ...patch })); } catch (error) { /* private mode */ }
+  };
+
+  function sinceText(time) {
+    const days = Math.max(1, Math.round((Date.now() - time) / DAY));
+    try {
+      return new Intl.RelativeTimeFormat(getLang() === "zh" ? "zh-CN" : "en", { numeric: "auto" }).format(-days, "day");
+    } catch (error) {
+      return t("{n} days ago", { n: days });
+    }
+  }
+
+  function renderNotices() {
+    if (store.readError) {
+      notice("library", {
+        tone: "error",
+        text: t("Your library could not be read. Nothing is lost yet: reload to try again."),
+        actions: [{ label: t("Reload"), onClick: () => location.reload() }]
+      });
+    }
+    if (!store.persistent) {
+      notice("storage", {
+        tone: "warn",
+        text: t("This browser is not letting the atelier save. Books made now last until the tab closes; export them to keep them."),
+        actions: store.books.length ? [{ label: t("Export all"), onClick: exportLibrary }] : []
+      });
+      return;
+    }
+    // A gentle reminder once a week of edits has gone by without a backup.
+    const backup = readBackup();
+    const books = store.books;
+    const edited = Math.max(0, ...books.map((book) => book.updatedAt || book.createdAt || 0));
+    const since = backup.at || Math.min(...books.map((book) => book.createdAt || Date.now()));
+    const due = books.length && !store.readError && edited > (backup.at || 0)
+      && Date.now() - since > BACKUP_AFTER && Date.now() > (backup.snooze || 0);
+    if (!due) {
+      clearNotice("backup");
+      return;
+    }
+    notice("backup", {
+      tone: "quiet",
+      text: backup.at
+        ? t("Your books were last exported {when}. Clearing site data would remove them.", { when: sinceText(backup.at) })
+        : t("Your books live only in this browser. Export a copy to keep them safe."),
+      actions: [
+        { label: t("Export all"), onClick: exportLibrary },
+        {
+          label: t("Not now"),
+          onClick: () => {
+            writeBackup({ snooze: Date.now() + 3 * DAY });
+            clearNotice("backup");
+          }
+        }
+      ]
+    });
   }
 
   async function importBook() {
@@ -395,10 +464,13 @@ export function createLibraryUi({ store, engine, audio }) {
     if (store.books[engine.selectedIndex] === book) renderSelection();
   });
 
+  renderNotices();
+
   return {
     refresh,
     renderSelection,
     relocalize() {
+      renderNotices();
       if (!roomPanel.hidden) renderRoomPanel();
       buildPresetGrid();
       choosePreset(chosenPreset);

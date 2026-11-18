@@ -23,7 +23,7 @@ Which browser tool to use:
 - **Playwright** — scripted, repeatable checks during iteration: driving a flow, measuring timings, console-error sweeps, rendering-tier and language comparisons.
 - **Ego browser** (the `ego-browser` skill) — the broader, real-world pass: whole-product walkthroughs, visual and feel review, and the final check of a finished or deployed build. It is a normal Chromium with real GPU, window focus and user context, so its frame rate and behaviour match what users see. Prefer it for release sign-off.
 
-Roadmap: `docs/ROADMAP.md` (phase status is recorded at the top of it; round 1 is in `docs/roadmap-round-1.md`).
+Roadmap: `docs/ROADMAP.md` (phase status is recorded at the top of it; earlier rounds are in `docs/roadmap-round-1.md` and `docs/roadmap-round-2.md`).
 
 Performance stance: optimise real cost first; where a wait is unavoidable, hide it with cheap, purposeful motion (instant feedback, skeletons, cross-fades, loading choreography). Masking must never be used as a reason to spend more GPU/CPU, and must respect `prefers-reduced-motion`.
 

@@ -26,12 +26,17 @@ export function createStore() {
   const books = [];
   const history = new Map(); // bookId -> { undo: [], redo: [], lastKey, lastAt }
   let saveError = null;
+  // False when the browser gives no IndexedDB: books then live for this visit only.
+  let persistent = true;
+  // Set when another tab took the library over: this one must stop writing.
+  let frozen = false;
 
   const emit = (event, payload) => {
     listeners.get(event)?.forEach((listener) => listener(payload));
   };
 
   const saveOrder = () => {
+    if (frozen) return;
     try {
       localStorage.setItem(ORDER_KEY, JSON.stringify(books.map((book) => book.id)));
     } catch (error) {
@@ -40,13 +45,14 @@ export function createStore() {
   };
 
   const persist = (book) => {
+    if (frozen) return;
     storage.saveBook(deepClone(book)).then(
       () => {
         if (saveError) {
           saveError = null;
           emit("save-state", { ok: true });
         }
-        emit("saved", { book });
+        emit("saved", { book, persistent });
       },
       (error) => {
         saveError = error;
@@ -75,6 +81,13 @@ export function createStore() {
   return {
     books,
 
+    /** Why the library could not be read at start-up, if it could not. */
+    readError: null,
+
+    get persistent() {
+      return persistent;
+    },
+
     on(event, listener) {
       if (!listeners.has(event)) listeners.set(event, new Set());
       listeners.get(event).add(listener);
@@ -83,9 +96,12 @@ export function createStore() {
 
     async init() {
       let stored = [];
+      persistent = await storage.isPersistent();
       try {
         stored = await storage.loadBooks();
       } catch (error) {
+        // Not the same as an empty library: say so rather than greet a new reader.
+        this.readError = error || new Error("unreadable");
         stored = [];
       }
       stored.forEach((value) => {
@@ -119,7 +135,7 @@ export function createStore() {
       const [book] = books.splice(index, 1);
       history.delete(id);
       savers.delete(id);
-      storage.deleteBook(id).catch(() => {});
+      if (!frozen) storage.deleteBook(id).catch(() => {});
       saveOrder();
       emit("remove", { book, index });
       return book;
@@ -192,7 +208,13 @@ export function createStore() {
     },
 
     flush() {
-      savers.forEach((saver) => saver.flush());
+      if (!frozen) savers.forEach((saver) => saver.flush());
+    },
+
+    /** Stop writing: another tab now owns the library. Pending saves are dropped. */
+    freeze() {
+      frozen = true;
+      savers.forEach((saver) => saver.cancel());
     }
   };
 }
