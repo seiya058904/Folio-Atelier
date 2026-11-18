@@ -432,7 +432,7 @@ function sharedGeometry() {
     cover: new RoundedBoxGeometry(d.width, d.height, d.board, 2, d.coverRadius),
     pageBlock: createPageBlockGeometry(d.pageWidth, d.pageHeight, d.pageDepth, d.pageRadius),
     coverSurface: createRoundedPlaneGeometry(d.width - 0.007, d.height - 0.007, 0.0035),
-    endpaper: createRoundedPlaneGeometry(d.width - 0.045, d.height - 0.045, 0.003),
+    endpaper: createRoundedPlaneGeometry(d.width - PASTE_INSET.x * 2, d.height - PASTE_INSET.y * 2, 0.003),
     spine: createSpineGeometry(d.depth + d.board * 1.94, d.height - 0.008, d.spineBulge, d.spineBoardThickness, true),
     spineFoil: createSpineGeometry(d.depth + d.board * 1.94, d.height - 0.008, d.spineBulge, 0, false),
     spineLining: new RoundedBoxGeometry(d.spineWidth * 0.68, d.height - 0.056, Math.max(0.045, d.pageDepth - 0.008), 1, 0.0015),
@@ -452,28 +452,52 @@ function roundedGeometry() {
     cover: createRoundedBoardGeometry(d.width, d.height, d.board, ROUND_CORNER, d.coverRadius),
     surfaceFore: createFacePlaneGeometry(d.width - 0.007, d.height - 0.007, 0.0035, ROUND_CORNER - 0.0035, 1),
     surfaceBack: createFacePlaneGeometry(d.width - 0.007, d.height - 0.007, 0.0035, ROUND_CORNER - 0.0035, -1),
-    endpaperFore: createFacePlaneGeometry(d.width - 0.045, d.height - 0.045, 0.003, ROUND_CORNER - 0.02, 1),
-    endpaperBack: createFacePlaneGeometry(d.width - 0.045, d.height - 0.045, 0.003, ROUND_CORNER - 0.02, -1)
+    endpaperFore: createFacePlaneGeometry(d.width - PASTE_INSET.x * 2, d.height - PASTE_INSET.y * 2, 0.003, ROUND_CORNER - PASTE_INSET.x, 1),
+    endpaperBack: createFacePlaneGeometry(d.width - PASTE_INSET.x * 2, d.height - PASTE_INSET.y * 2, 0.003, ROUND_CORNER - PASTE_INSET.x, -1)
   };
   return shared.rounded;
 }
 
+/*
+ * The covering is turned in over the inside of each board and the paste-down
+ * laid over it, a little short of the edges: what shows inside the squares
+ * (where a board stands past the pages) is the covering, never the endpaper.
+ * The paste-down's inset is wider than the squares (0.034 at head and tail,
+ * 0.019 at the fore-edge); the turn-ins reach exactly to its edge, so their
+ * step is where the paper begins.
+ */
+const PASTE_INSET = { x: 0.03, y: 0.05 };
+
 function addTurnIns(pivot, side, insideZ, material) {
-  const { width, height } = DIM;
-  const stripDepth = 0.002;
-  const border = 0.018;
-  const longWidth = width - border * 0.7;
-  const longHeight = height - border * 2.2;
-  [
-    ["head", width * 0.5, height * 0.5 - border * 0.56, longWidth, border],
-    ["tail", width * 0.5, -height * 0.5 + border * 0.56, longWidth, border],
-    ["spine", border * 0.56, 0, border, longHeight],
-    ["fore", width - border * 0.56, 0, border, longHeight]
-  ].forEach(([edge, x, y, stripWidth, stripHeight]) => {
+  const strips = {};
+  ["head", "tail", "spine", "fore"].forEach((edge) => {
     const strip = createMesh(shared.box, material, `${side}-turn-in-${edge}`, false, true);
-    strip.scale.set(stripWidth, stripHeight, stripDepth);
-    strip.position.set(x, y, insideZ);
+    strip.position.z = insideZ;
+    strip.scale.z = 0.002;
     pivot.add(strip);
+    strips[edge] = strip;
+  });
+  return strips;
+}
+
+/** Size the turn-ins for square or rounded corners (rounded: they stop short of the curve). */
+function layoutTurnIns(strips, rounded) {
+  const { width, height } = DIM;
+  const margin = 0.001;
+  const across = PASTE_INSET.x - margin;
+  const along = PASTE_INSET.y - margin;
+  const corner = rounded ? ROUND_CORNER : margin;
+  // Hinge and fore-edge strips run the height; head and tail run between them.
+  strips.spine.scale.set(across, height - margin * 2, 0.002);
+  strips.spine.position.set(margin + across * 0.5, 0, strips.spine.position.z);
+  const foreLength = height - corner * 2;
+  strips.fore.scale.set(across, foreLength, 0.002);
+  strips.fore.position.set(width - margin - across * 0.5, 0, strips.fore.position.z);
+  const start = margin + across;
+  const stop = rounded ? width - ROUND_CORNER : width - margin - across;
+  [["head", 1], ["tail", -1]].forEach(([edge, direction]) => {
+    strips[edge].scale.set(stop - start, along, 0.002);
+    strips[edge].position.set((start + stop) * 0.5, direction * (height * 0.5 - margin - along * 0.5), strips[edge].position.z);
   });
 }
 
@@ -728,7 +752,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   const backEndpaper = createMesh(g.endpaper, endpaperMaterial, "back-endpaper", false, true);
   backEndpaper.position.set(d.width * 0.5, 0, d.board * 0.515);
   backPivot.add(backEndpaper);
-  addTurnIns(backPivot, "back", d.board * 0.53, cloth);
+  const backTurnIns = addTurnIns(backPivot, "back", d.board * 0.53, cloth);
   const backGroove = createMesh(shared.plane, grooveMaterial, "back-hinge-groove", false, false);
   backGroove.scale.set(0.012, d.height * 0.94, 1);
   backGroove.position.set(0.038, 0, -d.board * 0.535);
@@ -752,7 +776,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   frontEndpaper.position.set(d.width * 0.5, 0, -d.board * 0.515);
   frontEndpaper.rotation.y = Math.PI;
   frontPivot.add(frontEndpaper);
-  addTurnIns(frontPivot, "front", -d.board * 0.53, cloth);
+  const frontTurnIns = addTurnIns(frontPivot, "front", -d.board * 0.53, cloth);
   const frontGroove = createMesh(shared.plane, grooveMaterial, "front-hinge-groove", false, false);
   frontGroove.scale.set(0.012, d.height * 0.94, 1);
   frontGroove.position.set(0.038, 0, d.board * 0.655);
@@ -1043,6 +1067,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     backFoilPlane.geometry = rounded ? r.surfaceBack : g.coverSurface;
     frontEndpaper.geometry = rounded ? r.endpaperBack : g.endpaper;
     backEndpaper.geometry = rounded ? r.endpaperFore : g.endpaper;
+    layoutTurnIns(frontTurnIns, rounded);
+    layoutTurnIns(backTurnIns, rounded);
     body.scale.set(size, size, 1);
     block.scale.set(1, 1, bulk);
     // Stand on the same shelf line whatever the height.
@@ -1070,6 +1096,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     claspMaterial.color.set((CLASP_METALS.find((metal) => metal.id === structure.clasp?.metal) || CLASP_METALS[0]).color);
     pocket.visible = Boolean(structure.pocket?.show);
     pocketMaterial.color.set(mixHex(rig.data.details?.endpaper?.color || "#efe6d4", "#3a2a1a", 0.12));
+    liningMaterial.color.set(mixHex(rig.data.details?.endpaper?.color || "#efe6d4", "#3a2a1a", 0.3));
     shapeCase();
     caseMaterial.color.set(structure.slipcase?.color || "#3a2a20");
     if (structure.slipcase?.show) paintCaseLabel();
@@ -1191,7 +1218,10 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   const spineFoil = createMesh(g.spineFoil, spineFoilArt, "spine-foil", false, false);
   spineFoil.position.x = spine.position.x - 0.0007;
   block.add(spineFoil);
-  const spineLining = createMesh(g.spineLining, endpaperMaterial, "spine-lining");
+  // The lining glued over the backs of the gatherings: plain paper, a shade
+  // of the endpaper (seen from the head and tail, never printed).
+  const liningMaterial = physical({ roughness: 0.96, metalness: 0, side: THREE.DoubleSide });
+  const spineLining = createMesh(g.spineLining, liningMaterial, "spine-lining");
   spineLining.position.set(-d.width * 0.5 + d.spineWidth * 0.38, 0, 0);
   block.add(spineLining);
 
@@ -1216,8 +1246,13 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   secondRibbon.rotation.z = -ribbon.rotation.z * 1.6;
   block.add(secondRibbon);
 
+  // Gatherings showing on a plain fore-edge. A decorated edge (gilt, stained,
+  // marbled) is trimmed smooth before it is coloured: there they are hidden
+  // (`applyLook`), or they cross the gold as pale bands.
+  const signatureMarks = [];
   for (let index = 0; index < 6; index += 1) {
     const signature = createMesh(shared.box, signatureMaterial, `page-signature-${index + 1}`, false, true);
+    signatureMarks.push(signature);
     signature.scale.set(0.0035, 0.00135, d.pageDepth * 0.91);
     signature.position.set(
       0.018 + d.pageWidth * 0.5 + 0.001,
@@ -1264,7 +1299,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   const fadeMaterials = [
     cloth, coverArt, foilArt, spineArt, spineFoilArt, backArt, backFoilArt,
     endpaperMaterial, foreEdgeMaterial, headTailEdgeMaterial, grooveMaterial,
-    pageMaterial, ...sheetMaterials, headbandMaterial, signatureMaterial, ribbonMaterial,
+    pageMaterial, ...sheetMaterials, headbandMaterial, signatureMaterial, liningMaterial, ribbonMaterial,
     secondRibbonMaterial, bandMaterial, penLoopMaterial, penTabMaterial, claspMaterial, pocketMaterial, caseMaterial, caseLabelMaterial, sealMaterial
   ];
 
@@ -1356,6 +1391,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
 
     const edge = spec.details.edge;
     const baked = BAKED_EDGES.has(edge.style);
+    const plainEdge = !edge.style || edge.style === "plain";
+    signatureMarks.forEach((mark) => { mark.visible = plainEdge; });
     const edgeMaps = getPageEdgeTextures(baked ? edge.style : "plain", edge.color);
     foreEdgeMaterial.map = edgeMaps.fore;
     headTailEdgeMaterial.map = edgeMaps.headTail;

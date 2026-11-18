@@ -292,16 +292,18 @@ export function createStudioUi({ store, engine, audio }) {
     // A rebuilt tab (after a preset, say) shows each thumbnail's picture at
     // once: the cached one if its content is known, otherwise what the same
     // slot showed before, until the new one is painted. Never a blank tile.
+    // (The previous picture needs no key: working out twenty keys would cost
+    // the click that rebuilt the tab; the pump checks them a frame later.)
     const slot = buildingPane?.thumbs.length ?? -1;
     const before = buildingPane?.previous?.[slot];
-    const known = before || thumbCache.size ? thumbCache.get(key()) : null;
-    const source = known || (before && before.width === canvas.width && before.height === canvas.height ? before : null);
-    if (source) {
-      canvas.getContext("2d").drawImage(source, 0, 0);
-      if (known) entry.shown = key();
-    } else {
-      canvas.classList.add("is-pending");
+    let source = before && before.width === canvas.width && before.height === canvas.height ? before : null;
+    if (!source && buildingPane?.previous && thumbCache.size) {
+      const name = key();
+      source = thumbCache.get(name) || null;
+      if (source) entry.shown = name;
     }
+    if (source) canvas.getContext("2d").drawImage(source, 0, 0);
+    else canvas.classList.add("is-pending");
     buildingPane?.thumbs.push(entry);
     return canvas;
   }

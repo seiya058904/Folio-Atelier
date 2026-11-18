@@ -4,7 +4,7 @@ Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2
 
 Started 2026-11-19 at the user's request: a flagship pass on smoothness and motion. Whatever stalls can be removed is removed; whatever wait remains is carried by purposeful motion, so the reader feels no hitch. Every press, drag, scroll and selection should answer like a system interface (immediate, follows the hand, interruptible, settles with its momentum), every control should belong to the theme (no browser-default widgets), and the model should be made more real by refining what is there, not by adding more.
 
-**Status:** W, X and Y done (2026-11-19). Z next.
+**Status:** W, X, Y and Z done (2026-11-19). Not yet pushed.
 
 **Rules (carried over)**
 - Measure first and say what each change bought. `?bench` before and after every phase, and the stutter census (`.playwright-mcp/w-census.js`: a whole visit, every long frame attributed to its step, long-animation-frame scripts) against the previous round served from a worktree.
@@ -54,4 +54,10 @@ Already in place and kept: press feedback (gives at once, springs back on releas
 
 ## Phase Z — Detail and modelling fidelity
 
-Close-up turntable review against the original; refine the 3–5 least convincing parts (board edges and corners, fore-edge, headbands, turn-ins, leaf bend, contact shadow) through textures, normals and parameters only.
+A close-up review (head corner, fore-edge, open boards, the tail from above) found three things that read as wrong at close range; each is fixed without adding anything:
+
+- **Pale bands across a gilt fore-edge.** Six paper-coloured "gathering" strips crossed the fore-edge, and on gold, stained or marbled edges they showed as bright seams. A decorated edge is trimmed smooth before it is coloured: the strips now show only on a plain edge.
+- **Endpaper in the squares.** Where the boards stand past the pages, the paste-down's printed pattern showed. The paste-down is now inset past the squares (`PASTE_INSET`) and the turn-ins reach exactly to its edge (`layoutTurnIns`), as the covering turned over a real board does: the squares show the covering, the open board a framed paste-down. With rounded corners the turn-ins stop short of the curve.
+- **The endpaper printed on the spine lining.** Seen from the head, the lining (which shared the endpaper's material) showed a squeezed copy of the endpaper design; it is plain paper now, a shade of the endpaper colour.
+
+Final census against round 4 (same script, same machine): frames over 33 ms 96 → 40, over 50 ms 43 → 18; the first book's 1.4 s frame is gone. Bench at parity or better.
