@@ -15,7 +15,7 @@ import {
 import { whenIdle } from "../motion.js";
 import { pad, uid } from "../util.js";
 import { segmented, toggle } from "./controls.js";
-import { clearNotice, confirmDialog, downloadBlob, h, notice, pickFile, toast } from "./dom.js";
+import { busy, clearNotice, confirmDialog, downloadBlob, h, notice, pickFile, toast } from "./dom.js";
 import { drawCoverThumb } from "./thumbs.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -359,10 +359,12 @@ export function createLibraryUi({ store, engine, audio }) {
     });
   }
 
-  async function importBook() {
+  async function importBook(event) {
     if (engine.mode !== "hero") return;
+    const button = event?.currentTarget;
     const file = await pickFile(importInput);
     if (!file) return;
+    const done = busy(button);
     try {
       const payload = JSON.parse(await file.text());
       if (payload?.format === "folio-atelier-library" && Array.isArray(payload.books)) {
@@ -389,6 +391,8 @@ export function createLibraryUi({ store, engine, audio }) {
       toast(t("Imported “{title}”.", { title: book.title }));
     } catch (error) {
       toast(t("That file is not a Folio Atelier book."));
+    } finally {
+      done();
     }
   }
 

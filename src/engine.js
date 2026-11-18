@@ -827,7 +827,7 @@ function buildRig(book) {
     onAsset: () => {
       if (!bookRigs.includes(rig)) return;
       pageEpoch += 1;
-      if (rig.painted) rig.repaint({ force: true });
+      if (rig.painted) rig.repaint({ force: true, fade: rig === activeBook ? swapSeconds(SWAP_ASSET) : 0 });
       if (rig === activeBook) schedulePageRefresh(0);
       requestFrame();
     }
@@ -920,7 +920,9 @@ function flushRepaints() {
       const hidden = draft ? rig.hiddenFaces(camera) : null;
       // The endpapers are inside the boards: out of sight while the book is shut.
       if (hidden) hidden.endpaper = !readingOpen;
-      if (rig.repaint({ draft, hidden })) draftRigs.add(rig);
+      // Anything but a stream of edits (a drag, typing) fades in on the book in hand.
+      const fade = rig === activeBook && !entry.draft ? swapSeconds(wholeBook ? SWAP_WHOLE : SWAP_CLICK) : 0;
+      if (rig.repaint({ draft, hidden, fade })) draftRigs.add(rig);
       if (has("front") || has("spine") || has("back") || has("meta")) requestCoverFonts(rig);
     }
     if (books[selectedIndex] === rig.data) applySelectedTheme();
@@ -949,6 +951,15 @@ function flushRepaints() {
 }
 
 let settleEpoch = 0;
+
+// Cross-fade lengths (seconds) for a board repainted on the book in hand: a
+// whole new binding, a single click, the sharp board after its draft, fonts
+// or pictures arriving. None with reduced motion, nor in the middle of a flight.
+const SWAP_WHOLE = 0.36;
+const SWAP_CLICK = 0.22;
+const SWAP_SHARPEN = 0.26;
+const SWAP_ASSET = 0.3;
+const swapSeconds = (seconds) => (reducedMotion || mode !== "detail" ? 0 : seconds);
 
 /** Start (or restart) the board-by-board full-size pass after `delay` ms. */
 function scheduleSettle(delay) {
@@ -980,7 +991,7 @@ function settleDrafts() {
       continue;
     }
     const hidden = rig === activeBook ? rig.hiddenFaces(camera) : null;
-    const more = rig.repaint({ budget: 1, hidden });
+    const more = rig.repaint({ budget: 1, hidden, fade: rig === activeBook ? swapSeconds(SWAP_SHARPEN) : 0 });
     painted += rig.paintedFaces;
     if (!more) draftRigs.delete(rig);
   }
@@ -2049,6 +2060,7 @@ function finishClosing() {
   ribbonSway.velocity = 0;
   glintTime = 1;
   activeBook.motion.scale.setScalar(1);
+  activeBook.releaseSwaps();
   activeBook.setResolution(quality.shelf);
   activeBook.setCase(1);
   controls.target.copy(shelfCameraTarget);
@@ -2186,6 +2198,7 @@ function frame(time) {
     updateSheetShare(delta);
     updateReadingAmount(delta);
     updateRebind(delta);
+    if (activeBook.stepSwaps(delta)) motion = true;
     updateRibbon(delta);
     updateGlint(delta);
   }
@@ -2786,6 +2799,7 @@ async function initialize(options) {
     if (!suspended) renderFrame();
     experience.classList.add("webgl-ready");
     beginArrival();
+    loading.style.setProperty("--progress", "1");
     loading.classList.add("is-done");
     scheduleWarmup();
     // After the room has come in, so the arrival never waits on it.

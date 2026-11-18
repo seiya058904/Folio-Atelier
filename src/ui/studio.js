@@ -52,7 +52,7 @@ import {
   tiles,
   toggle
 } from "./controls.js";
-import { ICONS, downloadBlob, h, icon, pickFile, toast } from "./dom.js";
+import { ICONS, busy, downloadBlob, h, icon, pickFile, toast } from "./dom.js";
 import { coverThumbKey, drawCoverThumb, drawMotifGlyph } from "./thumbs.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -285,7 +285,19 @@ export function createStudioUi({ store, engine, audio }) {
   function thumb(canvas, key, paint) {
     const entry = { canvas, key, paint, shown: null, visible: false, queued: false };
     canvas.thumb = entry;
-    canvas.classList.add("is-pending");
+    // A rebuilt tab (after a preset, say) shows each thumbnail's picture at
+    // once: the cached one if its content is known, otherwise what the same
+    // slot showed before, until the new one is painted. Never a blank tile.
+    const slot = buildingPane?.thumbs.length ?? -1;
+    const before = buildingPane?.previous?.[slot];
+    const known = before || thumbCache.size ? thumbCache.get(key()) : null;
+    const source = known || (before && before.width === canvas.width && before.height === canvas.height ? before : null);
+    if (source) {
+      canvas.getContext("2d").drawImage(source, 0, 0);
+      if (known) entry.shown = key();
+    } else {
+      canvas.classList.add("is-pending");
+    }
     buildingPane?.thumbs.push(entry);
     return canvas;
   }
@@ -927,10 +939,12 @@ export function createStudioUi({ store, engine, audio }) {
       };
       show();
     }
-    const chooseImage = async () => {
+    const chooseImage = async (event) => {
+      const button = event?.currentTarget;
       const file = await pickFile(imageInput);
       if (!file) return;
-      const id = await addImage(file);
+      const done = busy(button);
+      const id = await addImage(file).finally(done);
       if (!id) {
         toast(t("That image could not be read."));
         return;
@@ -1469,10 +1483,12 @@ export function createStudioUi({ store, engine, audio }) {
         h("p", { class: "group__hint", text: t("The list is built from your chapter openers, with their page numbers.") })
       );
     } else if (page.type === "plate") {
-      const choose = async () => {
+      const choose = async (event) => {
+        const button = event?.currentTarget;
         const file = await pickFile(imageInput);
         if (!file) return;
-        const id = await addImage(file);
+        const done = busy(button);
+        const id = await addImage(file).finally(done);
         if (!id) { toast(t("That image could not be read.")); return; }
         edit(() => { target().image = id; }, ["pages"], { rerender: true });
       };
@@ -1782,6 +1798,7 @@ export function createStudioUi({ store, engine, audio }) {
 
   function buildPane(pane) {
     pane.thumbs.forEach((entry) => thumbObserver.unobserve(entry.canvas));
+    pane.previous = pane.thumbs.filter((entry) => entry.shown).length ? pane.thumbs.map((entry) => (entry.shown ? entry.canvas : null)) : null;
     pane.thumbs = [];
     buildingPane = pane;
     try {
@@ -1790,6 +1807,7 @@ export function createStudioUi({ store, engine, audio }) {
       buildingPane = null;
     }
     pane.stale = false;
+    pane.previous = null;
     pane.thumbs.forEach((entry) => thumbObserver.observe(entry.canvas));
   }
 

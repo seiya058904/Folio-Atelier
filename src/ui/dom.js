@@ -58,6 +58,20 @@ export const ICONS = {
   plus: "M8 3v10M3 8h10"
 };
 
+/**
+ * Mark a control as working (a picture being read, a file unpacked): it
+ * shows a travelling underline and ignores presses. Returns the undo.
+ */
+export function busy(element) {
+  if (!(element instanceof HTMLElement)) return () => {};
+  element.classList.add("is-busy");
+  element.setAttribute("aria-busy", "true");
+  return () => {
+    element.classList.remove("is-busy");
+    element.removeAttribute("aria-busy");
+  };
+}
+
 let toastTimer = 0;
 
 export function toast(message, duration = 2600) {

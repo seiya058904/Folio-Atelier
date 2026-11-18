@@ -5,9 +5,79 @@ import * as THREE from "three";
 import { perf } from "../perf.js";
 
 let maxAnisotropy = 8;
+let boundRenderer = null;
 
 export function bindRenderer(renderer) {
+  boundRenderer = renderer;
   maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+}
+
+/*
+ * A copy of what a texture shows now, kept on the GPU, so a board can fade
+ * from its previous picture to the one about to be uploaded. One quad drawn
+ * into a render target: a fraction of a millisecond, and no canvas is read.
+ */
+let copyScene = null;
+let copyCamera = null;
+let copyMaterial = null;
+
+function copier() {
+  if (copyScene) return copyMaterial;
+  copyMaterial = new THREE.ShaderMaterial({
+    uniforms: { source: { value: null } },
+    vertexShader: `varying vec2 vUv;
+void main() { vUv = uv; gl_Position = vec4( position.xy, 0.0, 1.0 ); }`,
+    fragmentShader: `uniform sampler2D source;
+varying vec2 vUv;
+void main() { gl_FragColor = texture2D( source, vUv ); }`,
+    blending: THREE.NoBlending,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false
+  });
+  copyScene = new THREE.Scene();
+  copyScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copyMaterial));
+  copyCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  return copyMaterial;
+}
+
+/** Whether `texture` is on the GPU with its current contents. */
+export function isUploaded(texture) {
+  if (!boundRenderer || !texture) return false;
+  const properties = boundRenderer.properties.get(texture);
+  return Boolean(properties.__webglTexture) && properties.__version === texture.version;
+}
+
+/**
+ * Copy `texture` (as uploaded) into `target`, a render target made by
+ * `snapshotTarget`. Returns false when there is nothing on the GPU to copy.
+ */
+export function snapshotTexture(texture, target) {
+  if (!isUploaded(texture)) return false;
+  const material = copier();
+  material.uniforms.source.value = texture;
+  const previous = boundRenderer.getRenderTarget();
+  const autoClear = boundRenderer.autoClear;
+  boundRenderer.autoClear = false;
+  boundRenderer.setRenderTarget(target);
+  boundRenderer.render(copyScene, copyCamera);
+  boundRenderer.setRenderTarget(previous);
+  boundRenderer.autoClear = autoClear;
+  material.uniforms.source.value = null;
+  return true;
+}
+
+/** A render target for `snapshotTexture`, mipmapped like the boards. */
+export function snapshotTarget(width, height, colorSpace) {
+  const target = new THREE.WebGLRenderTarget(width, height, {
+    depthBuffer: false,
+    generateMipmaps: true,
+    minFilter: THREE.LinearMipmapLinearFilter,
+    magFilter: THREE.LinearFilter,
+    colorSpace
+  });
+  target.texture.anisotropy = Math.min(8, maxAnisotropy);
+  return target;
 }
 
 export function configureCanvasTexture(texture, { color = true, anisotropy = 16 } = {}) {

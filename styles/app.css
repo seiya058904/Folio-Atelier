@@ -2233,6 +2233,23 @@ p {
   text-transform: uppercase;
 }
 
+/* A thread drawn out as the atelier gets ready (stages set from main.js). */
+.loading__progress {
+  width: 96px;
+  height: 1px;
+  overflow: hidden;
+  background: var(--hairline);
+}
+
+.loading__progress span {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transform: scaleX(var(--progress, 0.08));
+  transform-origin: left center;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
 .loading {
   transition: opacity var(--duration-slow) var(--ease-out), visibility 0s linear var(--duration-slow);
 }
@@ -2889,4 +2906,35 @@ canvas.is-fresh {
 
 #scene.is-moving-book {
   cursor: grabbing;
+}
+
+/* Working (a picture being read, a file unpacked): a light travels along the
+   underline, and the control ignores presses until it is done. */
+.is-busy {
+  pointer-events: none;
+  cursor: progress;
+}
+
+.link-button.is-busy {
+  border-bottom-color: var(--hairline);
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
+  background-size: 45% 1px;
+  background-position: -60% 100%;
+  animation: busy-line calc(var(--duration-entrance) * 1.2) var(--ease-out) infinite;
+}
+
+.pill-button.is-busy {
+  opacity: 0.72;
+}
+
+@keyframes busy-line {
+  to { background-position: 160% 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link-button.is-busy {
+    animation: none;
+    background-position: 50% 100%;
+    opacity: 0.7;
+  }
 }

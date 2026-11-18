@@ -18,7 +18,7 @@ import {
   paintSpine,
   setFastGrain
 } from "../textures/faces.js";
-import { createPaintTexture } from "../textures/gl.js";
+import { createPaintTexture, snapshotTarget, snapshotTexture } from "../textures/gl.js";
 import { PAGE_SIZE, pageSignature, paintPage } from "../textures/pages.js";
 import {
   BAKED_EDGES,
@@ -502,10 +502,36 @@ vec3 reliefNormal( vec3 surfPos, vec3 surfNorm, vec2 uv, float faceDir ) {
 }
 `;
 
+/*
+ * Cross-fade. When a board is repainted with something new (a preset, a
+ * covering, the sharp board after its draft), what it showed is copied on the
+ * GPU first (`snapshotTexture`) and the shader mixes from that copy to the
+ * new picture as `swap` runs from 0 to 1. At 1 the copy is not sampled.
+ */
+const SWAP_PARS = `
+uniform sampler2D swapMap;
+uniform float swap;
+`;
+const SWAP_MAP = `
+#ifdef USE_MAP
+  vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+  if ( swap < 1.0 ) sampledDiffuseColor = mix( texture2D( swapMap, vMapUv ), sampledDiffuseColor, swap );
+  diffuseColor *= sampledDiffuseColor;
+#endif
+`;
+
+function swapUniforms() {
+  return { map: { value: null }, amount: { value: 1 } };
+}
+
 function compileRelief(shader) {
   shader.uniforms.reliefMap = this.userData.relief.map;
   shader.uniforms.reliefScale = this.userData.relief.scale;
+  shader.uniforms.swapMap = this.userData.swap.map;
+  shader.uniforms.swap = this.userData.swap.amount;
   shader.fragmentShader = shader.fragmentShader
+    .replace("#include <map_pars_fragment>", `#include <map_pars_fragment>\n${SWAP_PARS}`)
+    .replace("#include <map_fragment>", SWAP_MAP)
     .replace("#include <bumpmap_pars_fragment>", `#include <bumpmap_pars_fragment>\n${RELIEF_PARS}`)
     .replace(
       "#include <normal_fragment_maps>",
@@ -515,6 +541,7 @@ function compileRelief(shader) {
 
 function withRelief(material) {
   material.userData.relief = { map: { value: null }, scale: { value: 0 } };
+  material.userData.swap = swapUniforms();
   material.onBeforeCompile = compileRelief;
   return material;
 }
@@ -528,11 +555,14 @@ function withRelief(material) {
 function compileLeaf(shader) {
   shader.uniforms.leafMain = this.userData.leaf.main;
   shader.uniforms.leafSecond = this.userData.leaf.second;
+  shader.uniforms.swapMap = this.userData.swap.map;
+  shader.uniforms.swap = this.userData.swap.amount;
   shader.fragmentShader = shader.fragmentShader
-    .replace("#include <map_pars_fragment>", "#include <map_pars_fragment>\nuniform vec3 leafMain;\nuniform vec3 leafSecond;")
+    .replace("#include <map_pars_fragment>", `#include <map_pars_fragment>\nuniform vec3 leafMain;\nuniform vec3 leafSecond;\n${SWAP_PARS}`)
     .replace("#include <map_fragment>", `vec3 leafTint = leafMain;
 #ifdef USE_MAP
   vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+  if ( swap < 1.0 ) sampledDiffuseColor = mix( texture2D( swapMap, vMapUv ), sampledDiffuseColor, swap );
   leafTint = mix( leafMain, leafSecond, clamp( 1.0 - sampledDiffuseColor.g / max( sampledDiffuseColor.r, 0.001 ), 0.0, 1.0 ) );
   diffuseColor *= vec4( leafTint * sampledDiffuseColor.r, sampledDiffuseColor.a );
 #endif`)
@@ -570,6 +600,7 @@ const SHOW_THROUGH = { rice: 0.14, white: 0.075, cream: 0.07, ivory: 0.07, blush
 
 function withLeaf(material) {
   material.userData.leaf = { main: { value: new THREE.Color(1, 1, 1) }, second: { value: new THREE.Color(1, 1, 1) } };
+  material.userData.swap = swapUniforms();
   material.onBeforeCompile = compileLeaf;
   return material;
 }
@@ -1378,7 +1409,85 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   const shown = { front: {}, spine: {}, back: {}, endpaper: {} };
 
   /** Paint one board if needed. Returns true if it still owes a full-size pass. */
-  function repaintFace(face, signature, { force, draft, draftScale, hidden }) {
+  /* ----- cross-fades (see SWAP_MAP) ----- */
+
+  const swapFor = {
+    front: [coverArt, foilArt],
+    spine: [spineArt, spineFoilArt],
+    back: [backArt, backFoilArt]
+  };
+  // One copy per layer and board, at the logical board size, made when first
+  // needed (only the book in the studio fades) and let go on the shelf.
+  const swapTargets = {};
+  const swapRuns = {};
+
+  function beginSwap(face, duration) {
+    const run = swapRuns[face];
+    // Repainted again early in a fade: keep fading from the older picture.
+    if (run && run.time / run.duration < 0.5) {
+      run.time = 0;
+      run.duration = duration;
+      return;
+    }
+    let started = false;
+    swapFor[face].forEach((material, layer) => {
+      const key = `${face}${layer}`;
+      const source = material.map;
+      if (!source) return;
+      if (!swapTargets[key]) {
+        swapTargets[key] = snapshotTarget(FACE_SIZE[face].width, FACE_SIZE[face].height, source.colorSpace);
+      }
+      if (!snapshotTexture(source, swapTargets[key])) {
+        material.userData.swap.amount.value = 1;
+        material.userData.swap.map.value = null;
+        return;
+      }
+      material.userData.swap.map.value = swapTargets[key].texture;
+      material.userData.swap.amount.value = 0;
+      started = true;
+    });
+    if (started) swapRuns[face] = { time: 0, duration };
+  }
+
+  /** Advance the fades by `delta` seconds; true while any is running. */
+  function stepSwaps(delta) {
+    let running = false;
+    Object.entries(swapRuns).forEach(([face, run]) => {
+      run.time += delta;
+      const t = Math.min(1, run.time / run.duration);
+      // Ease out: most of the change early, a soft landing.
+      const amount = 1 - (1 - t) * (1 - t) * (1 - t);
+      swapFor[face].forEach((material) => {
+        if (material.userData.swap.map.value) material.userData.swap.amount.value = amount;
+      });
+      if (t >= 1) {
+        swapFor[face].forEach((material) => {
+          material.userData.swap.amount.value = 1;
+          material.userData.swap.map.value = null;
+        });
+        delete swapRuns[face];
+      } else {
+        running = true;
+      }
+    });
+    return running;
+  }
+
+  function releaseSwaps() {
+    Object.keys(swapRuns).forEach((face) => {
+      swapFor[face].forEach((material) => {
+        material.userData.swap.amount.value = 1;
+        material.userData.swap.map.value = null;
+      });
+      delete swapRuns[face];
+    });
+    Object.keys(swapTargets).forEach((key) => {
+      swapTargets[key].dispose();
+      delete swapTargets[key];
+    });
+  }
+
+  function repaintFace(face, signature, { force, draft, draftScale, hidden, fade = 0 }) {
     const state = shown[face];
     const relief = reliefOn();
     const changed = {
@@ -1394,6 +1503,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     let wanted = scale;
     if (draft) wanted = content ? Math.min(scale, draftScale) : state.scale ?? scale;
     if (!content && state.scale === wanted) return wanted < scale;
+    if (fade > 0) beginSwap(face, fade);
     const base = targets[face];
     const foil = targets[`${face}Foil`];
     if (state.scale !== wanted) {
@@ -1449,7 +1559,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
    * as pending), so a full-size pass can be spread over several frames;
    * boards facing the camera go first.
    */
-  function repaint({ force = false, draft = false, hidden = null, budget = Infinity } = {}) {
+  function repaint({ force = false, draft = false, hidden = null, budget = Infinity, fade = 0 } = {}) {
     rig.painted = true;
     const faces = ["front", "spine", "back"];
     if (budget < faces.length && hidden) faces.sort((a, b) => Number(Boolean(hidden[a])) - Number(Boolean(hidden[b])));
@@ -1471,7 +1581,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
           || Boolean(state.reliefStale) || (reliefOn() && state.relief !== signature.relief)) pending = true;
         return;
       }
-      if (repaintFace(face, signatures[index], { force, draft, draftScale, hidden: hidden?.[face] })) pending = true;
+      if (repaintFace(face, signatures[index], { force, draft, draftScale, hidden: hidden?.[face], fade })) pending = true;
     });
     if (repaintEndpaper(force, draft && hidden?.endpaper)) pending = true;
     applyLook();
@@ -1518,6 +1628,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
       if (saved.relief || saved.leaf) {
         if (saved.relief) material.userData.relief = saved.relief;
         if (saved.leaf) material.userData.leaf = saved.leaf;
+        if (saved.swap) material.userData.swap = saved.swap;
         material.onBeforeCompile = source.onBeforeCompile;
       }
       set(material);
@@ -1637,6 +1748,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   }
 
   function dispose() {
+    releaseSwaps();
     clearLeaves();
     Object.values(targets).forEach((target) => target.dispose());
     leaves.forEach((pivot) => pivot.userData.faces.forEach((face) => face.surface.geometry.dispose()));
@@ -1674,6 +1786,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     /** Boards painted by the last `repaint` call. */
     get paintedFaces() { return paintedFaces; },
     shaderVariants,
+    stepSwaps,
+    releaseSwaps,
     setResolution,
     setLeafPage,
     setLeafShadows,

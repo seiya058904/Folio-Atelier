@@ -59,8 +59,18 @@ async function claimLibrary(onLost) {
   });
 }
 
+/**
+ * The thread under the loading mark follows the real stages (modules,
+ * library, room); the engine draws it out to the end once the covers' type
+ * is in and lifts the veil.
+ */
+function loadingStage(amount) {
+  document.querySelector("#loading")?.style.setProperty("--progress", String(amount));
+}
+
 async function start() {
   window.__folioStarted = true;
+  loadingStage(0.28);
   clearTimeout(window.__folioBootTimer);
   document.querySelector("#interrupt").hidden = true;
   localizeDocument();
@@ -104,6 +114,7 @@ async function start() {
     });
   });
   await store.init();
+  loadingStage(0.55);
   liftBlocked?.();
   // Pictures no book uses any more (replaced, removed, deleted with a book).
   if (store.persistent && !store.readError) sweepImages(store.books).catch(() => {});
@@ -146,6 +157,7 @@ async function start() {
     }
   });
   if (!ready) return;
+  loadingStage(0.86);
 
   library = createLibraryUi({ store, engine, audio });
   studio = createStudioUi({ store, engine, audio });
