@@ -4,7 +4,7 @@ Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2
 
 Started 2026-11-18 at the user's request to take the next round as far as it goes. It begins with a real-browser review (Ego, real GPU, DPR 1.5) of everything round 3 built, and with the stalls round 3 left: the frames after a preset or a landing.
 
-**Status:** S, T, U and V done (2026-11-19).
+**Status:** S, T, U and V done and deployed to GitHub Pages (2026-11-19, `c0c2c64`; live walkthrough in Playwright and Ego passed).
 
 **Rules (carried over)**
 - Measure first and say what each change bought. `?bench` before and after every phase; turntable sweep after any 3D change; compare with the original before changing rig, lighting or page motion.
