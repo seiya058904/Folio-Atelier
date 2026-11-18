@@ -21,6 +21,12 @@ Agreed with the user on 2026-11-18. The aim of this round: nothing lost, nothing
   - Phones: an open book was cut off on the left (framed for the shut book). The view now widens and slides to frame the whole spread as the cover opens, and back as it shuts. The studio is a bottom sheet with a grabber: drag it between a peek, half and nearly full height (flicks carry on to the next stop), or tap the grabber; the book is reframed in the room left above it, and the reading bar steps aside when the sheet is raised for writing.
   - The page list glides when pages are moved, copied, added or removed (FLIP), instead of jumping.
   - `?bench` unchanged: the cold shelf sweep, which moved to p95 18 ms in two runs, was checked against the old easing in an A/B run (p95 12.2 ms both; frames here are quantised to 6.1 ms steps).
+- **P — done.**
+  - Tone mapping measured on eight presets (front-board colour against the swatch): ACES moved vermilion's hue from 6° to 11° (coral) and kept half of citron's chroma; AgX greyed everything further; Khronos PBR Neutral kept vermilion's hue exactly and 86 % of citron's chroma. Neutral is now the tone mapping, at exposure 0.84, with the room's walls, floor and lights desaturated (×0.55) so the studio, golden-hour and night rooms keep the look they were tuned for. Side-by-side shelves in all three lights were compared before choosing.
+  - Reflections follow the light: the reflection room is tinted and dimmed per preset (gold at night mirrors a dark, lamp-warm room).
+  - Show-through: each printed face lets its other side through, mirrored and faint (×0.06–0.075; rice paper ×0.14). Checked with an exaggerated setting that the mirrored text lines up with the other side's text block.
+  - Brushed foil already used anisotropic highlights; gutter shading and paper fibre were already painted. Close-range cloth detail maps: not done (the boards hold up at the closest zoom).
+  - `?bench` unchanged.
 
 **Rules (carried over)**
 - Real speed first; mask only waits that cannot be removed, with cheap motion that respects `prefers-reduced-motion`.

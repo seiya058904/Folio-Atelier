@@ -539,6 +539,35 @@ function compileLeaf(shader) {
     .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance *= leafTint;");
 }
 
+/*
+ * Show-through: a printed leaf lets a little of the print on its other side
+ * through, mirrored, as real paper does. Each face samples its partner's
+ * texture at (1 - u, v); thinner stocks show more. One extra sample a pixel.
+ */
+function compileThrough(shader) {
+  shader.uniforms.throughMap = this.userData.through.map;
+  shader.uniforms.throughAmount = this.userData.through.amount;
+  shader.fragmentShader = shader.fragmentShader
+    .replace("#include <map_pars_fragment>", "#include <map_pars_fragment>\nuniform sampler2D throughMap;\nuniform float throughAmount;")
+    .replace("#include <map_fragment>", `#include <map_fragment>
+#ifdef USE_MAP
+  if ( throughAmount > 0.0 ) {
+    vec3 behind = texture2D( throughMap, vec2( 1.0 - vMapUv.x, vMapUv.y ) ).rgb;
+    float ink = clamp( 1.0 - dot( behind, vec3( 0.3333 ) ) / 0.84, 0.0, 1.0 );
+    diffuseColor.rgb *= 1.0 - ink * throughAmount;
+  }
+#endif`);
+}
+
+function withThrough(material) {
+  material.userData.through = { map: { value: null }, amount: { value: 0 } };
+  material.onBeforeCompile = compileThrough;
+  return material;
+}
+
+// How much of the other side shows through each paper stock.
+const SHOW_THROUGH = { rice: 0.14, white: 0.075, cream: 0.07, ivory: 0.07, blush: 0.07, grey: 0.065, aged: 0.06 };
+
 function withLeaf(material) {
   material.userData.leaf = { main: { value: new THREE.Color(1, 1, 1) }, second: { value: new THREE.Color(1, 1, 1) } };
   material.onBeforeCompile = compileLeaf;
@@ -641,10 +670,10 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   const ribbonMaterial = physical({
     roughness: 0.62, metalness: 0.08, sheen: 0.36, sheenRoughness: 0.68, side: THREE.DoubleSide
   });
-  const sheetMaterial = () => physical({
+  const sheetMaterial = () => withThrough(physical({
     color: 0xeee6d7, map: paperFace, bumpMap: paperFace, bumpScale: 0.0012,
     roughness: 0.96, metalness: 0, sheen: 0.02, sheenRoughness: 1, side: THREE.FrontSide
-  });
+  }));
 
   /* ----- page block and boards ----- */
   const pageBlock = createMesh(g.pageBlock, pageMaterial, "page-block");
@@ -1328,6 +1357,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     });
     endpaperMaterial.bumpMap = stock;
     rig.paperFace = stock;
+    rig.showThrough = SHOW_THROUGH[spec.interior.paper] ?? 0.07;
+    leaves.forEach(linkShowThrough);
   }
 
   const PAINTERS = { front: paintFront, spine: paintSpine, back: paintBack };
@@ -1521,10 +1552,22 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
   }
 
   /** Print a page on one side of a leaf (or leave it blank when `entry` is null). */
+  /** Each printed face of a leaf shows its partner's print, faintly, through the paper. */
+  function linkShowThrough(pivot) {
+    const faces = pivot.userData.faces;
+    faces.forEach((face, side) => {
+      const partner = faces[1 - side].material.map;
+      const printed = partner && partner !== rig.paperFace;
+      face.material.userData.through.map.value = printed ? partner : null;
+      face.material.userData.through.amount.value = printed ? rig.showThrough ?? 0.07 : 0;
+    });
+  }
+
   function setLeafPage(pivot, side, entry, index, pageScale, epoch = 0) {
     const face = pivot.userData.faces[side];
     if (!entry) {
       face.material.map = rig.paperFace;
+      linkShowThrough(pivot);
       return;
     }
     const width = Math.round(PAGE_SIZE.width * pageScale);
@@ -1537,6 +1580,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
       face.signature = signature;
     }
     face.material.map = face.target.texture;
+    linkShowThrough(pivot);
   }
 
   const ribbonRest = ribbon.rotation.z;

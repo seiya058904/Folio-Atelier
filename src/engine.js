@@ -403,6 +403,7 @@ function applyTheme(palette, accent) {
   themeTargets.rim.set(accent);
 
   applyRoomToTargets();
+  tameRoomForNeutral();
 
   if (!themeInitialized || reducedMotion) {
     themeInitialized = true;
@@ -478,8 +479,67 @@ function applyRoomToTargets() {
   }
 }
 
+/*
+ * Tone mapping is Khronos PBR Neutral: a cloth renders the colour of its
+ * swatch (ACES turned vermilion to coral and halved the chroma of citron).
+ * The room was tuned under ACES, which greys out pale warm colours; under
+ * Neutral the walls and the lights would keep all their warmth, so their
+ * saturation is scaled back to the look they were tuned for.
+ */
+const TONE_MAPPING = THREE.NeutralToneMapping;
+const TONE_EXPOSURE = 0.84;
+const ROOM_CHROMA = { surface: 0.55, light: 0.55 };
+const tameScratch = { h: 0, s: 0, l: 0 };
+function tameRoomForNeutral() {
+  const tame = (color, factor) => {
+    color.getHSL(tameScratch);
+    color.setHSL(tameScratch.h, tameScratch.s * factor, tameScratch.l);
+  };
+  ["wall", "fog", "floor"].forEach((name) => tame(themeTargets[name], ROOM_CHROMA.surface));
+  ["key", "hemisphere", "rim", "fill"].forEach((name) => tame(themeTargets[name], ROOM_CHROMA.light));
+}
+
+/*
+ * What the foil, the clasp and the varnish reflect. The studio's reflection
+ * room is tinted and dimmed with the light, so gold at night mirrors a dark,
+ * lamp-warm room instead of a bright studio. Built once per light (a few
+ * milliseconds); the texture swap keeps every program.
+ */
+const ENVIRONMENTS = {
+  studio: { tint: "#ffffff", strength: 1 },
+  morning: { tint: "#f7f8ff", strength: 1.06 },
+  golden: { tint: "#ffcc94", strength: 0.96 },
+  night: { tint: "#ffb36b", strength: 0.36 }
+};
+let environmentKey = "";
+let pmrem = null;
+
+function buildEnvironment(name) {
+  if (!renderer || !scene) return;
+  const look = ENVIRONMENTS[name] || ENVIRONMENTS.studio;
+  if (environmentKey === name) return;
+  environmentKey = name;
+  const reflection = new RoomEnvironment();
+  const tint = new THREE.Color(look.tint).multiplyScalar(look.strength);
+  const seen = new Set();
+  reflection.traverse((object) => {
+    const material = object.material;
+    if (!material?.color || seen.has(material)) return;
+    seen.add(material);
+    material.color.multiply(tint);
+  });
+  if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
+  const target = pmrem.fromScene(reflection, 0.04);
+  reflection.dispose();
+  environmentTarget?.dispose();
+  environmentTarget = target;
+  scene.environment = target.texture;
+  shadowHold = Math.max(shadowHold, 1);
+}
+
 /** Light strengths, shelf surface and frame for the current room. */
 function applyRoomSettings() {
+  buildEnvironment(room.light);
   const light = LIGHT_PRESETS[room.light] || {};
   Object.entries(roomLights).forEach(([name, source]) => {
     if (!source || source.userData.base === undefined) return;
@@ -2468,6 +2528,7 @@ function disposeExperience() {
   controls?.dispose();
   bookRigs.forEach((rig) => rig.dispose());
   environmentTarget?.dispose();
+  pmrem?.dispose();
   composer?.dispose();
   renderer?.dispose();
 }
@@ -2500,8 +2561,8 @@ async function initialize(options) {
 
   bindRenderer(renderer);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.9;
+  renderer.toneMapping = TONE_MAPPING;
+  renderer.toneMappingExposure = TONE_EXPOSURE;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.shadowMap.autoUpdate = false;
@@ -2511,11 +2572,8 @@ async function initialize(options) {
   scene.fog = new THREE.FogExp2(0xe9dfcb, 0.027);
   // Looking past the back wall shows the room colour, never a black void.
   scene.background = scene.fog.color;
-  const pmremGenerator = new THREE.PMREMGenerator(renderer);
-  environmentTarget = pmremGenerator.fromScene(new RoomEnvironment(), 0.04);
-  scene.environment = environmentTarget.texture;
+  buildEnvironment(room.light);
   scene.environmentIntensity = 0.72;
-  pmremGenerator.dispose();
 
   camera = new THREE.PerspectiveCamera(32, 1, 0.1, 60);
   shelfStage = new THREE.Group();
