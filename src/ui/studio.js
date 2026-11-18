@@ -1748,11 +1748,47 @@ export function createStudioUi({ store, engine, audio }) {
     const pane = paneFor(tab);
     const scroll = currentPane === pane ? body.scrollTop : pane.scroll;
     const focus = captureFocus();
+    const before = currentPane === pane && keepScroll ? listPositions(pane.element) : null;
     buildPane(pane);
     activate(pane);
     body.scrollTop = keepScroll ? scroll : 0;
     restoreFocus(focus);
+    if (before) glideList(pane.element, before);
     updateHeader();
+  }
+
+  /*
+   * A rebuilt list (pages moved, copied, added or removed) glides from where
+   * its rows were to where they are now, and new rows open in place, instead
+   * of the whole list jumping (FLIP: first, last, invert, play).
+   */
+  const listMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  function listPositions(root) {
+    const positions = new Map();
+    root?.querySelectorAll("[data-page]").forEach((row) => positions.set(row.dataset.page, row.getBoundingClientRect().top));
+    return positions;
+  }
+
+  function glideList(root, before) {
+    if (listMotion.matches || !before.size || !root?.animate) return;
+    const easing = "cubic-bezier(0.2, 0.72, 0.24, 1)";
+    root.querySelectorAll("[data-page]").forEach((row) => {
+      const was = before.get(row.dataset.page);
+      if (was === undefined) {
+        row.animate(
+          [{ opacity: 0, transform: "translateY(-6px) scale(0.98)" }, { opacity: 1, transform: "none" }],
+          { duration: 320, easing, delay: 60 }
+        );
+        return;
+      }
+      const shift = was - row.getBoundingClientRect().top;
+      if (Math.abs(shift) < 1) return;
+      row.animate(
+        [{ transform: `translateY(${shift}px)` }, { transform: "none" }],
+        { duration: 360, easing }
+      );
+    });
   }
 
   /** Show the open tab, building it only if it has never been built or is stale. */
@@ -1843,6 +1879,87 @@ export function createStudioUi({ store, engine, audio }) {
   /* ---------------------------------------------------------------- */
   /* Wiring                                                             */
   /* ---------------------------------------------------------------- */
+
+  /* ----- the bottom sheet (phones): drag it up or down, or tap its grabber ----- */
+
+  // Three resting heights, as shares of the screen: a peek, half, and nearly
+  // all of it for writing. The book is reframed above it as it moves.
+  const SHEET_STOPS = [0.36, 0.5, 0.86];
+  const grabber = $("#studio-grabber");
+  const sheetHeader = panel.querySelector(".studio__header");
+  const experienceElement = $("#experience");
+  const narrowView = () => window.innerWidth < 820;
+  const sheetDrag = { pointerId: null, startY: 0, from: 0.5, share: 0.5, moved: false, samples: [], swallowClick: false };
+  let sheetStop = 0.5;
+
+  function setSheet(share, immediate = false) {
+    sheetDrag.share = share;
+    // Raised for writing, the sheet leaves room only for a small live view of
+    // the book: the reading controls step aside.
+    experienceElement.classList.toggle("is-sheet-high", share > 0.7);
+    experienceElement.style.setProperty("--sheet-height", `${(share * 100).toFixed(2)}dvh`);
+    engine.setSheetShare(share, immediate);
+  }
+
+  function onSheetDown(event) {
+    if (!narrowView() || event.button !== 0 || event.isPrimary === false) return;
+    const onGrabber = grabber.contains(event.target);
+    if (!onGrabber && event.target.closest("button, input, a, textarea, [role='tab']")) return;
+    Object.assign(sheetDrag, { pointerId: event.pointerId, startY: event.clientY, from: sheetStop, moved: false, samples: [] });
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function onSheetMove(event) {
+    if (sheetDrag.pointerId !== event.pointerId) return;
+    const dy = event.clientY - sheetDrag.startY;
+    if (!sheetDrag.moved) {
+      if (Math.abs(dy) < 6) return;
+      sheetDrag.moved = true;
+      experienceElement.classList.add("is-sheet-dragging");
+    }
+    let share = sheetDrag.from - dy / window.innerHeight;
+    // Past the lowest and highest stops it gives, but only a little.
+    const low = SHEET_STOPS[0];
+    const high = SHEET_STOPS[SHEET_STOPS.length - 1];
+    if (share < low) share = low - (low - share) * 0.3;
+    if (share > high) share = high + (share - high) * 0.3;
+    const now = event.timeStamp || performance.now();
+    sheetDrag.samples.push([now, share]);
+    while (sheetDrag.samples.length > 2 && now - sheetDrag.samples[0][0] > 90) sheetDrag.samples.shift();
+    setSheet(share, true);
+  }
+
+  function onSheetEnd(event) {
+    if (sheetDrag.pointerId !== event.pointerId) return;
+    sheetDrag.pointerId = null;
+    if (!sheetDrag.moved) return;
+    experienceElement.classList.remove("is-sheet-dragging");
+    const samples = sheetDrag.samples;
+    let velocity = 0;
+    if (samples.length >= 2) {
+      const [t0, s0] = samples[0];
+      const [t1, s1] = samples[samples.length - 1];
+      if (t1 > t0 && performance.now() - t1 < 80) velocity = ((s1 - s0) / (t1 - t0)) * 1000;
+    }
+    // A flick carries it on to the next stop in that direction.
+    const projected = sheetDrag.share + velocity * 0.16;
+    sheetStop = SHEET_STOPS.reduce((best, stop) => (Math.abs(stop - projected) < Math.abs(best - projected) ? stop : best));
+    setSheet(sheetStop);
+    sheetDrag.swallowClick = true;
+    setTimeout(() => { sheetDrag.swallowClick = false; }, 0);
+  }
+
+  [grabber, sheetHeader].forEach((element) => {
+    element.addEventListener("pointerdown", onSheetDown);
+    element.addEventListener("pointermove", onSheetMove);
+    element.addEventListener("pointerup", onSheetEnd);
+    element.addEventListener("pointercancel", onSheetEnd);
+  });
+  grabber.addEventListener("click", () => {
+    if (sheetDrag.swallowClick) return;
+    sheetStop = sheetStop >= 0.86 ? 0.5 : 0.86;
+    setSheet(sheetStop);
+  });
 
   closeButton.addEventListener("click", () => engine.closeDetail());
   undoButton.addEventListener("click", () => store.step(bookId, -1));

@@ -382,7 +382,8 @@ const ZH = {
   "This browser is not letting the atelier save. Books made now last until the tab closes; export them to keep them.": "此浏览器不允许工坊保存。现在做的书只保留到标签页关闭，请导出以留存。",
   "Your books were last exported {when}. Clearing site data would remove them.": "上次导出书库是{when}。清除网站数据会删掉这些书。",
   "Your books live only in this browser. Export a copy to keep them safe.": "你的书只保存在这个浏览器里。导出一份副本更安心。",
-  "Not now": "稍后"
+  "Not now": "稍后",
+  "Resize the panel": "调整面板高度"
 };
 
 function detect() {

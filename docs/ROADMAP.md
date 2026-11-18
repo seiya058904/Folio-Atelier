@@ -13,6 +13,14 @@ Agreed with the user on 2026-11-18. The aim of this round: nothing lost, nothing
   - Flight into the studio: nothing is painted in flight (no long frames during it). The full-size pass after landing still shows 40–60 ms frames whose main-thread share is about 10 ms; the rest is the GPU process taking the uploads, which this trace cannot see. Left for now.
   - Texture memory for a large library: no evidence it hurts on the target devices; repainting far books when they come back would cost smoothness. Not done.
   - `?bench` unchanged within run-to-run noise.
+- **O — done.** Each piece checked in Playwright:
+  - The shelf can be dragged by hand: on empty wall with a mouse, anywhere with a finger. It follows one to one, carries the hand's speed on release (projected 0.3 s ahead) and settles on a book; past either end it gives with growing resistance and springs back. The shelf now rides a critically damped spring (same settling time as the old easing), so a fling or a new target never jerks it. With a mouse, dragging a book still moves it; on a touch screen a book is lifted by holding it for 380 ms (a short vibration where supported), so a swipe no longer reorders the library by accident. The room shows a grab cursor.
+  - Reading: the pointer near the outer edge of an open page lifts that page's corner a little (the corner nearest the pointer first), a cue that it can be turned.
+  - Arrival: when the loading veil lifts, the books in view are set down on the shelf one after another from the middle out, and the masthead, title, controls and index come in after them (`is-arriving`, `--stagger`).
+  - Camera: view jumps last 0.5–1.05 s depending on how far they swing, and a long swing eases out a little on the way.
+  - Phones: an open book was cut off on the left (framed for the shut book). The view now widens and slides to frame the whole spread as the cover opens, and back as it shuts. The studio is a bottom sheet with a grabber: drag it between a peek, half and nearly full height (flicks carry on to the next stop), or tap the grabber; the book is reframed in the room left above it, and the reading bar steps aside when the sheet is raised for writing.
+  - The page list glides when pages are moved, copied, added or removed (FLIP), instead of jumping.
+  - `?bench` unchanged: the cold shelf sweep, which moved to p95 18 ms in two runs, was checked against the old easing in an A/B run (p95 12.2 ms both; frames here are quantised to 6.1 ms steps).
 
 **Rules (carried over)**
 - Real speed first; mask only waits that cannot be removed, with cheap motion that respects `prefers-reduced-motion`.

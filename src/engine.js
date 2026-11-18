@@ -135,6 +135,14 @@ let targetPosition = 0;
 let selectedIndex = -1;
 let hoveredIndex = -1;
 let wheelIdle = 0;
+// The shelf rides a critically damped spring, so a fling hands its speed on
+// and a new target never jerks it (it settles in the time the old easing did).
+const shelfSpring = { value: 0, velocity: 0 };
+// The pointer near the outer edge of an open page lifts its corner a little,
+// as a hand about to turn it would: `side` is 1 (next) or -1 (previous).
+const pagePeek = { side: 0, held: 0, amount: 0, tilt: 0 };
+const SHELF_STIFFNESS = 219;
+const SHELF_DAMPING = 29.6;
 let focusReturnTarget = null;
 let activeBook = null;
 let readingOpen = false;
@@ -146,6 +154,15 @@ let viewWidth = window.innerWidth;
 let viewHeight = window.innerHeight;
 let detailViewOffsetX = 0;
 let currentViewOffsetX = 0;
+// On a narrow screen an open book is twice as wide as the shut one it was
+// framed for. As the cover opens the view widens and slides to keep the
+// whole spread in sight (0: framed shut, 1: framed open).
+let readingFit = 0;
+// On phones the studio is a bottom sheet the reader can raise or lower: the
+// book is framed in the room left above it (`sheetShare` is its share of the
+// screen height; 0.5 is what the inspection view was laid out for).
+let sheetShare = 0.5;
+let sheetShown = 0.5;
 let detailSafeWidth = viewWidth * 0.6;
 let themeInitialized = false;
 let themeMoving = false;
@@ -917,6 +934,32 @@ function shelfSlot(index) {
   };
 }
 
+/**
+ * The room is ready and the veil lifts: the books in view are set down on
+ * the shelf one after another, nearest the middle first, while the interface
+ * comes in around them (`is-arriving` in the CSS).
+ */
+function beginArrival() {
+  if (reducedMotion) return;
+  experience.classList.add("is-arriving");
+  setTimeout(() => experience.classList.remove("is-arriving"), 2400);
+  bookRigs.forEach((rig, index) => {
+    if (rig.root.parent !== shelfStage) return;
+    const distance = Math.abs(index - targetPosition);
+    if (distance > 4) return;
+    // After the veil has mostly lifted, one book every tenth of a second.
+    rig.arrival = 0.3 + distance * 0.1;
+    rig.settling = 1.1;
+    rig.root.position.y += 0.2;
+    rig.root.rotation.z += (index < targetPosition ? 1 : -1) * 0.04;
+    rig.opacity = 0;
+    rig.fadeMaterials.forEach((material) => { material.opacity = 0; });
+    rig.contactShadow.material.opacity = 0;
+    rig.root.visible = false;
+  });
+  requestFrame();
+}
+
 function snapRigToShelfSlot(rig, index) {
   const slot = shelfSlot(index);
   rig.root.position.set(
@@ -948,10 +991,21 @@ function snapRigToShelfSlot(rig, index) {
 function updateShelfLayout(delta, elapsed) {
   if (mode === "hero") {
     const limit = Math.max(0, books.length - 1);
-    position = reducedMotion
-      ? targetPosition
-      : damp(position, targetPosition, 9.5, delta);
-    if (Math.abs(position - targetPosition) < 0.0005) position = targetPosition;
+    if (shelfPan.active) {
+      // Under the hand: `position` was set from the pointer.
+      shelfSpring.value = position;
+    } else if (reducedMotion) {
+      position = targetPosition;
+      shelfSpring.velocity = 0;
+    } else {
+      shelfSpring.value = position;
+      stepSpring(shelfSpring, targetPosition, SHELF_STIFFNESS, SHELF_DAMPING, delta, 0.0004);
+      position = shelfSpring.value;
+    }
+    if (Math.abs(position - targetPosition) < 0.0005 && Math.abs(shelfSpring.velocity) < 0.004) {
+      position = targetPosition;
+      shelfSpring.velocity = 0;
+    }
 
     if (wheelIdle > 0) {
       wheelIdle -= delta;
@@ -971,13 +1025,25 @@ function updateShelfLayout(delta, elapsed) {
   lazyPaintPending = false;
   bookRigs.forEach((rig, index) => {
     if (rig.root.parent !== shelfStage) return;
+    // Waiting for its turn to be set down (see beginArrival).
+    if (rig.arrival > 0) {
+      rig.arrival -= delta;
+      motion = true;
+      return;
+    }
+    // Just set down: it comes to rest more gently than a shelf move.
+    const settling = rig.settling > 0;
+    if (settling) {
+      rig.settling -= delta;
+      motion = true;
+    }
 
     const dragged = shelfDrag.active && index === shelfDrag.index;
     const slot = shelfSlot(dragSlotIndex(index));
     // The book being moved is lifted off the shelf and brought forward.
     if (dragged) slot.z += 0.28;
     const targetY = shelfBoardTop + rig.base.height * 0.5 + slot.focus * 0.15 + (dragged ? 0.12 : 0);
-    const speed = reducedMotion ? 1000 : 12;
+    const speed = reducedMotion ? 1000 : settling ? 8.5 : 12;
     rig.lastOffset = slot.offset;
 
     rig.root.position.x = damp(rig.root.position.x, slot.x, speed, delta);
@@ -989,7 +1055,7 @@ function updateShelfLayout(delta, elapsed) {
 
     rig.opacity = reducedMotion
       ? slot.opacity
-      : damp(rig.opacity, slot.opacity, 14, delta);
+      : damp(rig.opacity, slot.opacity, settling ? 6 : 14, delta);
     rig.root.visible = rig.opacity > 0.004;
     rig.fadeMaterials.forEach((material) => {
       material.opacity = rig.opacity;
@@ -1313,6 +1379,16 @@ function updatePaginatedBook(rig, delta, openAmount = 1) {
     ? (-Math.PI + 0.055) * amount
     : hoverCrack;
   const localSpread = currentSpread - rig.leafBase;
+  const peekWanted = mode === "detail" && readingOpen && !pageDrag.active && !reducedMotion ? pagePeek.side : 0;
+  if (peekWanted) pagePeek.held = peekWanted;
+  const peekBefore = pagePeek.amount;
+  pagePeek.amount = damp(pagePeek.amount, peekWanted ? 1 : 0, peekWanted ? 8 : 11, delta);
+  if (!peekWanted && pagePeek.amount < 0.003) pagePeek.amount = 0;
+  if (Math.abs(pagePeek.amount - peekBefore) > 0.0005) motion = true;
+  const peekLeaf = pagePeek.amount > 0
+    ? (pagePeek.held > 0 ? localSpread : localSpread - 1)
+    : -1;
+  const peek = ease.smooth(pagePeek.amount);
 
   if (mode !== "detail" || reducedMotion || pageDrag.active) {
     // Under the hand, and in transit, the cover simply follows.
@@ -1374,6 +1450,11 @@ function updatePaginatedBook(rig, delta, openAmount = 1) {
             + signedSpeed * pageDrag.direction * 0.03
           );
         }
+      } else if (leafOrder === peekLeaf) {
+        // The corner nearest the pointer comes up first.
+        pageTarget += (pagePeek.held > 0 ? -1 : 1) * peek * 0.1;
+        dragCurveBoost = peek * 0.045;
+        flexTwistTarget = peek * pagePeek.tilt * 0.07;
       }
 
       pagePivot.position.z = damp(
@@ -1460,19 +1541,100 @@ function slotPixels() {
   return Math.max(24, Math.abs(b.x - a.x) * 0.5 * viewWidth);
 }
 
+/* ----- sliding the shelf by hand ----- */
+
+// Drag the shelf (on a touch screen, swipe it anywhere) and it follows the
+// hand one to one; let go and it carries on at the hand's speed and settles
+// on a book. Past either end it gives, with growing resistance. With a mouse,
+// pressing a book and dragging moves that book instead; on a touch screen a
+// book is picked up by holding it still for a moment.
+const shelfPan = { pointerId: null, active: false, startX: 0, startY: 0, from: 0, pixels: 100, samples: [], index: -1, hold: 0 };
+const HOLD_TO_LIFT_MS = 380;
+
+/** Resistance past the ends of the shelf: gives a little, then less and less. */
+const rubber = (over) => 0.55 * (1 - 1 / (1 + over * 1.7));
+
+function panPosition(raw) {
+  const limit = Math.max(0, books.length - 1);
+  if (raw < 0) return -rubber(-raw);
+  if (raw > limit) return limit + rubber(raw - limit);
+  return raw;
+}
+
+/** Pick a book up to carry it along the shelf (a held touch). */
+function liftBook(index, start) {
+  Object.assign(shelfDrag, {
+    pointerId: start.pointerId, index, target: index, offset: 0, active: true,
+    startX: start.clientX, startY: start.clientY, pixels: slotPixels()
+  });
+  canvas.setPointerCapture?.(start.pointerId);
+  canvas.classList.add("is-moving-book");
+  setHovered(-1);
+  navigator.vibrate?.(8);
+  audio.playCue("navigate");
+  requestFrame();
+}
+
 function onShelfPointerDown(event) {
-  if (mode !== "hero" || event.button !== 0 || event.isPrimary === false || books.length < 2) return;
+  if (mode !== "hero" || event.button !== 0 || event.isPrimary === false || !books.length) return;
   setPointerFromEvent(event);
   const index = bookIndexAtPointer();
-  if (index < 0) return;
-  Object.assign(shelfDrag, {
-    pointerId: event.pointerId, index, target: index, offset: 0, active: false,
-    startX: event.clientX, startY: event.clientY, pixels: slotPixels()
+  const touch = Boolean(event.pointerType) && event.pointerType !== "mouse";
+  if (!touch && index >= 0) {
+    if (books.length < 2) return;
+    Object.assign(shelfDrag, {
+      pointerId: event.pointerId, index, target: index, offset: 0, active: false,
+      startX: event.clientX, startY: event.clientY, pixels: slotPixels()
+    });
+    return;
+  }
+  clearTimeout(shelfPan.hold);
+  Object.assign(shelfPan, {
+    pointerId: event.pointerId, active: false, startX: event.clientX, startY: event.clientY,
+    from: position, pixels: slotPixels(), samples: [], index, hold: 0
   });
+  if (touch && index >= 0 && books.length >= 2) {
+    const start = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY };
+    shelfPan.hold = setTimeout(() => {
+      if (shelfPan.pointerId !== start.pointerId || shelfPan.active || mode !== "hero") return;
+      shelfPan.pointerId = null;
+      liftBook(index, start);
+    }, HOLD_TO_LIFT_MS);
+  }
 }
 
 function onShelfPointerMove(event) {
-  if (shelfDrag.pointerId !== event.pointerId || mode !== "hero") return;
+  if (mode !== "hero") return;
+  if (shelfPan.pointerId === event.pointerId) {
+    const dx = event.clientX - shelfPan.startX;
+    const dy = event.clientY - shelfPan.startY;
+    if (!shelfPan.active) {
+      if (Math.hypot(dx, dy) > 10) clearTimeout(shelfPan.hold);
+      if (Math.abs(dx) < 8) return;
+      if (Math.abs(dx) < Math.abs(dy)) {
+        shelfPan.pointerId = null;
+        return;
+      }
+      shelfPan.active = true;
+      shelfPan.startX = event.clientX;
+      shelfPan.from = position;
+      shelfSpring.velocity = 0;
+      wheelIdle = 0;
+      canvas.setPointerCapture?.(event.pointerId);
+      canvas.classList.add("is-panning");
+      setHovered(-1);
+      audio.unlock();
+    }
+    const raw = shelfPan.from - (event.clientX - shelfPan.startX) / shelfPan.pixels;
+    position = panPosition(raw);
+    targetPosition = position;
+    const now = event.timeStamp || performance.now();
+    shelfPan.samples.push([now, raw]);
+    while (shelfPan.samples.length > 2 && now - shelfPan.samples[0][0] > 90) shelfPan.samples.shift();
+    requestFrame();
+    return;
+  }
+  if (shelfDrag.pointerId !== event.pointerId) return;
   const dx = event.clientX - shelfDrag.startX;
   if (!shelfDrag.active) {
     if (Math.abs(dx) < 9 || Math.abs(dx) < Math.abs(event.clientY - shelfDrag.startY)) return;
@@ -1486,7 +1648,36 @@ function onShelfPointerMove(event) {
   requestFrame();
 }
 
+/** Release a pan: carry the hand's speed on, and settle on the book it reaches. */
+function releasePan(cancelled) {
+  const samples = shelfPan.samples;
+  let velocity = 0;
+  if (!cancelled && samples.length >= 2) {
+    const [t0, p0] = samples[0];
+    const [t1, p1] = samples[samples.length - 1];
+    // A hand that stopped before letting go throws nothing.
+    const stale = performance.now() - t1 > 80;
+    if (t1 > t0 && !stale) velocity = clamp(((p1 - p0) / (t1 - t0)) * 1000, -28, 28);
+  }
+  const limit = Math.max(0, books.length - 1);
+  const projected = position + velocity * 0.3;
+  targetPosition = clamp(Math.round(projected), 0, limit);
+  shelfSpring.velocity = reducedMotion ? 0 : velocity;
+  shelfPan.active = false;
+  canvas.classList.remove("is-panning");
+  // The click that follows the release is not a selection.
+  shelfDrag.dropped = true;
+  setTimeout(() => { shelfDrag.dropped = false; }, 0);
+  requestFrame();
+}
+
 function onShelfPointerEnd(event) {
+  if (shelfPan.pointerId === event.pointerId) {
+    clearTimeout(shelfPan.hold);
+    shelfPan.pointerId = null;
+    if (shelfPan.active) releasePan(event.type === "pointercancel");
+    return;
+  }
   if (shelfDrag.pointerId !== event.pointerId) return;
   shelfDrag.pointerId = null;
   if (!shelfDrag.active) return;
@@ -1555,10 +1746,15 @@ function onWheel(event) {
   event.preventDefault();
   audio.unlock();
   const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+  // Past either end each notch goes less far: the shelf gives, then holds.
+  const limit = Math.max(0, books.length - 1);
+  const over = Math.max(0, -targetPosition, targetPosition - limit);
+  const step = clamp(delta * 0.0022, -0.72, 0.72);
+  const outward = (step < 0 && targetPosition <= 0) || (step > 0 && targetPosition >= limit);
   targetPosition = clamp(
-    targetPosition + clamp(delta * 0.0022, -0.72, 0.72),
+    targetPosition + (outward ? step / (1 + over * 9) : step),
     -0.3,
-    books.length - 0.7
+    limit + 0.3
   );
   wheelIdle = 0.14;
   requestFrame();
@@ -1762,6 +1958,12 @@ function focusView(name) {
   // Travel the short way round.
   const turn = viewTween.to.theta - viewTween.from.theta;
   viewTween.to.theta = viewTween.from.theta + Math.atan2(Math.sin(turn), Math.cos(turn));
+  // A short move is quick; a swing round to the back takes its time and
+  // eases out a little on the way, as a camera on a dolly would.
+  const swing = Math.abs(viewTween.to.theta - viewTween.from.theta);
+  const lift = Math.abs(viewTween.to.phi - viewTween.from.phi);
+  viewTween.duration = clamp(0.5 + swing * 0.17 + lift * 0.3, 0.5, 1.05);
+  viewTween.breath = Math.min(0.07, swing * 0.024);
   viewTween.time = 0;
   viewTween.active = true;
   if (reducedMotion) viewTween.time = 1;
@@ -1772,8 +1974,9 @@ function updateViewTween(delta) {
   if (!viewTween.active) return;
   viewTween.time = Math.min(1, viewTween.time + delta / viewTween.duration);
   const eased = smootherstep(viewTween.time);
+  const breath = 1 + Math.sin(Math.PI * eased) * (viewTween.breath || 0);
   viewTween.current.set(
-    lerp(viewTween.from.radius, viewTween.to.radius, eased),
+    lerp(viewTween.from.radius, viewTween.to.radius, eased) * breath,
     lerp(viewTween.from.phi, viewTween.to.phi, eased),
     lerp(viewTween.from.theta, viewTween.to.theta, eased)
   );
@@ -1811,6 +2014,7 @@ function frame(time) {
   updateShelfLayout(delta, ambientClock);
   updateLeaving(delta);
   updateTransition(delta);
+  if (mode !== "detail" && readingFit > 0) updateReadingFit(delta);
   updateDust();
   const themeIsMoving = updateTheme(delta);
 
@@ -1825,12 +2029,14 @@ function frame(time) {
       cameraMotion = true;
     }
     updatePaginatedBook(activeBook, delta, getDetailOpenAmount());
+    updateReadingFit(delta);
+    updateSheetShare(delta);
     updateRebind(delta);
     updateRibbon(delta);
     updateGlint(delta);
   }
 
-  const shelfMoving = Math.abs(position - targetPosition) > 0.0005 || wheelIdle > 0;
+  const shelfMoving = Math.abs(position - targetPosition) > 0.0005 || shelfSpring.velocity !== 0 || wheelIdle > 0;
   const active = motion
     || cameraMotion
     || mode === "opening"
@@ -1840,6 +2046,7 @@ function frame(time) {
     || viewTween.active
     || pageDrag.active
     || shelfDrag.active
+    || shelfPan.active
     || rebindTime < 1
     || glintTime < 1
     || leavingRigs.length > 0
@@ -2416,6 +2623,7 @@ async function initialize(options) {
     shadowHold = 3;
     if (!suspended) renderFrame();
     experience.classList.add("webgl-ready");
+    beginArrival();
     loading.classList.add("is-done");
     scheduleWarmup();
     // The night lamp's materials, so choosing the night light does not stall.
@@ -2451,6 +2659,7 @@ export const engine = {
   goToPage,
   focusView,
   resetView: resetInspectionView,
+  setSheetShare,
   resize,
   showFallback,
   get mode() { return mode; },
@@ -2606,6 +2815,11 @@ function updateHover() {
     setHovered(-1);
     if (readingOpen) {
       detailBookHovered = false;
+      const side = pageDrag.active ? 0 : pagePeekAtPointer();
+      if (side !== pagePeek.side) {
+        pagePeek.side = side;
+        requestFrame();
+      }
       canvas.classList.remove("has-closed-book-hover");
       canvas.classList.toggle(
         "has-page-hover",
@@ -2648,6 +2862,28 @@ function pageSurfaceAtPointer() {
     false
   );
   return hits.length ? hits[0].object : null;
+}
+
+/**
+ * Which way a page would turn if the pointer, near the outer edge of an open
+ * page, pressed it: 1 for the next spread, -1 for the previous, 0 elsewhere.
+ * Also notes how high up the page the pointer is, for the corner's tilt.
+ */
+function pagePeekAtPointer() {
+  if (mode !== "detail" || !activeBook || !readingOpen) return 0;
+  activeBook.root.updateWorldMatrix(true, true);
+  raycaster.setFromCamera(pointer.ndc, camera);
+  const hit = raycaster.intersectObjects(activeBook.pageSurfaces, false)[0];
+  const pivot = hit?.object.parent;
+  if (!pivot) return 0;
+  const local = pivot.worldToLocal(hit.point.clone());
+  const width = hit.object.scale.x || 1;
+  const height = hit.object.scale.y || 1;
+  if (local.x / width < 0.68) return 0;
+  pagePeek.tilt = clamp(local.y / (height * 0.5), -1, 1);
+  const turned = pivot.rotation.y < -Math.PI / 2;
+  if (turned) return currentSpread > 0 ? -1 : 0;
+  return currentSpread < spreadLimit() ? 1 : 0;
 }
 
 function coverSurfaceAtPointer() {
@@ -2948,6 +3184,10 @@ function onPointerMove(event) {
 
 function onPointerLeave() {
   pointer.ndc.set(3, 3);
+  if (pagePeek.side) {
+    pagePeek.side = 0;
+    requestFrame();
+  }
   pointerDirty = false;
   detailBookHovered = false;
   setHovered(-1);
@@ -3055,19 +3295,75 @@ function applyClosingPose(progress) {
   camera.lookAt(transitionCameraTarget);
 }
 
+/** How far to widen the view, and slide it, to frame the open spread. */
+function readingFrame() {
+  if (!activeBook) return { zoom: 1, shift: 0 };
+  const distance = Math.max(0.5, camera.position.distanceTo(activeBook.root.position));
+  const worldHeight = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
+  const pixelsPerWorld = viewHeight / worldHeight;
+  const shut = activeBook.base.width * activeBook.root.scale.x;
+  const zoom = clamp((viewWidth * 0.94) / (shut * 2.08 * pixelsPerWorld), 0.5, 1);
+  // The spread is centred on the spine, half a board left of the shut book.
+  return { zoom, shift: -(shut * 0.5) * pixelsPerWorld * zoom };
+}
+
 function applyDetailViewOffset() {
-  if (Math.abs(currentViewOffsetX) < 0.5) {
+  let zoom = 1;
+  let shift = 0;
+  let lift = 0;
+  if (readingFit > 0) {
+    const fit = readingFrame();
+    zoom = lerp(1, fit.zoom, readingFit);
+    shift = fit.shift * readingFit;
+  }
+  if (viewWidth < 820 && activeBook && sheetShown !== 0.5) {
+    // Centre the book in the room above the sheet, and size it to that room.
+    const room = Math.max(0.12, 1 - sheetShown);
+    zoom *= clamp(room / 0.5, 0.42, 1.3);
+    lift = (sheetShown - 0.5) * 0.5 * viewHeight;
+  }
+  camera.zoom = zoom;
+  const offset = currentViewOffsetX + shift;
+  if (Math.abs(offset) < 0.5 && Math.abs(lift) < 0.5) {
     camera.clearViewOffset();
     return;
   }
   camera.setViewOffset(
     viewWidth,
     viewHeight,
-    currentViewOffsetX,
-    0,
+    offset,
+    lift,
     viewWidth,
     viewHeight
   );
+}
+
+/** The studio sheet's share of the screen height (phones). `immediate` while dragged. */
+function setSheetShare(share, immediate = false) {
+  sheetShare = clamp(share, 0.2, 0.95);
+  if (immediate || reducedMotion) {
+    sheetShown = sheetShare;
+    applyDetailViewOffset();
+  }
+  requestFrame();
+}
+
+function updateSheetShare(delta) {
+  if (sheetShown === sheetShare) return;
+  // Matches the sheet's own CSS transition (--duration-base, ease-out).
+  sheetShown = damp(sheetShown, sheetShare, 11, delta);
+  if (Math.abs(sheetShown - sheetShare) < 0.001) sheetShown = sheetShare;
+  applyDetailViewOffset();
+  motion = true;
+}
+
+function updateReadingFit(delta) {
+  const want = viewWidth < 820 && activeBook && mode === "detail" ? getDetailOpenAmount() : 0;
+  if (readingFit === want) return;
+  readingFit = reducedMotion ? want : damp(readingFit, want, 6.5, delta);
+  if (Math.abs(readingFit - want) < 0.002) readingFit = want;
+  applyDetailViewOffset();
+  motion = true;
 }
 
 function createWoodTexture(repeatX, repeatY, rotation = 0) {

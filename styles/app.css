@@ -28,6 +28,8 @@
   --duration-scene: 620ms;
   --duration-tint: 720ms;
   --duration-entrance: 900ms;
+  /* The gap between pieces of one entrance, played one after another. */
+  --stagger: 80ms;
   --edge: clamp(18px, 2.4vw, 34px);
   --studio-width: clamp(340px, 30vw, 440px);
   --hairline: color-mix(in srgb, var(--ink) 20%, transparent);
@@ -155,7 +157,17 @@ p {
   opacity: 1;
 }
 
-#scene.has-book-hover,
+/* The shelf can be dragged sideways: the room says so; a book says "open". */
+.webgl-ready:not(.mode-detail) #scene {
+  cursor: grab;
+}
+
+.webgl-ready:not(.mode-detail) #scene.is-panning,
+.webgl-ready:not(.mode-detail) #scene.is-moving-book {
+  cursor: grabbing;
+}
+
+.webgl-ready:not(.mode-detail) #scene.has-book-hover,
 .mode-detail #scene.has-closed-book-hover {
   cursor: pointer;
 }
@@ -389,6 +401,45 @@ p {
   }
 }
 
+/* ---------- arrival: the interface gathers round the books ---------- */
+
+/* Played once, when the loading veil lifts. Only the start is filled, so
+   nothing here outlasts the entrance or fights later transitions. */
+.is-arriving .masthead__identity {
+  animation: arrive-down var(--duration-entrance) var(--ease-out) calc(var(--stagger) * 1) backwards;
+}
+
+.is-arriving .masthead__index,
+.is-arriving .audio-controls {
+  animation: arrive-down var(--duration-entrance) var(--ease-out) calc(var(--stagger) * 2) backwards;
+}
+
+.is-arriving .selection {
+  animation: arrive-up var(--duration-entrance) var(--ease-out) calc(var(--stagger) * 4) backwards;
+}
+
+.is-arriving .browse-actions {
+  animation: arrive-up var(--duration-entrance) var(--ease-out) calc(var(--stagger) * 5) backwards;
+}
+
+.is-arriving .index-nav {
+  animation: arrive-up var(--duration-entrance) var(--ease-out) calc(var(--stagger) * 6) backwards;
+}
+
+@keyframes arrive-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes arrive-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
 /* ---------- empty shelf ---------- */
 
 .empty-state {
@@ -599,6 +650,10 @@ p {
   opacity: 1;
   transform: none;
   pointer-events: auto;
+}
+
+.studio__grabber {
+  display: none;
 }
 
 .studio__header {
@@ -2062,11 +2117,65 @@ p {
   .studio {
     top: auto;
     width: 100%;
-    height: 50dvh;
+    height: var(--sheet-height, 50dvh);
     border-top: 1px solid var(--hairline);
     border-left: 0;
+    border-radius: 18px 18px 0 0;
     background: color-mix(in srgb, var(--paper) 92%, transparent);
+    box-shadow: 0 -12px 40px color-mix(in srgb, var(--ink) 10%, transparent);
     transform: translateY(28px);
+    transition:
+      opacity var(--duration-slow) var(--ease-out),
+      transform var(--duration-scene) var(--ease-out),
+      height var(--duration-base) var(--ease-out),
+      background-color var(--duration-tint) var(--ease-out);
+  }
+
+  .mode-detail.is-sheet-high .reader-bar {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+    pointer-events: none;
+  }
+
+  /* The sheet follows the hand exactly while it is dragged. */
+  .is-sheet-dragging .studio,
+  .is-sheet-dragging .reader-bar {
+    transition: none;
+  }
+
+  .studio__grabber {
+    display: grid;
+    position: absolute;
+    top: 0;
+    left: 50%;
+    z-index: 2;
+    width: 88px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    place-items: center;
+    transform: translateX(-50%);
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .studio__grabber span {
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--hairline-strong);
+    transition: width var(--duration-quick) var(--ease-out), background-color var(--duration-quick) var(--ease-out);
+  }
+
+  .studio__grabber:hover span,
+  .is-sheet-dragging .studio__grabber span {
+    width: 44px;
+    background: var(--ink-soft);
+  }
+
+  .studio__header {
+    touch-action: none;
   }
 
   .studio__header {
@@ -2082,7 +2191,11 @@ p {
   }
 
   .reader-bar {
-    bottom: calc(50dvh + 10px);
+    bottom: calc(var(--sheet-height, 50dvh) + 10px);
+    transition:
+      opacity var(--duration-slow) var(--ease-out),
+      transform var(--duration-scene) var(--ease-out),
+      bottom var(--duration-base) var(--ease-out);
     left: 50%;
     gap: 10px;
     padding-right: 14px;
