@@ -166,6 +166,9 @@ let sheetShown = 0.5;
 // Reading mode: the workbench withdraws and the open spread fills the screen
 // (`readingAmount` eases the framing between the two).
 let readingMode = false;
+// Ambient occlusion strength; reading mode lightens it so the page stays clean.
+const AO_BLEND = 0.82;
+let lastCameraMotion = false;
 let readingAmount = 0;
 let quietTimer = 0;
 let detailSafeWidth = viewWidth * 0.6;
@@ -2233,9 +2236,12 @@ function buildComposer() {
     occlusion.setSize = (width, height) => {
       GTAOPass.prototype.setSize.call(occlusion, Math.ceil(width * scale), Math.ceil(height * scale));
     };
-    occlusion.updateGtaoMaterial({ radius: 0.2, distanceExponent: 1.4, thickness: 1.2, scale: 1.05, samples: 12 });
-    occlusion.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6 * Math.max(scale, 0.66), rings: 2, samples: 12 });
-    occlusion.blendIntensity = 0.82;
+    // A short distance fall-off: a leaf a hair above the block occludes it
+    // only faintly, so stacked pages keep clean edges instead of a grainy band
+    // (books against the shelf are unchanged). Denoised over a wider disc.
+    occlusion.updateGtaoMaterial({ radius: 0.2, distanceExponent: 1.4, distanceFallOff: 0.1, thickness: 1.2, scale: 1.05, samples: 12 });
+    occlusion.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 12 * Math.max(scale, 0.66), rings: 3, samples: 16 });
+    occlusion.blendIntensity = AO_BLEND;
     composer.addPass(occlusion);
     occlusionPass = occlusion;
   }
@@ -2760,6 +2766,7 @@ export const engine = {
     get rigs() { return bookRigs; },
     get scene() { return scene; },
     get renderer() { return renderer; },
+    get occlusion() { return occlusionPass; },
     get lastCapture() { return lastCapture; },
     get camera() { return camera; }
   }
@@ -3405,7 +3412,8 @@ function readingModeFrame() {
   const scale = activeBook.root.scale.x;
   const spread = activeBook.base.width * scale * 2.08 * pixelsPerWorld;
   const tall = activeBook.base.height * scale * 1.1 * pixelsPerWorld;
-  const zoom = clamp(Math.min((viewWidth * 0.9) / spread, (viewHeight * 0.8) / tall), 0.5, 1.9);
+  // Room to breathe round the spread: it should sit on the page, not fill it.
+  const zoom = clamp(Math.min((viewWidth * 0.84) / spread, (viewHeight * 0.76) / tall), 0.5, 1.9);
   plainCamera.copy(camera);
   plainCamera.zoom = 1;
   plainCamera.clearViewOffset();
@@ -3436,6 +3444,7 @@ function applyDetailViewOffset() {
     offset = lerp(offset, full.x, eased);
     lift = lerp(lift, full.y, eased);
   }
+  if (occlusionPass) occlusionPass.blendIntensity = AO_BLEND * (1 - 0.55 * ease.smooth(readingAmount));
   camera.zoom = zoom;
   if (Math.abs(offset) < 0.5 && Math.abs(lift) < 0.5) {
     camera.clearViewOffset();
@@ -3464,8 +3473,10 @@ function setSheetShare(share, immediate = false) {
 function updateReadingAmount(delta) {
   const want = readingMode && mode === "detail" ? 1 : 0;
   if (readingAmount === want) {
-    // The camera may still be swinging round to face the pages: keep the spread centred.
-    if (want && cameraMotion) applyDetailViewOffset();
+    // The camera may still be swinging round to face the pages (and has just
+    // stopped, on the frame after): keep the spread centred.
+    if (want && (cameraMotion || lastCameraMotion)) applyDetailViewOffset();
+    lastCameraMotion = cameraMotion;
     return;
   }
   readingAmount = reducedMotion ? want : damp(readingAmount, want, 5.5, delta);

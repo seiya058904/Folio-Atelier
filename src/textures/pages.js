@@ -19,6 +19,7 @@ const ZH_FOIL = {
 };
 import { hashSeed, mixHex, pad, rgba, seededRandom } from "../util.js";
 import { drawMotif, hasMotif } from "./motifs.js";
+import { paintContext } from "./gl.js";
 import { drawPaperSurface } from "./surface.js";
 import { breakText, drawLine, fitDisplayText, setTracking, tokenize } from "./text.js";
 
@@ -770,6 +771,36 @@ const PAINT = {
  * Paint one physical page onto a paint target.
  * `index` is the 0-based page position; even positions are right-hand pages.
  */
+// The paper under the print: thousands of fibres and flecks, the same for
+// every page of a stock. Four sheets per stock and size are kept (neighbouring
+// leaves differ) and laid down whole, instead of drawing the fibres again for
+// every page and every keystroke.
+const paperSheets = new Map();
+const PAPER_SHEET_LIMIT = 8;
+
+function paperSheet(stock, variant, pixelWidth, pixelHeight) {
+  const key = `${stock}|${variant}|${pixelWidth}x${pixelHeight}`;
+  const cached = paperSheets.get(key);
+  if (cached) {
+    paperSheets.delete(key);
+    paperSheets.set(key, cached);
+    return cached;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = pixelWidth;
+  canvas.height = pixelHeight;
+  const ctx = paintContext(canvas);
+  ctx.setTransform(pixelWidth / W, 0, 0, pixelHeight / H, 0, 0);
+  drawPaperSurface(ctx, W, H, seededRandom(hashSeed(`paper-sheet-${stock}-${variant}`)), stock);
+  paperSheets.set(key, canvas);
+  if (paperSheets.size > PAPER_SHEET_LIMIT) {
+    const oldest = paperSheets.keys().next().value;
+    paperSheets.get(oldest).width = 1;
+    paperSheets.delete(oldest);
+  }
+  return canvas;
+}
+
 export function paintPage(book, entry, index, target, onAsset) {
   const { context: ctx, canvas } = target;
   const recto = index % 2 === 0;
@@ -777,7 +808,7 @@ export function paintPage(book, entry, index, target, onAsset) {
   ctx.globalAlpha = 1;
   ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
   ctx.letterSpacing = "0px";
-  drawPaperSurface(ctx, W, H, seededRandom(hashSeed(`${book.id}-leaf-${index}`)), book.interior.paper);
+  ctx.drawImage(paperSheet(book.interior.paper || "cream", index % 4, canvas.width, canvas.height), 0, 0, W, H);
 
   // Gutter shadow: the sheet curls away into the binding.
   const gutter = ctx.createLinearGradient(recto ? 0 : W, 0, recto ? 70 : W - 70, 0);

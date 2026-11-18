@@ -1239,8 +1239,19 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
 
   /* ----- look: everything that is a material parameter rather than paint ----- */
   let lookReady = false;
+  /** The painted layers may have changed size (and texture): point the materials at them. */
+  function bindPaintedMaps() {
+    Object.entries(artFor).forEach(([face, material]) => { material.map = targets[face].texture; });
+    [[foilArt, targets.frontFoil], [spineFoilArt, targets.spineFoil], [backFoilArt, targets.backFoil]].forEach(([material, target]) => {
+      material.map = target.texture;
+      material.bumpMap = target.texture;
+    });
+    endpaperMaterial.map = targets.endpaper.texture;
+  }
+
   function applyLook() {
     const spec = rig.data;
+    bindPaintedMaps();
     const maps = getMaterialMaps(spec.material.kind);
     const look = maps.look;
     const foilColor = new THREE.Color(spec.foil.color);
@@ -1548,6 +1559,8 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     scale = next;
     if (defer) return rig.painted;
     if (rig.painted) repaint();
+    // Settled at this size for a while (back on the shelf): let the other go.
+    Object.values(targets).forEach((target) => target.trim());
     return false;
   }
 
@@ -1574,7 +1587,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     const height = Math.round(PAGE_SIZE.height * pageScale);
     const signature = `${width}x${height}|${index}|${epoch}|${pageSignature(rig.data, entry)}`;
     if (!face.target) face.target = createPaintTexture(width, height, { opaque: true });
-    else face.target.resize(width, height);
+    else if (face.target.resize(width, height)) face.target.trim();
     if (face.signature !== signature) {
       perf.paint("page", () => paintPage(rig.data, entry, index, face.target, onAsset));
       face.signature = signature;

@@ -422,39 +422,43 @@ export function paintMaterialBase(ctx, width, height, color, kind, seed, { spine
   // over and over (a colour being dragged, a grid of thumbnails) `overlay`
   // keeps it as a transparent sheet and lays it on in one go, instead of
   // rasterising thousands of strokes every time.
-  if (overlay) {
-    const transform = ctx.getTransform();
-    const pixelWidth = Math.round(width * transform.a);
-    const pixelHeight = Math.round(height * transform.d);
-    if (transform.b === 0 && transform.c === 0 && pixelWidth * pixelHeight <= GRAIN_CACHE_PIXELS) {
-      ctx.drawImage(grainOverlay(pixelWidth, pixelHeight, width, height, kind, seed, spine, flip), 0, 0, width, height);
-      return;
-    }
+  // Studio-size boards are cached too (a few, they are large): a book is
+  // repainted many times as it is edited, and its grain never changes, so
+  // after the first paint a board costs a fill and one copy (`overlay` is
+  // kept for the callers that ask for it; every axis-aligned paint uses it).
+  void overlay;
+  const transform = ctx.getTransform();
+  const pixelWidth = Math.round(width * transform.a);
+  const pixelHeight = Math.round(height * transform.d);
+  if (transform.b === 0 && transform.c === 0 && pixelWidth > 0 && pixelHeight > 0) {
+    ctx.drawImage(grainOverlay(pixelWidth, pixelHeight, width, height, kind, seed, spine, flip), 0, 0, width, height);
+    return;
   }
   paintGrain(ctx, width, height, kind, seed, spine, flip);
 }
 
 const GRAIN_CACHE_PIXELS = 768 * 1152;
-const GRAIN_CACHE_LIMIT = 24;
-const grainCache = new Map();
+// Small sheets (drafts, the shelf, thumbnails) and studio-size ones, apart.
+const grainCaches = { small: { limit: 24, entries: new Map() }, large: { limit: 4, entries: new Map() } };
 
 function grainOverlay(pixelWidth, pixelHeight, width, height, kind, seed, spine, flip) {
   const key = [pixelWidth, pixelHeight, width, height, kind, seed, spine, flip].join("|");
-  const cached = grainCache.get(key);
+  const cache = pixelWidth * pixelHeight <= GRAIN_CACHE_PIXELS ? grainCaches.small : grainCaches.large;
+  const cached = cache.entries.get(key);
   if (cached) {
-    grainCache.delete(key);
-    grainCache.set(key, cached);
+    cache.entries.delete(key);
+    cache.entries.set(key, cached);
     return cached;
   }
   const canvas = makeCanvas(pixelWidth, pixelHeight);
   const ctx = paintContext(canvas);
   ctx.setTransform(pixelWidth / width, 0, 0, pixelHeight / height, 0, 0);
   paintGrain(ctx, width, height, kind, seed, spine, flip);
-  grainCache.set(key, canvas);
-  if (grainCache.size > GRAIN_CACHE_LIMIT) {
-    const oldest = grainCache.keys().next().value;
-    grainCache.get(oldest).width = 1;
-    grainCache.delete(oldest);
+  cache.entries.set(key, canvas);
+  if (cache.entries.size > cache.limit) {
+    const oldest = cache.entries.keys().next().value;
+    cache.entries.get(oldest).width = 1;
+    cache.entries.delete(oldest);
   }
   return canvas;
 }
@@ -573,36 +577,56 @@ function paintGrain(ctx, width, height, kind, seed, spine, flip) {
       ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length);
       ctx.stroke();
     }
-  } else {
+  }
+
+  /*
+   * Everything else here is soft (mottling 40-190 units across, the shading
+   * at the edges), so it is drawn on a sheet a quarter of the size and laid on
+   * scaled up once: a sixteenth of the pixels for the same look. At studio
+   * size the two full-board gradients and the mottling cost 25-60 ms of
+   * rasterising; the threads above are the only fine detail.
+   */
+  const scale = Math.abs(ctx.getTransform().a) || 1;
+  const small = makeCanvas(Math.max(2, Math.ceil((width * scale) / 4)), Math.max(2, Math.ceil((height * scale) / 4)));
+  const mottle = paintContext(small);
+  mottle.setTransform(small.width / width, 0, 0, small.height / height, 0, 0);
+  if (!["woven", "slub", "silk", "twill", "speckle", "scales", "wood", "fibre"].includes(look.thread)) {
     // Leather and velvet: broad, soft tonal mottling instead of threads.
     const count = Math.round(70 * area);
     for (let blot = 0; blot < count; blot += 1) {
       const x = random() * width;
       const y = random() * height;
       const radius = 40 + random() * 150;
-      const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+      const gradient = mottle.createRadialGradient(x, y, 0, x, y, radius);
       const tone = random() > 0.5 ? "255,255,255" : "0,0,0";
       gradient.addColorStop(0, `rgba(${tone},${0.01 + random() * 0.018})`);
       gradient.addColorStop(1, `rgba(${tone},0)`);
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+      mottle.fillStyle = gradient;
+      mottle.fillRect(x - radius, y - radius, radius * 2, radius * 2);
     }
   }
 
   // Board edges catch less light: darker towards the hinge and the fore-edge.
-  const edge = flip ? ctx.createLinearGradient(width, 0, 0, 0) : ctx.createLinearGradient(0, 0, width, 0);
+  const edge = flip ? mottle.createLinearGradient(width, 0, 0, 0) : mottle.createLinearGradient(0, 0, width, 0);
   edge.addColorStop(0, `rgba(0,0,0,${spine ? 0.2 : 0.17})`);
   edge.addColorStop(spine ? 0.14 : 0.055, "rgba(255,255,255,0.03)");
   edge.addColorStop(spine ? 0.62 : 0.9, "rgba(255,255,255,0)");
   edge.addColorStop(1, `rgba(0,0,0,${spine ? 0.16 : 0.11})`);
-  ctx.fillStyle = edge;
-  ctx.fillRect(0, 0, width, height);
+  mottle.fillStyle = edge;
+  mottle.fillRect(0, 0, width, height);
 
-  const foot = ctx.createLinearGradient(0, height * 0.8, 0, height);
+  const foot = mottle.createLinearGradient(0, height * 0.8, 0, height);
   foot.addColorStop(0, "rgba(0,0,0,0)");
   foot.addColorStop(1, "rgba(0,0,0,0.09)");
-  ctx.fillStyle = foot;
-  ctx.fillRect(0, 0, width, height);
+  mottle.fillStyle = foot;
+  mottle.fillRect(0, 0, width, height);
+
+  // Bilinear is exact for the gradients and invisible on the soft blots.
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "low";
+  ctx.drawImage(small, 0, 0, width, height);
+  ctx.restore();
 }
 
 /* ---------- paper ---------- */

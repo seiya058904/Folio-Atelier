@@ -1,35 +1,37 @@
-# Folio Atelier — Roadmap, round 3 (Phases M–S)
+# Folio Atelier — Roadmap, round 4 (Phases S–V)
 
-Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2.md) (G–L).
+Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2.md) (G–L), [round 3](roadmap-round-3.md) (M–R).
 
-Agreed with the user on 2026-11-18. The aim of this round: nothing lost, nothing stiff. Every motion should hand over to the next one without a seam, every surface should hold up close, and the three reading features the user picked should feel native to the studio.
+Started 2026-11-18 at the user's request to take the next round as far as it goes. It begins with a real-browser review (Ego, real GPU, DPR 1.5) of everything round 3 built, and with the stalls round 3 left: the frames after a preset or a landing.
 
-**Status:** M, N, O, P and R done; Q reviewed and left as it was (2026-11-18).
+**Status:** S done (2026-11-18).
 
-- **M — done.** Verified in Playwright: with IndexedDB refused, the shelf and the studio say the books are kept for this visit only (before: "Saved", and a reload emptied the shelf). A second tab waits behind "Your library is open in another tab" until the reader takes it over; the first then stops saving and says so. The orphaned picture in the test library (about 1 MB) was swept at start-up. With the CDN refused, the boot watchdog shows a bilingual message and a reload button at once. The backup line shows after a week of edits without an "Export all". `?bench` unchanged.
-- **N — done.** Profiled before changing anything (CPU profile, Chrome trace, frame timeline after a preset click), RTX 3070 laptop, high tier:
-  - Typing in a 60-paragraph chapter was already smooth (frame p95 6.3 ms, worst 12 ms): left as it was.
-  - The worst preset click (Midnight) had a 331 ms task. Three causes, all fixed: the gilt page edges switch off sheen, a material feature missing from `shaderVariants` (160 ms of compiling mid-frame); the seigaiha mask drew each scale with its own composite switch (93 ms at full size; now one tile laid as a pattern, 14 ms, identical look); and every preset reprinted all eight printed pages in one frame even with the book shut (now only the open spread at once, the rest one leaf per quiet moment). Tinted pattern masks are cached, and the relief layer gets a mask at its own size. Longest main-thread task after a preset: 331 → about 50 ms.
-  - Flight into the studio: nothing is painted in flight (no long frames during it). The full-size pass after landing still shows 40–60 ms frames whose main-thread share is about 10 ms; the rest is the GPU process taking the uploads, which this trace cannot see. Left for now.
-  - Texture memory for a large library: no evidence it hurts on the target devices; repainting far books when they come back would cost smoothness. Not done.
-  - `?bench` unchanged within run-to-run noise.
-- **O — done.** Each piece checked in Playwright:
-  - The shelf can be dragged by hand: on empty wall with a mouse, anywhere with a finger. It follows one to one, carries the hand's speed on release (projected 0.3 s ahead) and settles on a book; past either end it gives with growing resistance and springs back. The shelf now rides a critically damped spring (same settling time as the old easing), so a fling or a new target never jerks it. With a mouse, dragging a book still moves it; on a touch screen a book is lifted by holding it for 380 ms (a short vibration where supported), so a swipe no longer reorders the library by accident. The room shows a grab cursor.
-  - Reading: the pointer near the outer edge of an open page lifts that page's corner a little (the corner nearest the pointer first), a cue that it can be turned.
-  - Arrival: when the loading veil lifts, the books in view are set down on the shelf one after another from the middle out, and the masthead, title, controls and index come in after them (`is-arriving`, `--stagger`).
-  - Camera: view jumps last 0.5–1.05 s depending on how far they swing, and a long swing eases out a little on the way.
-  - Phones: an open book was cut off on the left (framed for the shut book). The view now widens and slides to frame the whole spread as the cover opens, and back as it shuts. The studio is a bottom sheet with a grabber: drag it between a peek, half and nearly full height (flicks carry on to the next stop), or tap the grabber; the book is reframed in the room left above it, and the reading bar steps aside when the sheet is raised for writing.
-  - The page list glides when pages are moved, copied, added or removed (FLIP), instead of jumping.
-  - `?bench` unchanged: the cold shelf sweep, which moved to p95 18 ms in two runs, was checked against the old easing in an A/B run (p95 12.2 ms both; frames here are quantised to 6.1 ms steps).
-- **P — done.**
-  - Tone mapping measured on eight presets (front-board colour against the swatch): ACES moved vermilion's hue from 6° to 11° (coral) and kept half of citron's chroma; AgX greyed everything further; Khronos PBR Neutral kept vermilion's hue exactly and 86 % of citron's chroma. Neutral is now the tone mapping, at exposure 0.84, with the room's walls, floor and lights desaturated (×0.55) so the studio, golden-hour and night rooms keep the look they were tuned for. Side-by-side shelves in all three lights were compared before choosing.
-  - Reflections follow the light: the reflection room is tinted and dimmed per preset (gold at night mirrors a dark, lamp-warm room).
-  - Show-through: each printed face lets its other side through, mirrored and faint (×0.06–0.075; rice paper ×0.14). Checked with an exaggerated setting that the mirrored text lines up with the other side's text block.
-  - Brushed foil already used anisotropic highlights; gutter shading and paper fibre were already painted. Close-range cloth detail maps: not done (the boards hold up at the closest zoom).
-  - `?bench` unchanged.
-- **Q — reviewed, not changed.** Close-ups of the head, fore-edge, joint and open gutter at the nearest zoom: the bevelled boards, rounded spine, gutter compression, fore-edge character, page lines and headbands hold up. French grooves, head caps and turn-ins would be new geometry on the boards that turn, with real risk to the page physics and transitions for little gain at the distances the studio allows; left for a later round.
-- **R — done.**
-  - Reading mode (**Read** under the book): the panel and the masthead withdraw, the book opens if shut, the camera turns square onto the pages and the spread is framed on the whole screen with its spine at the centre (through the projection, so nothing in the scene moves). Tap either side, swipe, drag a page or use the arrow keys; the controls and the pointer fade after 2.6 s still; Escape leaves. Checked on desktop and on a 390 px phone (taps on a page turn it too).
-  - Import a manuscript (Pages tab): `.txt` or `.md` up to 4 MB. Markdown `#`/`##` become parts and chapters (a lone top heading is the book's title, set if the book is still untitled); plain text finds headings such as “Chapter 3”, “CHAPTER II”, “第三章”, “第一卷”, “序”, “Prologue”. Paragraphs are rebuilt from wrapped lines (no space between CJK characters), one-paragraph-per-line Chinese files and full-width indents are understood, section breaks are kept. A new book's untouched starter chapters make way for the import; otherwise it goes before the colophon. One undo takes it out. Parser checked in Node on Markdown, Chinese and English samples; import checked end to end.
-  - Find on the shelf (**Find**, `/`, Ctrl/⌘ K): title, author, subtitle, series and words inside, ranked; each result shows its cover and, for a match in the text, the passage with the words marked. Arrow keys glide the shelf to each result, Enter keeps it, Escape goes back.
-  - Interface strings all translated (only colour codes and typeface names remain in `missing`). `?bench` unchanged.
+**Rules (carried over)**
+- Measure first and say what each change bought. `?bench` before and after every phase; turntable sweep after any 3D change; compare with the original before changing rig, lighting or page motion.
+- New spec fields get a default, `normalizeBook` handling, `ZH` strings and a `dirty` key. No build step, no dependencies, Three.js stays at 0.165, no lights added at run time.
+- One scoped commit per phase. Pushing and deploying need the user's go-ahead.
+
+---
+
+## Phase S — The real cost of a repaint
+
+- **S — done.** Measured on an RTX 3070 laptop, high tier, Playwright; reviewed by eye in Ego.
+  - Round 3 put the stalls after a preset down to the GPU. A browser-wide trace showed otherwise: `CanvasRenderingContext2D::FinalizeFrame` (up to 95 ms, 379 ms in all after one click). Chrome rasterises a 2D canvas lazily, so a painter's JavaScript looked cheap (1–3 ms) while its pixels cost 25–66 ms per board at studio size, paid at the end of the frame.
+  - Most of it was the material grain. It never depends on the dye, so studio-size grain is now cached like the small sheets (four of them); and its soft parts — leather and velvet mottling, the shading at the board edges and foot — are drawn on a quarter-size sheet and laid on once. A board repaint went from 24–66 ms to 2–9 ms; the first paint of a material from up to 67 ms to 19–32 ms. Checked pixel by pixel against the previous painter: mean difference under 1.2 of 255, at most 7.
+  - Each printed page drew its paper (2,400 fibres, 1,200 flecks) afresh, for every page and every keystroke. Four sheets per stock are kept and laid down. Typing: frame p95 25.7 → 13.7 ms, key to page 27 → 15 ms.
+  - Board textures keep their other size (draft or studio) as a spare, so going back and forth no longer allocates GPU storage. (It turned out not to be what stalled; kept because it is free.)
+  - After a preset (Midnight): long frames 8 → 4, worst 151 → 85 ms (the first full-size board of a new material, once). After landing in the studio: long frames 7 → 2, worst 72 → 36 ms.
+  - Real-browser review found grainy ambient occlusion along page edges, worst in reading mode, where the spread is magnified: GTAO now has a short distance fall-off and a wider denoise (shelf contact shadows unchanged, compared side by side), and reading mode lightens it further. Reading mode left too little margin round the spread, and its framing could miss the last frame of the camera's swing: both fixed.
+  - `?bench` unchanged elsewhere.
+
+## Phase T — Finer models
+
+Details round 3 left: the French groove along the joint, head caps, the board squares, page edges seen close. Prefer relief and painted detail over new geometry on the turning boards; compare close-ups before and after.
+
+## Phase U — One continuous motion
+
+Walk every hand-over (shelf ⇄ studio, open ⇄ read, tab ⇄ view, panel ⇄ sheet) and remove each seam: timing, easing, what moves first.
+
+## Phase V — Finish
+
+Whatever the reviews turn up; a final Ego walkthrough.
