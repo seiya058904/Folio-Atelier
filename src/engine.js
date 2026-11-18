@@ -169,7 +169,13 @@ let readingMode = false;
 // Ambient occlusion strength; reading mode lightens it so the page stays clean.
 const AO_BLEND = 0.82;
 let lastCameraMotion = false;
+// The view the reader was on before reading, to return to on leaving.
+let viewBeforeReading = "front";
+let currentViewName = "front";
 let readingAmount = 0;
+// The framing moves on the camera's own timeline (same length, same curve),
+// so the swing and the zoom start and land together, as one motion.
+let readingDuration = 0.7;
 let quietTimer = 0;
 let detailSafeWidth = viewWidth * 0.6;
 let themeInitialized = false;
@@ -1839,6 +1845,7 @@ function openDetail(origin = null) {
   audio.playCue("select");
   mode = "opening";
   transitionTime = 0;
+  currentViewName = "front";
   readingOpen = false;
   detailBookHovered = false;
   currentSpread = 0;
@@ -2014,6 +2021,7 @@ const VIEWS = {
 
 function focusView(name) {
   const view = VIEWS[name] || VIEWS.front;
+  if (VIEWS[name]) currentViewName = name;
   if (mode !== "detail") {
     pendingView = mode === "opening" ? name : null;
     return;
@@ -2238,9 +2246,11 @@ function buildComposer() {
     };
     // A short distance fall-off: a leaf a hair above the block occludes it
     // only faintly, so stacked pages keep clean edges instead of a grainy band
-    // (books against the shelf are unchanged). Denoised over a wider disc.
+    // (books against the shelf are unchanged). Denoised over a wider disc
+    // at the same cost (more samples or rings doubled the denoise on every
+    // frame, enough to cost the shelf sweep a frame step).
     occlusion.updateGtaoMaterial({ radius: 0.2, distanceExponent: 1.4, distanceFallOff: 0.1, thickness: 1.2, scale: 1.05, samples: 12 });
-    occlusion.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 12 * Math.max(scale, 0.66), rings: 3, samples: 16 });
+    occlusion.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 9 * Math.max(scale, 0.66), rings: 2, samples: 12 });
     occlusion.blendIntensity = AO_BLEND;
     composer.addPass(occlusion);
     occlusionPass = occlusion;
@@ -3439,12 +3449,12 @@ function applyDetailViewOffset() {
   let offset = currentViewOffsetX + shift;
   if (readingAmount > 0) {
     const full = readingModeFrame();
-    const eased = ease.smooth(readingAmount);
+    const eased = smootherstep(readingAmount);
     zoom = lerp(zoom, full.zoom, eased);
     offset = lerp(offset, full.x, eased);
     lift = lerp(lift, full.y, eased);
   }
-  if (occlusionPass) occlusionPass.blendIntensity = AO_BLEND * (1 - 0.55 * ease.smooth(readingAmount));
+  if (occlusionPass) occlusionPass.blendIntensity = AO_BLEND * (1 - 0.55 * smootherstep(readingAmount));
   camera.zoom = zoom;
   if (Math.abs(offset) < 0.5 && Math.abs(lift) < 0.5) {
     camera.clearViewOffset();
@@ -3479,8 +3489,9 @@ function updateReadingAmount(delta) {
     lastCameraMotion = cameraMotion;
     return;
   }
-  readingAmount = reducedMotion ? want : damp(readingAmount, want, 5.5, delta);
-  if (Math.abs(readingAmount - want) < 0.002) readingAmount = want;
+  readingAmount = reducedMotion
+    ? want
+    : clamp(readingAmount + Math.sign(want - readingAmount) * (delta / readingDuration), 0, 1);
   applyDetailViewOffset();
   motion = true;
 }
@@ -3499,12 +3510,15 @@ function setReadingMode(on) {
   cancelPageDrag();
   controls.enabled = !on;
   if (on) {
+    viewBeforeReading = currentViewName === "reading" ? "front" : currentViewName;
     if (!readingOpen) setReadingOpen(true, false);
     focusView("reading");
+    readingDuration = viewTween.duration;
     announce(t("Reading. Use the arrow keys or tap either side to turn the page; Escape to leave."));
   } else {
     experience.classList.remove("is-quiet");
-    focusView("front");
+    focusView(viewBeforeReading);
+    readingDuration = viewTween.duration;
   }
   rouse();
   emit("onReadingMode", on);

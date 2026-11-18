@@ -424,13 +424,13 @@ export function paintMaterialBase(ctx, width, height, color, kind, seed, { spine
   // rasterising thousands of strokes every time.
   // Studio-size boards are cached too (a few, they are large): a book is
   // repainted many times as it is edited, and its grain never changes, so
-  // after the first paint a board costs a fill and one copy (`overlay` is
-  // kept for the callers that ask for it; every axis-aligned paint uses it).
-  void overlay;
+  // after the first paint a board costs a fill and one copy. Shelf-size
+  // boards, painted once each, are drawn directly unless asked otherwise.
   const transform = ctx.getTransform();
   const pixelWidth = Math.round(width * transform.a);
   const pixelHeight = Math.round(height * transform.d);
-  if (transform.b === 0 && transform.c === 0 && pixelWidth > 0 && pixelHeight > 0) {
+  const studio = pixelWidth * pixelHeight > GRAIN_CACHE_PIXELS;
+  if ((overlay || studio) && transform.b === 0 && transform.c === 0 && pixelWidth > 0 && pixelHeight > 0) {
     ctx.drawImage(grainOverlay(pixelWidth, pixelHeight, width, height, kind, seed, spine, flip), 0, 0, width, height);
     return;
   }
@@ -587,10 +587,14 @@ function paintGrain(ctx, width, height, kind, seed, spine, flip) {
    * rasterising; the threads above are the only fine detail.
    */
   const scale = Math.abs(ctx.getTransform().a) || 1;
-  const small = makeCanvas(Math.max(2, Math.ceil((width * scale) / 4)), Math.max(2, Math.ceil((height * scale) / 4)));
-  const mottle = paintContext(small);
-  mottle.setTransform(small.width / width, 0, 0, small.height / height, 0, 0);
-  if (!["woven", "slub", "silk", "twill", "speckle", "scales", "wood", "fibre"].includes(look.thread)) {
+  const mottled = !["woven", "slub", "silk", "twill", "speckle", "scales", "wood", "fibre"].includes(look.thread);
+  // Small boards (the shelf, drafts) with threads gain nothing from a sheet
+  // of their own: there the gradients go straight on.
+  const sheet = mottled || width * height * scale * scale > GRAIN_CACHE_PIXELS;
+  const small = sheet ? makeCanvas(Math.max(2, Math.ceil((width * scale) / 4)), Math.max(2, Math.ceil((height * scale) / 4))) : null;
+  const mottle = small ? paintContext(small) : ctx;
+  if (small) mottle.setTransform(small.width / width, 0, 0, small.height / height, 0, 0);
+  if (mottled) {
     // Leather and velvet: broad, soft tonal mottling instead of threads.
     const count = Math.round(70 * area);
     for (let blot = 0; blot < count; blot += 1) {
@@ -622,11 +626,13 @@ function paintGrain(ctx, width, height, kind, seed, spine, flip) {
   mottle.fillRect(0, 0, width, height);
 
   // Bilinear is exact for the gradients and invisible on the soft blots.
-  ctx.save();
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "low";
-  ctx.drawImage(small, 0, 0, width, height);
-  ctx.restore();
+  if (small) {
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "low";
+    ctx.drawImage(small, 0, 0, width, height);
+    ctx.restore();
+  }
 }
 
 /* ---------- paper ---------- */

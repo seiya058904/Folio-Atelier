@@ -4,7 +4,7 @@ Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2
 
 Started 2026-11-18 at the user's request to take the next round as far as it goes. It begins with a real-browser review (Ego, real GPU, DPR 1.5) of everything round 3 built, and with the stalls round 3 left: the frames after a preset or a landing.
 
-**Status:** S done (2026-11-18).
+**Status:** S, T and U done (2026-11-18).
 
 **Rules (carried over)**
 - Measure first and say what each change bought. `?bench` before and after every phase; turntable sweep after any 3D change; compare with the original before changing rig, lighting or page motion.
@@ -26,11 +26,15 @@ Started 2026-11-18 at the user's request to take the next round as far as it goe
 
 ## Phase T — Finer models
 
-Details round 3 left: the French groove along the joint, head caps, the board squares, page edges seen close. Prefer relief and painted detail over new geometry on the turning boards; compare close-ups before and after.
+- **T — done.** The French groove: a shallow channel along the joint of both boards, 4.6 % of the board in from the spine — a soft trough with a lit far lip on the picture, and pressed into the relief layer where the book has one, so on leather it moves with the light. Stab-bound books (sewn through the board) have none. Checked in close-ups of cloth and debossed leather. Texture only: no geometry on the turning boards. Head caps and turn-ins remain geometry work, still not worth the risk.
 
 ## Phase U — One continuous motion
 
-Walk every hand-over (shelf ⇄ studio, open ⇄ read, tab ⇄ view, panel ⇄ sheet) and remove each seam: timing, easing, what moves first.
+- **U — done.** Recorded the hand-overs as screencasts and read them frame by frame.
+  - Entering reading mode, the camera's swing landed in about half a second and the framing then drifted for another 0.8 s (it eased on its own curve). The framing now runs on the camera's timeline — same length, same curve — so the two land together (about 650 ms).
+  - Leaving reading mode returns to the view the reader was on (spine, back, edges), not always the front.
+  - Correction to S: the wider AO denoise (16 samples × 3 rings) doubled the denoise on every frame and cost the cold shelf sweep a frame step (p95 12.3 → 18.2 ms, found by A/B against round 3 in a separate worktree). It is back to 12 × 2 with a wider radius at the same cost; the distance fall-off, which is what cleaned the page edges, stays. The soft grain sheet is now used only where it pays (studio size, or mottled materials).
+  - `?bench` back on the round-3 numbers everywhere; typing keeps S's gain (frame p95 13.4 ms, key to page 15 ms).
 
 ## Phase V — Finish
 
