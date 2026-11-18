@@ -1491,6 +1491,12 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
         target.clearcoat = coat * 0.2;
       })));
     });
+    // Gilt and gauffered edges drop the paper's sheen, which is a feature switch.
+    [[foreEdgeMaterial, foreEdge], [headTailEdgeMaterial, foreEdge]].forEach(([material, mesh]) => {
+      both.forEach((sheen) => variant(material, mesh, (target) => {
+        target.sheen = sheen * 0.02;
+      }));
+    });
     [[foilArt, foilPlane], [backFoilArt, backFoilPlane], [spineFoilArt, spineFoil]].forEach(([material, mesh]) => {
       both.forEach((coat) => both.forEach((grain) => both.forEach((film) => variant(material, mesh, (target) => {
         target.clearcoat = coat * 0.18;

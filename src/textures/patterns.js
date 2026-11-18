@@ -107,22 +107,44 @@ const DRAW = {
   },
 
   seigaiha(ctx, w, h, u) {
-    const r = u * 0.56;
-    for (let row = -1; row * r * 0.5 < h + r; row += 1) {
+    // Each scale hides the ones above it, so drawn one by one it costs a
+    // composite switch per scale (about 90 ms for a full-size board). The
+    // waves repeat every 2r across and r down: one tile, a whole number of
+    // pixels wide, is drawn with its neighbours and then laid as a pattern.
+    const scale = Math.abs(ctx.getTransform().a) || 1;
+    const across = Math.max(2, Math.round(u * 0.56 * 2 * scale));
+    const r = across / (2 * scale);
+    const down = Math.max(1, Math.round(r * scale));
+    const tile = document.createElement("canvas");
+    tile.width = across;
+    tile.height = down;
+    const t = paintContext(tile);
+    t.setTransform(scale, 0, 0, scale, 0, 0);
+    t.strokeStyle = ctx.strokeStyle;
+    t.fillStyle = "#000000";
+    t.lineWidth = ctx.lineWidth;
+    const tileW = across / scale;
+    const tileH = down / scale;
+    for (let row = -4; row * r * 0.5 < tileH + r; row += 1) {
       const y = row * r * 0.5;
-      for (let x = row % 2 ? r : 0; x < w + r; x += r * 2) {
-        ctx.globalCompositeOperation = "destination-out";
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, TAU);
-        ctx.fill();
-        ctx.globalCompositeOperation = "source-over";
-        [0.95, 0.68, 0.42, 0.18].forEach((scale) => {
-          ctx.beginPath();
-          ctx.arc(x, y, r * scale, 0, TAU);
-          ctx.stroke();
+      for (let x = (row % 2 ? r : 0) - r * 2; x < tileW + r * 2; x += r * 2) {
+        t.globalCompositeOperation = "destination-out";
+        t.beginPath();
+        t.arc(x, y, r, 0, TAU);
+        t.fill();
+        t.globalCompositeOperation = "source-over";
+        [0.95, 0.68, 0.42, 0.18].forEach((ring) => {
+          t.beginPath();
+          t.arc(x, y, r * ring, 0, TAU);
+          t.stroke();
         });
       }
     }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = ctx.createPattern(tile, "repeat");
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
   },
 
   shippo(ctx, w, h, u) {
@@ -404,34 +426,63 @@ export function patternMask(key, pixelWidth, pixelHeight, logical, { scale = 1, 
   ctx.fillStyle = "#ffffff";
   ctx.lineWidth = lineWidth;
   DRAW[key](ctx, logical.width, logical.height, unit * scale, seededRandom(seed * 7919 + 13));
+  // Identity for the tint cache, and a way to get the same mask at another
+  // size (the relief layer is half the size of the board).
+  canvas.maskId = id;
+  canvas.remake = (width, height) => patternMask(key, width, height, logical, { scale, unit, lineWidth, seed });
   cache.set(id, canvas);
   if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value);
   return canvas;
 }
 
-let tintCanvas = null;
+// Tinted copies of masks, by mask and colour. A board stamps the same mask
+// in the same colours on every repaint (and on both boards), so the copy is
+// made once instead of on every stamp.
+const tints = new Map();
+const TINT_LIMIT = 4;
+const WHITE = new Set(["#ffffff", "#fff", "white", "rgb(255,255,255)", "rgb(255, 255, 255)"]);
 
-/** Stamp a mask onto `ctx` (which works in logical units) in one colour. */
+function tinted(mask, color) {
+  const id = `${mask.maskId || ""}|${mask.width}x${mask.height}|${color}`;
+  const cached = mask.maskId ? tints.get(id) : null;
+  if (cached) {
+    tints.delete(id);
+    tints.set(id, cached);
+    return cached;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = mask.width;
+  canvas.height = mask.height;
+  const tint = paintContext(canvas);
+  tint.drawImage(mask, 0, 0);
+  tint.globalCompositeOperation = "source-in";
+  tint.fillStyle = color;
+  tint.fillRect(0, 0, mask.width, mask.height);
+  if (mask.maskId) {
+    tints.set(id, canvas);
+    if (tints.size > TINT_LIMIT) tints.delete(tints.keys().next().value);
+  }
+  return canvas;
+}
+
+/**
+ * Stamp a mask onto `ctx` (which works in logical units, `width` × `height`
+ * covering the whole canvas) in one colour. The mask is used at the canvas's
+ * own pixel size and offsets land on whole pixels, so the browser copies
+ * pixels instead of resampling a full-size board.
+ */
 export function stampPattern(ctx, mask, width, height, color, alpha = 1, dx = 0, dy = 0) {
   if (!mask) return;
   let source = mask;
-  if (color !== "#ffffff") {
-    if (!tintCanvas) tintCanvas = document.createElement("canvas");
-    if (tintCanvas.width !== mask.width || tintCanvas.height !== mask.height) {
-      tintCanvas.width = mask.width;
-      tintCanvas.height = mask.height;
-    }
-    const tint = paintContext(tintCanvas);
-    tint.globalCompositeOperation = "copy";
-    tint.drawImage(mask, 0, 0);
-    tint.globalCompositeOperation = "source-in";
-    tint.fillStyle = color;
-    tint.fillRect(0, 0, mask.width, mask.height);
-    tint.globalCompositeOperation = "source-over";
-    source = tintCanvas;
+  if (mask.remake && (ctx.canvas.width !== mask.width || ctx.canvas.height !== mask.height)) {
+    source = mask.remake(ctx.canvas.width, ctx.canvas.height);
   }
+  if (!WHITE.has(String(color).toLowerCase())) source = tinted(source, color);
+  const transform = ctx.getTransform();
+  const sx = transform.a || 1;
+  const sy = transform.d || 1;
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.drawImage(source, dx, dy, width, height);
+  ctx.drawImage(source, Math.round(dx * sx) / sx, Math.round(dy * sy) / sy, width, height);
   ctx.restore();
 }

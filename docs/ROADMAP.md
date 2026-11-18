@@ -7,6 +7,12 @@ Agreed with the user on 2026-11-18. The aim of this round: nothing lost, nothing
 **Status:** started 2026-11-18.
 
 - **M — done.** Verified in Playwright: with IndexedDB refused, the shelf and the studio say the books are kept for this visit only (before: "Saved", and a reload emptied the shelf). A second tab waits behind "Your library is open in another tab" until the reader takes it over; the first then stops saving and says so. The orphaned picture in the test library (about 1 MB) was swept at start-up. With the CDN refused, the boot watchdog shows a bilingual message and a reload button at once. The backup line shows after a week of edits without an "Export all". `?bench` unchanged.
+- **N — done.** Profiled before changing anything (CPU profile, Chrome trace, frame timeline after a preset click), RTX 3070 laptop, high tier:
+  - Typing in a 60-paragraph chapter was already smooth (frame p95 6.3 ms, worst 12 ms): left as it was.
+  - The worst preset click (Midnight) had a 331 ms task. Three causes, all fixed: the gilt page edges switch off sheen, a material feature missing from `shaderVariants` (160 ms of compiling mid-frame); the seigaiha mask drew each scale with its own composite switch (93 ms at full size; now one tile laid as a pattern, 14 ms, identical look); and every preset reprinted all eight printed pages in one frame even with the book shut (now only the open spread at once, the rest one leaf per quiet moment). Tinted pattern masks are cached, and the relief layer gets a mask at its own size. Longest main-thread task after a preset: 331 → about 50 ms.
+  - Flight into the studio: nothing is painted in flight (no long frames during it). The full-size pass after landing still shows 40–60 ms frames whose main-thread share is about 10 ms; the rest is the GPU process taking the uploads, which this trace cannot see. Left for now.
+  - Texture memory for a large library: no evidence it hurts on the target devices; repainting far books when they come back would cost smoothness. Not done.
+  - `?bench` unchanged within run-to-run noise.
 
 **Rules (carried over)**
 - Real speed first; mask only waits that cannot be removed, with cheap motion that respects `prefers-reduced-motion`.

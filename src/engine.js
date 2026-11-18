@@ -1142,9 +1142,18 @@ function syncLeafWindow(rig, force = false) {
     deferLeafPrint(rig, pivot, base);
   } else {
     rig.assignLeafSlots();
+    // Only the open spread is printed now; the leaves lying under the piles
+    // (or all of them, while the book is shut) follow one per quiet moment.
+    // A preset or a cloth colour reprints every page, and eight pages with
+    // their uploads in one frame was the largest stall left in the studio.
+    leafQueue.length = 0;
     for (let order = 0; order < PRINTED_LEAVES; order += 1) {
-      printLeaf(rig, rig.leaves[order], base + order);
+      const leaf = base + order;
+      const inView = readingOpen && (leaf === currentSpread || leaf === currentSpread - 1);
+      if (inView) printLeaf(rig, rig.leaves[order], leaf);
+      else leafQueue.push({ rig, pivot: rig.leaves[order], leaf });
     }
+    startLeafQueue();
   }
 }
 
