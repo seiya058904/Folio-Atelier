@@ -4,7 +4,7 @@ Earlier rounds: [round 1](roadmap-round-1.md) (A–F), [round 2](roadmap-round-2
 
 Started 2026-11-18 at the user's request to take the next round as far as it goes. It begins with a real-browser review (Ego, real GPU, DPR 1.5) of everything round 3 built, and with the stalls round 3 left: the frames after a preset or a landing.
 
-**Status:** S, T and U done (2026-11-18).
+**Status:** S, T, U and V done (2026-11-19).
 
 **Rules (carried over)**
 - Measure first and say what each change bought. `?bench` before and after every phase; turntable sweep after any 3D change; compare with the original before changing rig, lighting or page motion.
@@ -38,4 +38,8 @@ Started 2026-11-18 at the user's request to take the next round as far as it goe
 
 ## Phase V — Finish
 
-Whatever the reviews turn up; a final Ego walkthrough.
+- **V — done.** From the Ego review and a last walk through:
+  - In English the seven studio tabs needed 450 px in a 340 px panel: STRUCTURE and PAGES were out of sight with no sign they were there. The tabs are set a little closer (they now fit from a 432 px panel, a 1440 px window); in a narrower panel the strip scrolls sideways, the side with more fades out, a mouse wheel scrolls it, and the open tab is always brought into view. Chinese always fits.
+  - Reading is now a visit: leaving it puts back what was there, so a book that was shut when reading began is shut again, and the camera returns to the view it came from (before, a shut book entered from the spine view came back open and seen edge-on). Leaving the studio from reading lets the flight home shut the book, with no separate close on the way.
+  - Engine notes for the cached grain, paper sheets and texture spares added to `CLAUDE.md`, with the rule for measuring a 2D painter (force the flush).
+  - `?bench`: the machine was noisier on this second day, so the shelf sweep was compared against round 3 in a separate worktree, interleaved: current p95 18.5 ms against 24.2 and 30.2 ms for round 3, average frame equal. No regression.

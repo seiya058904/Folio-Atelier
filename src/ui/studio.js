@@ -177,21 +177,56 @@ export function createStudioUi({ store, engine, audio }) {
       button.tabIndex = selected ? 0 : -1;
     });
     body.setAttribute("aria-labelledby", `tab-${tab}`);
-    requestAnimationFrame(placeTabIndicator);
+    requestAnimationFrame(() => {
+      placeTabIndicator();
+      keepTabInView();
+      updateTabEdges();
+    });
   }
 
   function placeTabIndicator() {
     const selected = tabsElement.querySelector(".tab[aria-selected='true']");
     if (!selected || !selected.offsetWidth) return;
-    tabsElement.style.setProperty("--tab-x", `${selected.offsetLeft + 8}px`);
-    tabsElement.style.setProperty("--tab-w", `${Math.max(0, selected.offsetWidth - 16)}px`);
+    tabsElement.style.setProperty("--tab-x", `${selected.offsetLeft + 6}px`);
+    tabsElement.style.setProperty("--tab-w", `${Math.max(0, selected.offsetWidth - 12)}px`);
     if (!tabsElement.classList.contains("has-indicator")) {
       tabsElement.classList.add("has-indicator");
       // The first placement is instant; later ones slide.
       requestAnimationFrame(() => tabsElement.classList.add("is-placed"));
     }
   }
-  new ResizeObserver(() => placeTabIndicator()).observe(tabsElement);
+  new ResizeObserver(() => {
+    placeTabIndicator();
+    updateTabEdges();
+  }).observe(tabsElement);
+
+  // When the tabs do not fit (English in a narrow panel) the strip scrolls:
+  // the side with more fades out, a mouse wheel scrolls it sideways, and the
+  // open tab is always brought into view.
+  const tabMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  function updateTabEdges() {
+    const over = tabsElement.scrollWidth > tabsElement.clientWidth + 1;
+    tabsElement.classList.toggle("fade-start", over && tabsElement.scrollLeft > 2);
+    tabsElement.classList.toggle("fade-end", over && tabsElement.scrollLeft + tabsElement.clientWidth < tabsElement.scrollWidth - 2);
+  }
+
+  function keepTabInView() {
+    const selected = tabsElement.querySelector(".tab[aria-selected='true']");
+    if (!selected || tabsElement.scrollWidth <= tabsElement.clientWidth + 1) return;
+    const margin = 36;
+    const start = selected.offsetLeft - margin;
+    const end = selected.offsetLeft + selected.offsetWidth + margin;
+    const behavior = tabMotion.matches ? "auto" : "smooth";
+    if (start < tabsElement.scrollLeft) tabsElement.scrollTo({ left: start, behavior });
+    else if (end > tabsElement.scrollLeft + tabsElement.clientWidth) tabsElement.scrollTo({ left: end - tabsElement.clientWidth, behavior });
+  }
+
+  tabsElement.addEventListener("scroll", updateTabEdges, { passive: true });
+  tabsElement.addEventListener("wheel", (event) => {
+    if (tabsElement.scrollWidth <= tabsElement.clientWidth + 1 || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+    event.preventDefault();
+    tabsElement.scrollLeft += event.deltaY;
+  }, { passive: false });
 
   function setTab(next, { focusView = true } = {}) {
     if (next === tab && currentPane) {

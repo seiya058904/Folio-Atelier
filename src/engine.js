@@ -171,6 +171,8 @@ const AO_BLEND = 0.82;
 let lastCameraMotion = false;
 // The view the reader was on before reading, to return to on leaving.
 let viewBeforeReading = "front";
+// Reading is a visit: leaving it puts back what was there (a shut book is shut again).
+let openBeforeReading = false;
 let currentViewName = "front";
 let readingAmount = 0;
 // The framing moves on the camera's own timeline (same length, same curve),
@@ -1923,7 +1925,8 @@ function finishOpening() {
 
 function closeDetail() {
   if (mode !== "detail") return;
-  if (readingMode) setReadingMode(false);
+  // The flight home shuts the book by itself: no separate close on the way.
+  if (readingMode) setReadingMode(false, { restore: false });
   audio.playCue(readingOpen ? "close" : "select", {
     gain: readingOpen ? 1 : 0.72
   });
@@ -3502,7 +3505,7 @@ function updateReadingAmount(delta) {
  * turn with the arrow keys, a tap on either side, a swipe, or a drag of the
  * page itself; the controls fade while the reader reads. Escape leaves.
  */
-function setReadingMode(on) {
+function setReadingMode(on, { restore = true } = {}) {
   on = Boolean(on) && mode === "detail";
   if (on === readingMode) return;
   readingMode = on;
@@ -3511,12 +3514,14 @@ function setReadingMode(on) {
   controls.enabled = !on;
   if (on) {
     viewBeforeReading = currentViewName === "reading" ? "front" : currentViewName;
+    openBeforeReading = readingOpen;
     if (!readingOpen) setReadingOpen(true, false);
     focusView("reading");
     readingDuration = viewTween.duration;
     announce(t("Reading. Use the arrow keys or tap either side to turn the page; Escape to leave."));
   } else {
     experience.classList.remove("is-quiet");
+    if (restore && !openBeforeReading && readingOpen) setReadingOpen(false, false);
     focusView(viewBeforeReading);
     readingDuration = viewTween.duration;
   }
