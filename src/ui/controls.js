@@ -732,6 +732,16 @@ export function openColourPicker(anchor, value, onInput) {
   });
 }
 
+// Escape closes an open picker or list and goes no further (it must not also
+// take the book back to the shelf), wherever the focus happens to be.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || (!openPicker && !openSelect)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (openPicker) openPicker.close({ restore: true });
+  else openSelect.close();
+}, true);
+
 document.addEventListener("pointerdown", (event) => {
   if (!openPicker) return;
   if (openPicker.panel.contains(event.target) || openPicker.anchor.contains(event.target)) return;

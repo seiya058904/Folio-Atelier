@@ -1390,6 +1390,7 @@ p {
   z-index: 60;
   display: grid;
   width: 248px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--hairline);
@@ -1483,6 +1484,7 @@ p {
 }
 
 .picker__hex {
+  width: 0;
   min-width: 0;
   flex: 1;
   padding: 6px 10px;
