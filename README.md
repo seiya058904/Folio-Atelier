@@ -8,6 +8,12 @@ A personal 3D bookmaking studio. Choose a cloth, press a title in foil, set the 
 
 <p align="center">
   <a href="https://seiya058904.github.io/Folio-Atelier/">
+    <img src="docs/readme-cover.svg" width="100%" alt="Folio Atelier — illustrated oxblood leather and antique-gold cover banner for the 3D bookmaking studio" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://seiya058904.github.io/Folio-Atelier/">
     <img src="docs/studio.png" width="100%" alt="Folio Atelier — a leather-bound book in the 3D studio with the design panel open" />
   </a>
 </p>
