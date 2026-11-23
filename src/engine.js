@@ -9,7 +9,7 @@
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
@@ -25,7 +25,7 @@ import { bookPalette, coverFontRuns, createBook } from "./state/schema.js";
 import { bindRenderer } from "./textures/gl.js";
 import { prefetchBoardGrain } from "./textures/faces.js";
 import { forgetMeasurements, pageFontRuns, paginate } from "./textures/pages.js";
-import { MATERIAL_LOOK, getContactShadowTexture, getMaterialMaps } from "./textures/surface.js";
+import { MATERIAL_LOOK, createWoodMicroMaps, getContactShadowTexture, getMaterialMaps } from "./textures/surface.js";
 import { ATELIER_PALETTE, seededRandom } from "./util.js";
 
 const WOOD_TEXTURE_URL = "./assets/walnut.webp";
@@ -89,6 +89,7 @@ let wakeRender = true;
 let ambient = 1;
 let ambientClock = 0;
 let shadowHold = 4;
+let shadowTick = 0;
 let dustPoints = null;
 
 // Books on their way off the shelf (deleted): they lift and fade, then go.
@@ -167,6 +168,9 @@ let sheetShown = 0.5;
 // Reading mode: the workbench withdraws and the open spread fills the screen
 // (`readingAmount` eases the framing between the two).
 let readingMode = false;
+// Photo Studio mode: workbench withdraws, book centers cleanly inside viewfinder.
+let photoMode = false;
+let photoAmount = 0;
 // Ambient occlusion strength; reading mode lightens it so the page stays clean.
 const AO_BLEND = 0.82;
 let lastCameraMotion = false;
@@ -193,6 +197,10 @@ const roomMaterials = {
   shelf: null,
   shelfDark: null,
   shadow: null
+};
+const roomMeshes = {
+  floor: null,
+  wall: null
 };
 const roomLights = {
   hemisphere: null,
@@ -228,6 +236,7 @@ const pageDrag = {
   pointerId: null,
   startX: 0,
   startY: 0,
+  spanPx: 220,
   progress: 0,
   peakProgress: 0,
   committed: false,
@@ -326,13 +335,14 @@ const announce = (message) => { liveRegion.textContent = message; };
 
 function configureResponsiveTargets() {
   const narrow = viewWidth < 820;
-  shelfCameraPosition.set(0, narrow ? 2.02 : 1.92, narrow ? 8.7 : 8.1);
-  shelfCameraTarget.set(0, narrow ? 1.57 : 1.55, 0);
-  inspectPosition.set(narrow ? 0 : -2.25, narrow ? 2.42 : 1.56, narrow ? 0.15 : 0);
-  inspectCameraPosition.set(narrow ? 0 : -0.52, narrow ? 1.7 : 1.78, narrow ? 7.4 : 5.25);
+  shelfCameraPosition.set(0, narrow ? 1.82 : 1.92, narrow ? 8.85 : 8.1);
+  shelfCameraTarget.set(0, narrow ? 1.18 : 1.55, 0);
+  inspectPosition.set(narrow ? 0 : -2.25, narrow ? 2.26 : 1.56, narrow ? 0.15 : 0);
+  inspectCameraPosition.set(narrow ? 0 : -0.52, narrow ? 1.66 : 1.78, narrow ? 7.45 : 5.25);
   inspectCameraTarget.copy(inspectPosition);
-  // On phones the workbench covers the lower half, so aim below the book.
-  if (narrow) inspectCameraTarget.y -= 1.05;
+  // On phones the workbench covers the lower half and the stage bar sits above,
+  // so frame the book centered cleanly between stage-bar and reader-bar.
+  if (narrow) inspectCameraTarget.y -= 0.96;
 
   if (narrow) {
     detailViewOffsetX = 0;
@@ -351,13 +361,18 @@ function configureResponsiveTargets() {
 }
 
 function getInspectScale() {
-  if (!activeBook || viewWidth < 820) return 0.82;
+  if (!activeBook) return 0.77;
+  const trimMul = activeBook.trimScale || 1;
+  if (viewWidth < 820) return clamp(0.77 / Math.max(1, trimMul * 0.96), 0.62, 0.77);
   const distance = Math.abs(inspectCameraPosition.z - inspectPosition.z);
   const worldHeight = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
   const pixelsPerWorld = viewHeight / Math.max(worldHeight, 0.001);
-  const estimatedBookWidth = activeBook.base.width * pixelsPerWorld * 1.16;
+  const estimatedBookWidth = activeBook.base.width * trimMul * pixelsPerWorld * 1.16;
+  const estimatedBookHeight = activeBook.base.height * trimMul * pixelsPerWorld * 1.06;
+  const safeHeight = Math.max(260, viewHeight - 186);
   const scaleForSafeWidth = (detailSafeWidth * 0.72) / Math.max(estimatedBookWidth, 1);
-  return clamp(scaleForSafeWidth, 0.9, 1.32);
+  const scaleForSafeHeight = safeHeight / Math.max(estimatedBookHeight, 1);
+  return clamp(Math.min(scaleForSafeWidth, scaleForSafeHeight), 0.66, 1.32);
 }
 
 /* ------------------------------------------------------------------ */
@@ -517,37 +532,120 @@ function tameRoomForNeutral() {
 }
 
 /*
- * What the foil, the clasp and the varnish reflect. The studio's reflection
- * room is tinted and dimmed with the light, so gold at night mirrors a dark,
- * lamp-warm room instead of a bright studio. Built once per light (a few
- * milliseconds); the texture swap keeps every program.
+ * Bespoke procedural Atelier Photography Studio environment for PMREM
+ * reflections. Overhead silk scrim, tall vertical key softbox, warm rim strip,
+ * cool fill bounce and dark negative-fill flags create crisp dark-to-bright
+ * contrast on metallic gold/copper/silver foil, brass hardware and pebbled hide.
+ * Rebuilt only when the lighting preset changes (keeps every shader program).
  */
 const ENVIRONMENTS = {
-  studio: { tint: "#ffffff", strength: 1 },
-  morning: { tint: "#f7f8ff", strength: 1.06 },
-  golden: { tint: "#ffcc94", strength: 0.96 },
-  night: { tint: "#ffb36b", strength: 0.36 }
+  studio: {
+    base: "#2d2a26",
+    ceiling: "#f8f3ea", ceilingPower: 2.3,
+    key: "#fff3df", keyPower: 4.8,
+    rim: "#f2c68a", rimPower: 3.6,
+    fill: "#d5e4f0", fillPower: 1.9,
+    floor: "#5c4635", floorPower: 0.75
+  },
+  morning: {
+    base: "#333942",
+    ceiling: "#f7fbff", ceilingPower: 2.6,
+    key: "#fff7ec", keyPower: 4.6,
+    rim: "#c9e0f5", rimPower: 2.8,
+    fill: "#cce2f8", fillPower: 2.9,
+    floor: "#695b4e", floorPower: 0.85
+  },
+  golden: {
+    base: "#221a20",
+    ceiling: "#f5c694", ceilingPower: 1.8,
+    key: "#ffae62", keyPower: 5.6,
+    rim: "#ff8c3a", rimPower: 5.2,
+    fill: "#6a759c", fillPower: 1.25,
+    floor: "#52321e", floorPower: 0.75
+  },
+  night: {
+    base: "#07060a",
+    ceiling: "#1b1724", ceilingPower: 0.35,
+    key: "#ffbb66", keyPower: 5.2,
+    rim: "#ff9b44", rimPower: 2.8,
+    fill: "#2a3352", fillPower: 0.55,
+    floor: "#24160d", floorPower: 0.32
+  }
 };
 let environmentKey = "";
 let pmrem = null;
+
+function createAtelierEnvironmentScene(preset) {
+  const envScene = new THREE.Scene();
+  const mat = (color, intensity = 1, side = THREE.FrontSide) => new THREE.MeshBasicMaterial({
+    color: new THREE.Color(color).multiplyScalar(intensity),
+    side
+  });
+
+  // Dark studio enclosure (negative fill gives foil & brass genuine contrast)
+  const roomBox = new THREE.Mesh(new THREE.BoxGeometry(20, 14, 20), mat(preset.base, 1, THREE.BackSide));
+  roomBox.position.y = 3;
+  envScene.add(roomBox);
+
+  // Soft overhead silk scrim diffuser
+  const ceilingScrim = new THREE.Mesh(new THREE.PlaneGeometry(11, 8), mat(preset.ceiling, preset.ceilingPower));
+  ceilingScrim.position.set(0, 9.6, 0.5);
+  ceilingScrim.rotation.x = Math.PI * 0.5;
+  envScene.add(ceilingScrim);
+
+  // Tall vertical key softbox (left-front) — sweeps bright specular highlight down spine & cover foil
+  const keyBox = new THREE.Mesh(new THREE.PlaneGeometry(3.8, 7.6), mat(preset.key, preset.keyPower));
+  keyBox.position.set(-6.5, 4.2, 5.2);
+  keyBox.lookAt(0, 1.5, 0);
+  envScene.add(keyBox);
+
+  // Focused hot strip inside the key softbox for crisp metal catchlights
+  const keyCore = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 5.8), mat(preset.key, preset.keyPower * 1.9));
+  keyCore.position.set(-6.2, 4.4, 5.4);
+  keyCore.lookAt(0, 1.5, 0);
+  envScene.add(keyCore);
+
+  // Opposite cool window fill panel (right-front)
+  const fillPanel = new THREE.Mesh(new THREE.PlaneGeometry(5.5, 6.2), mat(preset.fill, preset.fillPower));
+  fillPanel.position.set(7.6, 3.6, 3.8);
+  fillPanel.lookAt(0, 1.5, 0);
+  envScene.add(fillPanel);
+
+  // Narrow raking rim strip (right-rear) — lights raised spine cords & metal corner bevels
+  const rimStrip = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 6.8), mat(preset.rim, preset.rimPower));
+  rimStrip.position.set(5.4, 4.2, -5.2);
+  rimStrip.lookAt(0, 1.5, 0);
+  envScene.add(rimStrip);
+
+  // Secondary back-left subtle strip for back-cover metallic grazing reflections
+  const backStrip = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 5.2), mat(preset.fill, preset.fillPower * 0.85));
+  backStrip.position.set(-4.2, 3.4, -6.4);
+  backStrip.lookAt(0, 1.5, 0);
+  envScene.add(backStrip);
+
+  // Warm timber floor bounce
+  const floorBounce = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), mat(preset.floor, preset.floorPower));
+  floorBounce.position.set(0, -3.5, 0);
+  floorBounce.rotation.x = -Math.PI * 0.5;
+  envScene.add(floorBounce);
+
+  return envScene;
+}
 
 function buildEnvironment(name) {
   if (!renderer || !scene) return;
   const look = ENVIRONMENTS[name] || ENVIRONMENTS.studio;
   if (environmentKey === name) return;
   environmentKey = name;
-  const reflection = new RoomEnvironment();
-  const tint = new THREE.Color(look.tint).multiplyScalar(look.strength);
-  const seen = new Set();
-  reflection.traverse((object) => {
-    const material = object.material;
-    if (!material?.color || seen.has(material)) return;
-    seen.add(material);
-    material.color.multiply(tint);
-  });
+  const reflection = createAtelierEnvironmentScene(look);
   if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
-  const target = pmrem.fromScene(reflection, 0.04);
-  reflection.dispose();
+  const target = pmrem.fromScene(reflection, 0.032);
+  reflection.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.geometry.dispose();
+      obj.material.dispose();
+    }
+  });
   environmentTarget?.dispose();
   environmentTarget = target;
   scene.environment = target.texture;
@@ -567,10 +665,14 @@ function applyRoomSettings() {
     const wantMap = !shelf.plain;
     if (wantMap && !material.map && material.userData.woodMap) {
       material.map = material.userData.woodMap;
+      material.bumpMap = material.userData.woodBump || null;
+      material.roughnessMap = material.userData.woodRough || null;
       material.needsUpdate = true;
     } else if (!wantMap && material.map) {
       material.userData.woodMap = material.map;
       material.map = null;
+      material.bumpMap = null;
+      material.roughnessMap = null;
       material.needsUpdate = true;
     }
     material.roughness = shelf.roughness ?? material.userData.baseRoughness ?? material.roughness;
@@ -578,8 +680,10 @@ function applyRoomSettings() {
   });
   roomFrame.forEach((mesh) => { mesh.visible = !shelf.frameless; });
   if (lamp) {
-    lamp.visible = room.light === "night";
-    lamp.userData.shade.emissiveIntensity = lamp.visible ? 0.9 : 0;
+    const night = room.light === "night";
+    lamp.visible = night;
+    lamp.userData.shade.emissiveIntensity = night ? 1.15 : 0;
+    if (lamp.userData.pool) lamp.userData.pool.visible = night;
   }
   shadowHold = 4;
 }
@@ -595,6 +699,7 @@ function setRoom(next = {}) {
   applyRoomSettings();
   themeKey = "";
   applySelectedTheme();
+  emit("onRoomChange", { ...room });
   requestFrame();
 }
 
@@ -856,8 +961,7 @@ function addBook(book, index = bookRigs.length, { from = null } = {}) {
     rig.root.rotation.z += 0.16;
     rig.root.rotation.y -= 0.5;
     rig.root.scale.multiplyScalar(0.9);
-    rig.opacity = 0;
-    rig.fadeMaterials.forEach((material) => { material.opacity = 0; });
+    rig.setOpacity(0);
   }
   requestFrame();
   return rig;
@@ -1088,8 +1192,7 @@ function beginArrival() {
     rig.settling = 1.1;
     rig.root.position.y += 0.2;
     rig.root.rotation.z += (index < targetPosition ? 1 : -1) * 0.04;
-    rig.opacity = 0;
-    rig.fadeMaterials.forEach((material) => { material.opacity = 0; });
+    rig.setOpacity(0);
     rig.contactShadow.material.opacity = 0;
     rig.root.visible = false;
   });
@@ -1112,14 +1215,12 @@ function snapRigToShelfSlot(rig, index) {
     pagePivot.rotation.y = 0;
     pagePivot.rotation.z = 0;
     pagePivot.position.z = pagePivot.userData.restZ;
-    updateFlexiblePage(pagePivot, 0, 0, true);
+    updateFlexiblePage(pagePivot, 0, 0, true, 0, 0);
   });
-  rig.opacity = slot.opacity;
-  rig.fadeMaterials.forEach((material) => {
-    material.opacity = slot.opacity;
-  });
+  rig.setOpacity(slot.opacity);
+  rig.setRibbonShelfRest?.(1);
   rig.contactShadow.visible = true;
-  rig.contactShadow.material.opacity = slot.opacity * 0.24;
+  rig.contactShadow.material.opacity = slot.opacity * 0.34;
   rig.hit.visible = slot.opacity > 0.12;
   rig.lastOffset = slot.offset;
 }
@@ -1189,17 +1290,16 @@ function updateShelfLayout(delta, elapsed) {
     rig.root.rotation.z = damp(rig.root.rotation.z, slot.rotationZ, speed, delta);
     rig.root.scale.setScalar(damp(rig.root.scale.x, slot.scale, speed, delta));
 
-    rig.opacity = reducedMotion
+    const nextOpacity = reducedMotion
       ? slot.opacity
       : damp(rig.opacity, slot.opacity, settling ? 6 : 14, delta);
-    rig.root.visible = rig.opacity > 0.004;
-    rig.fadeMaterials.forEach((material) => {
-      material.opacity = rig.opacity;
-    });
+    rig.root.visible = nextOpacity > 0.004;
+    rig.setOpacity(nextOpacity);
     rig.contactShadow.visible = true;
-    rig.contactShadow.material.opacity = rig.opacity * 0.24;
-    rig.hit.visible = rig.opacity > 0.12;
+    rig.contactShadow.material.opacity = nextOpacity * 0.34;
+    rig.hit.visible = nextOpacity > 0.12;
     if (!rig.root.visible) return;
+    rig.setRibbonShelfRest?.(1);
     if (rig.hasBand && rig.updateBand(delta, { tug: hoveredIndex === index && !reducedMotion })) motion = true;
     if (!rig.painted) {
       // Books are painted as they come into view, at most two a frame.
@@ -1258,7 +1358,8 @@ function settleLeaf(pivot, turned) {
   const flex = pivot.userData.flex;
   flex.curveVelocity = 0;
   flex.twistVelocity = 0;
-  updateFlexiblePage(pivot, 0.012, 0, true);
+  const dir = turned ? -1 : 1;
+  updateFlexiblePage(pivot, 0.008 * dir, 0, true, 0, 0.032 * dir);
 }
 
 /**
@@ -1620,11 +1721,20 @@ function updatePaginatedBook(rig, delta, openAmount = 1) {
     pagePivot.rotation.y = damp(pagePivot.rotation.y, pageTarget * amount, speed, delta);
     pagePivot.rotation.z = damp(pagePivot.rotation.z, pageTwistTarget * amount, speed, delta);
     const turnProgress = clamp(Math.abs(pagePivot.rotation.y) / Math.PI, 0, 1);
+    const midTurn = Math.sin(Math.PI * turnProgress);
+    // Arch direction flips sign smoothly via cos(rotation.y) so BOTH right-hand
+    // unturned leaves (+z local = +z world) and left-hand turned leaves (-z local = +z world)
+    // bow gracefully toward the reader without ever clipping into the front cover.
+    const archDir = Math.cos(pagePivot.rotation.y);
     const curveTarget = amount > 0
-      ? amount * (0.011 + Math.sin(Math.PI * turnProgress) * 0.078 + dragCurveBoost)
+      ? amount * (0.008 * archDir + midTurn * 0.082 + dragCurveBoost)
       : 0;
-    updateFlexiblePage(pagePivot, curveTarget, delta, false, flexTwistTarget * amount);
+    const restArchTarget = amount > 0 && leafOrder < PRINTED_LEAVES
+      ? amount * 0.032 * archDir * (1 - midTurn * 0.85)
+      : 0;
+    updateFlexiblePage(pagePivot, curveTarget, delta, false, flexTwistTarget * amount, restArchTarget);
   });
+  rig.setSpreadProgress?.(currentSpread / Math.max(1, spreadLimit()), amount);
 }
 
 function applyPageReleaseImpulse(turnDirection) {
@@ -1885,7 +1995,8 @@ function onCanvasClick(event) {
 
 function onWheel(event) {
   if (mode !== "hero" || !books.length) return;
-  if (event.target instanceof Element && event.target.closest("[data-scroll]")) return;
+  if (document.querySelector("dialog[open]")) return;
+  if (event.target instanceof Element && event.target.closest("dialog, [data-scroll], .finder, .room-panel, .select__list, .picker, .share-menu")) return;
   event.preventDefault();
   audio.unlock();
   const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
@@ -1923,8 +2034,7 @@ function openDetail(origin = null) {
   prefetchBoardGrain(activeBook.data, quality.detail);
   activeBook.contactShadow.visible = false;
   activeBook.root.visible = true;
-  activeBook.opacity = 1;
-  activeBook.fadeMaterials.forEach((material) => { material.opacity = 1; });
+  activeBook.setOpacity(1);
   activeBook.leafBase = 0;
   if (!activeBook.painted) paintRig(activeBook);
   // The boards are sharpened to studio resolution once the book has arrived
@@ -1976,7 +2086,10 @@ function finishOpening() {
   controls.enableDamping = !reducedMotion;
   controls.update();
   experience.classList.remove("is-opening");
+  activeBook.setRibbonShelfRest?.(0);
+  updateShadowFrustum(true);
   emit("onMode", mode, activeBook.data);
+  emit("onViewChange", currentViewName);
   emitPageState(false);
   coverSpring.velocity = 0;
   kickRibbon(0.8);
@@ -1993,6 +2106,7 @@ function finishOpening() {
 function closeDetail() {
   if (mode !== "detail") return;
   // The flight home shuts the book by itself: no separate close on the way.
+  if (photoMode) setPhotoMode(false);
   if (readingMode) setReadingMode(false, { restore: false });
   audio.playCue(readingOpen ? "close" : "select", {
     gain: readingOpen ? 1 : 0.72
@@ -2054,6 +2168,7 @@ function finishClosing() {
   activeBook.contactShadow.visible = true;
   activeBook.clearLeaves();
   activeBook.setLeafShadows(false);
+  activeBook.setRibbonShelfRest?.(1);
   activeBook.swayRibbon(0);
   activeBook.setGlint(0);
   ribbonSway.value = 0;
@@ -2066,6 +2181,7 @@ function finishClosing() {
   controls.target.copy(shelfCameraTarget);
   mode = "hero";
   transitionTime = 0;
+  updateShadowFrustum(false);
   const book = activeBook.data;
   activeBook = null;
   emit("onMode", mode, book);
@@ -2087,12 +2203,22 @@ const VIEWS = {
   details: { turn: 1.02, tilt: -0.36, zoom: 1.06 },
   pages: { turn: -0.2, tilt: -0.1, zoom: 1.08 },
   // Square on to the spread, looking a little down onto it, as a reader does.
-  reading: { turn: 0, tilt: -0.3, zoom: 1 }
+  reading: { turn: 0, tilt: -0.3, zoom: 1 },
+  // Curated Photo Studio camera stations (balanced margins for viewfinder & collector cards)
+  photo_hero: { turn: -0.36, tilt: -0.12, zoom: 1.08 },
+  photo_front: { turn: 0.14, tilt: -0.04, zoom: 1.04 },
+  photo_spine: { turn: -1.62, tilt: -0.06, zoom: 1.04 },
+  photo_detail: { turn: 0.72, tilt: -0.3, zoom: 0.78 },
+  photo_spread: { turn: 0.06, tilt: -0.28, zoom: 1.38 },
+  photo_editorial: { turn: -0.68, tilt: -0.44, zoom: 1.14 }
 };
 
 function focusView(name) {
   const view = VIEWS[name] || VIEWS.front;
-  if (VIEWS[name]) currentViewName = name;
+  if (VIEWS[name]) {
+    currentViewName = name;
+    emit("onViewChange", currentViewName);
+  }
   if (mode !== "detail") {
     pendingView = mode === "opening" ? name : null;
     return;
@@ -2154,6 +2280,7 @@ function resetInspectionView() {
 /* ------------------------------------------------------------------ */
 
 let typicalGap = 1000 / 60;
+let slowGapStreak = 0;
 
 function frame(time) {
   rafId = 0;
@@ -2161,9 +2288,15 @@ function frame(time) {
   const frameGap = time - lastTime;
   // A lone long frame (a board painted, a texture uploaded) is absorbed:
   // motion carries on from where it was by about one ordinary frame instead
-  // of jumping ahead by the whole gap. A steadily slow device keeps real time.
-  const spike = frameGap > typicalGap * 2.2;
-  if (!spike && frameGap > 0 && frameGap < 100) typicalGap += (frameGap - typicalGap) * 0.1;
+  // of jumping ahead by the whole gap. If 3+ consecutive frames run steadily
+  // slower (e.g. power-saver or 24-30Hz display), let typicalGap adapt so
+  // transitions and animations keep real time instead of locking in slow-mo.
+  const rawSpike = frameGap > typicalGap * 2.2;
+  slowGapStreak = rawSpike && frameGap < 120 ? slowGapStreak + 1 : 0;
+  const spike = rawSpike && slowGapStreak <= 2;
+  if ((!spike || slowGapStreak >= 3) && frameGap > 0 && frameGap < 100) {
+    typicalGap += (Math.min(frameGap, 66) - typicalGap) * (slowGapStreak >= 3 ? 0.3 : 0.1);
+  }
   const delta = Math.min((spike ? typicalGap * 1.5 : frameGap) / 1000, 0.05);
   lastTime = time;
   motion = false;
@@ -2180,6 +2313,7 @@ function frame(time) {
   updateTransition(delta);
   if (mode !== "detail" && readingFit > 0) updateReadingFit(delta);
   if (mode !== "detail" && readingAmount > 0) updateReadingAmount(delta);
+  if (mode !== "detail" && photoAmount > 0) updatePhotoAmount(delta);
   updateDust();
   const themeIsMoving = updateTheme(delta);
 
@@ -2197,8 +2331,24 @@ function frame(time) {
     updateReadingFit(delta);
     updateSheetShare(delta);
     updateReadingAmount(delta);
+    updatePhotoAmount(delta);
     updateRebind(delta);
+    // Subtle hand-in-book inspection tilt on the closed cover so metallic foil
+    // and pebbled grain catch grazing light as the pointer glides across it.
+    if (rebindTime >= 1) {
+      const parallax = !readingOpen && detailBookHovered && !reducedMotion && !pageDrag.active && !viewTween.active;
+      const targetRx = parallax ? pointer.ndc.y * 0.022 : 0;
+      const targetRy = parallax ? -pointer.ndc.x * 0.026 : 0;
+      activeBook.motion.rotation.x = damp(activeBook.motion.rotation.x, targetRx, 8.5, delta);
+      activeBook.motion.rotation.y = damp(activeBook.motion.rotation.y, targetRy, 8.5, delta);
+    }
     if (activeBook.stepSwaps(delta)) motion = true;
+    const targetInspectScale = getInspectScale();
+    if (Math.abs(activeBook.root.scale.x - targetInspectScale) > 0.001) {
+      const nextScale = reducedMotion ? targetInspectScale : damp(activeBook.root.scale.x, targetInspectScale, 10, delta);
+      activeBook.root.scale.setScalar(Math.abs(nextScale - targetInspectScale) < 0.001 ? targetInspectScale : nextScale);
+      motion = true;
+    }
     updateRibbon(delta);
     updateGlint(delta);
   }
@@ -2217,6 +2367,7 @@ function frame(time) {
     || rebindTime < 1
     || glintTime < 1
     || leavingRigs.length > 0
+    || Boolean(activeBook?.hasActiveSwaps)
     || lazyPaintPending
     || pendingRepaints.size > 0;
   if (active) activeUntil = frameStarted + 160;
@@ -2224,19 +2375,27 @@ function frame(time) {
   const keepGoing = !suspended && (busy || ambient > 0);
 
   // Ambient-only frames are drawn at a gentle rate; the last frame before
-  // sleeping is always drawn, at full resolution.
+  // sleeping is always drawn, at full resolution. Reading mode always stays
+  // sharp at full resolution so printed text never blurs.
   const due = active || wakeRender || !keepGoing || frameStarted - lastRenderAt >= AMBIENT_FRAME_MS;
   if (due) {
     wakeRender = false;
-    applyRenderScale(busy && keepGoing ? motionScale : 1);
-    if (motion || !keepGoing || (ambient > 0 && mode === "hero")) shadowHold = Math.max(shadowHold, 2);
+    applyRenderScale(busy && keepGoing && !readingMode ? motionScale : 1);
+    // Throttle 4096px shadow redraw to every 2nd frame during fast shelf sweeps,
+    // and guarantee a crisp full shadow refresh the instant velocity settles.
+    shadowTick += 1;
+    const fastShelfSweep = mode === "hero" && shelfMoving && Math.abs(shelfSpring.velocity) > 1.8;
+    if (motion || shelfMoving || mode === "opening" || mode === "closing" || rebindTime < 1 || leavingRigs.length > 0) {
+      if (!fastShelfSweep || shadowTick % 2 === 0) shadowHold = Math.max(shadowHold, fastShelfSweep ? 1 : 2);
+    }
     renderFrame();
     lastRenderAt = frameStarted;
-    perf.frame(frameGap, performance.now() - frameStarted, perf.enabled && [
+    const frameWork = performance.now() - frameStarted;
+    perf.frame(frameGap, frameWork, perf.enabled && [
       motion ? "m" : "", cameraMotion ? "c" : "", shelfMoving ? "s" : "", themeIsMoving ? "t" : "",
       lazyPaintPending ? "l" : "", active ? "" : "-", renderScale < 1 ? renderScale : ""
     ].join(""));
-    watchFrameBudget(frameGap, active, frameStarted);
+    watchFrameBudget(frameGap, active, frameStarted, frameWork);
   }
 
   // Something inside the frame may already have asked for the next one.
@@ -2251,9 +2410,8 @@ function updateLeaving(delta) {
     const fade = 1 - ease.smooth(Math.max(0, rig.leaving * 1.25 - 0.25));
     rig.root.position.y = rig.leaveFrom + lift * 0.42;
     rig.root.rotation.z -= delta * 0.22;
-    rig.opacity = fade;
-    rig.fadeMaterials.forEach((material) => { material.opacity = fade; });
-    rig.contactShadow.material.opacity = fade * 0.24;
+    rig.setOpacity(fade);
+    rig.contactShadow.material.opacity = fade * 0.34;
     motion = true;
     if (rig.leaving >= 1) {
       leavingRigs.splice(index, 1);
@@ -2304,6 +2462,8 @@ function updateRebind(delta) {
 /* Rendering and post-processing                                       */
 /* ------------------------------------------------------------------ */
 
+let sceneStats = { calls: 0, triangles: 0 };
+
 function buildComposer() {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   // At two device pixels per CSS pixel, 2x multisampling is already clean.
@@ -2312,7 +2472,14 @@ function buildComposer() {
     samples: basePixelRatio >= 1.75 ? 2 : 4
   });
   composer = new EffectComposer(renderer, target);
-  composer.addPass(new RenderPass(scene, camera));
+  const renderPass = new RenderPass(scene, camera);
+  const baseRender = renderPass.render.bind(renderPass);
+  renderPass.render = (r, writeBuffer, readBuffer, deltaTime, maskActive) => {
+    baseRender(r, writeBuffer, readBuffer, deltaTime, maskActive);
+    sceneStats.calls = r.info.render.calls;
+    sceneStats.triangles = r.info.render.triangles;
+  };
+  composer.addPass(renderPass);
   occlusionPass = null;
 
   if (quality.post) {
@@ -2345,7 +2512,11 @@ function renderFrame() {
   renderer.shadowMap.needsUpdate = shadowHold > 0;
   if (shadowHold > 0) shadowHold -= 1;
   if (composer) composer.render();
-  else renderer.render(scene, camera);
+  else {
+    renderer.render(scene, camera);
+    sceneStats.calls = renderer.info.render.calls;
+    sceneStats.triangles = renderer.info.render.triangles;
+  }
   if (perf.syncGpu) renderer.getContext().finish();
 }
 
@@ -2360,6 +2531,237 @@ function capturePicture() {
   renderFrame();
   // The drawing buffer is read in the same task as the render.
   return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+const STUDIO_BACKDROPS = {
+  cream: { wall: "#f4eee2", floor: "#e8dfd0" },
+  linen: { wall: "#e2d7c4", floor: "#d4c7b2" },
+  sage: { wall: "#d7dfd6", floor: "#c6d0c4" },
+  charcoal: { wall: "#1a191e", floor: "#141318", dark: true }
+};
+
+let photoBackdrop = "match";
+let photoBackdropSaved = null;
+
+/** Live studio sweep / transparent cutout preview while inside Photo Studio. */
+function setPhotoBackdrop(next = "match") {
+  const id = next === "transparent" || STUDIO_BACKDROPS[next] ? next : "match";
+  if (id === photoBackdrop && (id !== "match" || !photoBackdropSaved)) return;
+  if (!scene || !renderer) {
+    photoBackdrop = id;
+    return;
+  }
+  if (id === "match") {
+    photoBackdrop = "match";
+    experience.classList.remove("is-photo-cutout");
+    if (photoBackdropSaved) {
+      if (roomMeshes.floor) roomMeshes.floor.visible = photoBackdropSaved.floorVis;
+      if (roomMeshes.wall) roomMeshes.wall.visible = photoBackdropSaved.wallVis;
+      if (dustPoints) dustPoints.visible = photoBackdropSaved.dustVis;
+      if (shelfStage) shelfStage.visible = photoBackdropSaved.shelfVis;
+      scene.background = photoBackdropSaved.bg;
+      scene.fog = photoBackdropSaved.fog;
+      if (roomMaterials.wall) {
+        roomMaterials.wall.emissive.copy(photoBackdropSaved.wallEmissive);
+        roomMaterials.wall.emissiveIntensity = photoBackdropSaved.wallEmissiveI;
+      }
+      if (roomMaterials.floor) {
+        roomMaterials.floor.emissive.copy(photoBackdropSaved.floorEmissive);
+        roomMaterials.floor.emissiveIntensity = photoBackdropSaved.floorEmissiveI;
+      }
+      renderer.setClearColor(photoBackdropSaved.clearColor, photoBackdropSaved.clearAlpha);
+      photoBackdropSaved = null;
+    }
+    if (room.follow && activeBook?.data) applyTheme(bookPalette(activeBook.data), activeBook.data.foil.color);
+    else applyTheme(roomPalette(), ROOM_ACCENT);
+    requestFrame();
+    return;
+  }
+  if (!photoBackdropSaved) {
+    photoBackdropSaved = {
+      floorVis: roomMeshes.floor ? roomMeshes.floor.visible : true,
+      wallVis: roomMeshes.wall ? roomMeshes.wall.visible : true,
+      dustVis: dustPoints ? dustPoints.visible : true,
+      shelfVis: shelfStage ? shelfStage.visible : true,
+      bg: scene.background,
+      fog: scene.fog,
+      wallEmissive: roomMaterials.wall ? roomMaterials.wall.emissive.clone() : new THREE.Color(),
+      wallEmissiveI: roomMaterials.wall ? roomMaterials.wall.emissiveIntensity : 0,
+      floorEmissive: roomMaterials.floor ? roomMaterials.floor.emissive.clone() : new THREE.Color(),
+      floorEmissiveI: roomMaterials.floor ? roomMaterials.floor.emissiveIntensity : 0,
+      clearColor: renderer.getClearColor(new THREE.Color()),
+      clearAlpha: renderer.getClearAlpha()
+    };
+  }
+  photoBackdrop = id;
+  if (id === "transparent") {
+    experience.classList.add("is-photo-cutout");
+    if (roomMeshes.floor) roomMeshes.floor.visible = false;
+    if (roomMeshes.wall) roomMeshes.wall.visible = false;
+    if (dustPoints) dustPoints.visible = false;
+    if (shelfStage) shelfStage.visible = false;
+    scene.background = null;
+    scene.fog = null;
+    renderer.setClearColor(0x000000, 0);
+  } else {
+    experience.classList.remove("is-photo-cutout");
+    const sweep = STUDIO_BACKDROPS[id];
+    const wc = new THREE.Color(sweep.wall);
+    const fc = new THREE.Color(sweep.floor);
+    if (roomMeshes.floor) roomMeshes.floor.visible = photoBackdropSaved.floorVis;
+    if (roomMeshes.wall) roomMeshes.wall.visible = photoBackdropSaved.wallVis;
+    if (dustPoints) dustPoints.visible = false;
+    if (shelfStage) shelfStage.visible = photoBackdropSaved.shelfVis;
+    scene.background = wc;
+    scene.fog = photoBackdropSaved.fog;
+    themeTargets.wall.copy(wc);
+    themeTargets.floor.copy(fc);
+    themeTargets.fog.copy(wc);
+    themeMoving = true;
+    if (roomMaterials.wall) {
+      roomMaterials.wall.color.copy(wc);
+      roomMaterials.wall.emissive.copy(wc);
+      roomMaterials.wall.emissiveIntensity = sweep.dark ? 0.16 : 0.44;
+    }
+    if (roomMaterials.floor) {
+      roomMaterials.floor.color.copy(fc);
+      roomMaterials.floor.emissive.copy(fc);
+      roomMaterials.floor.emissiveIntensity = sweep.dark ? 0.16 : 0.44;
+    }
+    renderer.setClearColor(wc, 1);
+  }
+  requestFrame();
+}
+
+/**
+ * Render an exact-aspect, 2x-supersampled studio photograph of the active book
+ * matching the live viewfinder framing. Supports custom studio sweep backdrops
+ * as well as true alpha=0 transparent PNG cutouts. Restores live state cleanly.
+ */
+function captureStudioPhoto({ aspect = 4 / 5, maxEdge = 1800, backdrop = "match", cropHeightRatio = 0.78 } = {}) {
+  if (!renderer || !scene || !camera) return null;
+  const safeAspect = clamp(Number(aspect) || 0.8, 0.4, 2.2);
+  const edge = clamp(Math.round(Number(maxEdge) || 1800), 600, 2400);
+  const outW = safeAspect >= 1 ? edge : Math.round(edge * safeAspect);
+  const outH = safeAspect >= 1 ? Math.round(edge / safeAspect) : edge;
+  const ratio = clamp(Number(cropHeightRatio) || 0.78, 0.25, 1);
+  const transparent = backdrop === "transparent";
+  const sweep = STUDIO_BACKDROPS[backdrop] || null;
+
+  // Snapshot live state
+  const savedPixelRatio = renderer.getPixelRatio();
+  const savedSize = renderer.getSize(new THREE.Vector2());
+  const savedAspect = camera.aspect;
+  const savedZoom = camera.zoom;
+  const savedView = camera.view ? { ...camera.view } : null;
+  const savedBg = scene.background;
+  const savedFog = scene.fog;
+  const savedFogColor = scene.fog ? scene.fog.color.clone() : null;
+  const savedWallColor = roomMaterials.wall ? roomMaterials.wall.color.clone() : null;
+  const savedWallEmissive = roomMaterials.wall ? roomMaterials.wall.emissive.clone() : null;
+  const savedWallEmissiveI = roomMaterials.wall ? roomMaterials.wall.emissiveIntensity : 0;
+  const savedFloorColor = roomMaterials.floor ? roomMaterials.floor.color.clone() : null;
+  const savedFloorEmissive = roomMaterials.floor ? roomMaterials.floor.emissive.clone() : null;
+  const savedFloorEmissiveI = roomMaterials.floor ? roomMaterials.floor.emissiveIntensity : 0;
+  const savedFloorVis = roomMeshes.floor ? roomMeshes.floor.visible : true;
+  const savedWallVis = roomMeshes.wall ? roomMeshes.wall.visible : true;
+  const savedDustVis = dustPoints ? dustPoints.visible : true;
+  const savedShelfVis = shelfStage ? shelfStage.visible : true;
+  const savedClearColor = renderer.getClearColor(new THREE.Color());
+  const savedClearAlpha = renderer.getClearAlpha();
+
+  const out = document.createElement("canvas");
+  out.width = outW;
+  out.height = outH;
+  const outCtx = out.getContext("2d");
+
+  try {
+    // Configure exact viewfinder sub-frustum at full target resolution
+    camera.aspect = outW / outH;
+    camera.zoom = savedZoom / ratio;
+    camera.clearViewOffset();
+    if (savedView && savedView.enabled && (Math.abs(savedView.offsetX) > 0.5 || Math.abs(savedView.offsetY) > 0.5)) {
+      const scaleY = outH / Math.max(1, viewHeight * ratio);
+      camera.setViewOffset(outW, outH, savedView.offsetX * scaleY, savedView.offsetY * scaleY, outW, outH);
+    }
+    camera.updateProjectionMatrix();
+
+    if (transparent) {
+      if (roomMeshes.floor) roomMeshes.floor.visible = false;
+      if (roomMeshes.wall) roomMeshes.wall.visible = false;
+      if (dustPoints) dustPoints.visible = false;
+      if (shelfStage) shelfStage.visible = false;
+      scene.background = null;
+      scene.fog = null;
+      renderer.setClearColor(0x000000, 0);
+    } else if (sweep) {
+      const wc = new THREE.Color(sweep.wall);
+      const fc = new THREE.Color(sweep.floor);
+      scene.background = wc;
+      if (scene.fog) scene.fog.color.copy(wc);
+      if (roomMaterials.wall) {
+        roomMaterials.wall.color.copy(wc);
+        roomMaterials.wall.emissive.copy(wc);
+        roomMaterials.wall.emissiveIntensity = sweep.dark ? 0.16 : 0.44;
+      }
+      if (roomMaterials.floor) {
+        roomMaterials.floor.color.copy(fc);
+        roomMaterials.floor.emissive.copy(fc);
+        roomMaterials.floor.emissiveIntensity = sweep.dark ? 0.16 : 0.44;
+      }
+      if (dustPoints) dustPoints.visible = false;
+    }
+
+    renderer.setPixelRatio(1);
+    renderer.setSize(outW, outH, false);
+
+    if (transparent || !composer) {
+      renderer.clear(true, true, true);
+      renderer.render(scene, camera);
+    } else {
+      composer.setPixelRatio(1);
+      composer.setSize(outW, outH);
+      composer.render();
+    }
+    outCtx.clearRect(0, 0, outW, outH);
+    outCtx.drawImage(canvas, 0, 0, outW, outH);
+  } finally {
+    // Restore exact live state with zero flicker
+    if (roomMeshes.floor) roomMeshes.floor.visible = savedFloorVis;
+    if (roomMeshes.wall) roomMeshes.wall.visible = savedWallVis;
+    if (dustPoints) dustPoints.visible = savedDustVis;
+    if (shelfStage) shelfStage.visible = savedShelfVis;
+    scene.background = savedBg;
+    scene.fog = savedFog;
+    if (scene.fog && savedFogColor) scene.fog.color.copy(savedFogColor);
+    if (roomMaterials.wall && savedWallColor) {
+      roomMaterials.wall.color.copy(savedWallColor);
+      roomMaterials.wall.emissive.copy(savedWallEmissive);
+      roomMaterials.wall.emissiveIntensity = savedWallEmissiveI;
+    }
+    if (roomMaterials.floor && savedFloorColor) {
+      roomMaterials.floor.color.copy(savedFloorColor);
+      roomMaterials.floor.emissive.copy(savedFloorEmissive);
+      roomMaterials.floor.emissiveIntensity = savedFloorEmissiveI;
+    }
+    renderer.setClearColor(savedClearColor, savedClearAlpha);
+    renderer.setPixelRatio(savedPixelRatio);
+    renderer.setSize(savedSize.x, savedSize.y, false);
+    if (composer) {
+      composer.setPixelRatio(savedPixelRatio);
+      composer.setSize(savedSize.x, savedSize.y);
+    }
+    camera.aspect = savedAspect;
+    camera.zoom = savedZoom;
+    if (savedView && savedView.enabled) {
+      camera.setViewOffset(savedView.fullWidth, savedView.fullHeight, savedView.offsetX, savedView.offsetY, savedView.width, savedView.height);
+    } else {
+      camera.clearViewOffset();
+    }
+    camera.updateProjectionMatrix();
+    renderFrame();
+  }
+  return out;
 }
 
 /**
@@ -2444,10 +2846,19 @@ function applyRenderScale(next) {
  * after a spell of smooth frames it is tried one step higher again. Only when
  * the lowest step is still too slow does the whole tier drop.
  */
-function watchFrameBudget(gap, active, now) {
+function watchFrameBudget(gap, active, now, workMs = 0) {
   const budget = frameBudget;
-  if (!active || gap <= 0 || gap > 120) {
+  // Ignore rAF throttling from unfocused/occluded windows or low-refresh power-saver
+  // displays where actual frame work is trivial: only downgrade when our own rendering
+  // is genuinely straining the device.
+  if (!active || gap <= 0 || gap > 120 || !document.hasFocus()) {
     budget.streak = 0;
+    return;
+  }
+  const throttled = gap > SLOW_FRAME_MS && workMs > 0 && workMs < 8;
+  if (throttled) {
+    budget.streak = 0;
+    budget.slow = 0;
     return;
   }
   budget.ema = budget.streak ? lerp(budget.ema, gap, 0.12) : gap;
@@ -2535,6 +2946,7 @@ function resize() {
   } else if (mode === "detail" && activeBook) {
     activeBook.root.position.copy(inspectPosition);
     activeBook.root.scale.setScalar(getInspectScale());
+    updateShadowFrustum(true);
     transitionCameraTarget.copy(inspectCameraTarget);
     currentViewOffsetX = detailViewOffsetX;
     applyDetailViewOffset();
@@ -2560,6 +2972,7 @@ function onKeyDown(event) {
   if (event.key === "Escape" && mode === "detail") {
     event.preventDefault();
     if (typing) event.target.blur();
+    else if (photoMode) setPhotoMode(false);
     else if (readingMode) setReadingMode(false);
     else closeDetail();
     return;
@@ -2572,7 +2985,29 @@ function onKeyDown(event) {
   }
   if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
 
+  if (mode === "detail" && !readingMode) {
+    // Never leak studio/camera shortcuts behind the modal Photo Studio darkroom.
+    const darkroom = document.getElementById("photo-darkroom");
+    if (darkroom && !darkroom.hidden) return;
+    const onControl = event.target instanceof HTMLElement
+      && Boolean(event.target.closest("button, a, [role='button'], [role='switch'], [role='tab'], [role='slider'], [role='tablist'], [role='radiogroup']"));
+    if (!photoMode) {
+      if (event.key === "1") { event.preventDefault(); focusView("front"); return; }
+      if (event.key === "2") { event.preventDefault(); focusView("spine"); return; }
+      if (event.key === "3") { event.preventDefault(); focusView("back"); return; }
+      if (event.key === "4") { event.preventDefault(); focusView("details"); return; }
+    }
+    if (event.key === "p" || event.key === "P") { event.preventDefault(); setPhotoMode(!photoMode); return; }
+    if (event.code === "Space" && !onControl) {
+      event.preventDefault();
+      setReadingOpen(!readingOpen);
+      return;
+    }
+  }
+
   if (mode === "detail" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    const darkroom = document.getElementById("photo-darkroom");
+    if (darkroom && !darkroom.hidden) return;
     if (event.target instanceof HTMLElement && event.target.closest("[role='tablist'], [role='radiogroup']")) return;
     event.preventDefault();
     turnPage(event.key === "ArrowLeft" ? -1 : 1);
@@ -2780,8 +3215,8 @@ async function initialize(options) {
     post: Boolean(occlusionPass),
     pixelRatio: Math.round(renderer.getPixelRatio() * 100) / 100,
     scale: motionScale,
-    calls: renderer.info.render.calls,
-    triangles: renderer.info.render.triangles,
+    calls: sceneStats.calls || renderer.info.render.calls,
+    triangles: sceneStats.triangles || renderer.info.render.triangles,
     textures: renderer.info.memory.textures,
     geometries: renderer.info.memory.geometries,
     programs: renderer.info.programs?.length || 0
@@ -2821,6 +3256,7 @@ async function initialize(options) {
 export const engine = {
   init: initialize,
   capturePicture,
+  captureStudioPhoto,
   captureTurntable,
   setRoom,
   get room() { return { ...room }; },
@@ -2843,6 +3279,11 @@ export const engine = {
   turnPage,
   goToPage,
   focusView,
+  setPhotoMode,
+  setPhotoAngle,
+  setPhotoBackdrop,
+  get photoMode() { return photoMode; },
+  get view() { return currentViewName; },
   resetView: resetInspectionView,
   setSheetShare,
   setReadingMode,
@@ -2880,7 +3321,8 @@ function updateFlexiblePage(
   targetCurve,
   delta,
   immediate = false,
-  targetTwist = 0
+  targetTwist = 0,
+  targetRestArch = 0
 ) {
   const flex = pagePivot.userData.flex;
   if (!flex) return;
@@ -2888,6 +3330,7 @@ function updateFlexiblePage(
   const step = Math.min(delta, 0.033);
   let nextCurve = targetCurve;
   let nextTwist = targetTwist;
+  let nextRestArch = targetRestArch;
 
   if (settleImmediately) {
     flex.curveVelocity = 0;
@@ -2921,6 +3364,7 @@ function updateFlexiblePage(
       -0.12,
       0.12
     );
+    nextRestArch = THREE.MathUtils.damp(flex.restArch || 0, targetRestArch, 11, step);
 
     if (
       Math.abs(targetCurve - nextCurve) < 0.00002
@@ -2936,6 +3380,9 @@ function updateFlexiblePage(
       nextTwist = targetTwist;
       flex.twistVelocity = 0;
     }
+    if (Math.abs(targetRestArch - nextRestArch) < 0.00005) {
+      nextRestArch = targetRestArch;
+    }
   }
 
   if (
@@ -2944,43 +3391,39 @@ function updateFlexiblePage(
     && Math.abs(targetCurve - nextCurve) < 0.00001
     && Math.abs(nextTwist - flex.twist) < 0.00001
     && Math.abs(targetTwist - nextTwist) < 0.00001
+    && Math.abs(nextRestArch - (flex.restArch || 0)) < 0.00001
+    && Math.abs(targetRestArch - nextRestArch) < 0.00001
   ) return;
 
   flex.curve = nextCurve;
   flex.twist = nextTwist;
+  flex.restArch = nextRestArch;
   if (!settleImmediately) motion = true;
-  flex.surfaces.forEach((surface) => {
-    const { position, base, direction, geometry } = surface;
-    for (let vertex = 0; vertex < position.count; vertex += 1) {
-      const offset = vertex * 3;
-      const x = base[offset];
-      const y = base[offset + 1];
-      const u = x + 0.5;
-      const mappedU = direction > 0 ? u : 1 - u;
-      const arch = Math.sin(Math.PI * mappedU);
-      const freeEdgeLift = mappedU * mappedU * 0.16;
-      const shape = arch * 0.84 + freeEdgeLift;
-      const diagonalTwist = (
-        nextTwist
-        * y
-        * Math.pow(mappedU, 1.35)
-      );
-      const softRipple = (
-        nextTwist
-        * Math.sin(mappedU * Math.PI * 2)
-        * (1 - Math.min(1, Math.abs(y) * 1.65))
-        * 0.09
-      );
-      const z = (
-        nextCurve * shape * (1 + y * 0.14)
-        + diagonalTwist
-        + softRipple
-      ) * direction;
-      position.setXYZ(vertex, x, y, z);
+
+  // Precomputed basis + inline analytical normals (zero trig/pow, zero computeVertexNormals).
+  for (let s = 0; s < flex.surfaces.length; s += 1) {
+    const surface = flex.surfaces[s];
+    const {
+      position, normal, base, archBasis, dArchDu, restArchBasis, dRestArchDu,
+      twistBasis, dTwistDu, dTwistDv
+    } = surface;
+    const posArr = position.array;
+    const normArr = normal.array;
+    const count = position.count;
+    for (let v = 0; v < count; v += 1) {
+      const o = v * 3;
+      posArr[o + 2] = nextCurve * archBasis[v] + nextRestArch * restArchBasis[v] + nextTwist * twistBasis[v];
+      const dzdx = nextCurve * dArchDu[v] + nextRestArch * dRestArchDu[v] + nextTwist * dTwistDu[v];
+      const dzdy = nextTwist * dTwistDv[v] + nextCurve * archBasis[v] * 0.14;
+      const invLen = 1 / Math.hypot(dzdx, dzdy, 1);
+      normArr[o] = -dzdx * invLen;
+      normArr[o + 1] = -dzdy * invLen;
+      normArr[o + 2] = invLen;
     }
     position.needsUpdate = true;
-    geometry.computeVertexNormals();
-  });
+    normal.needsUpdate = true;
+    void base;
+  }
 }
 
 function setPointerFromEvent(event) {
@@ -2992,46 +3435,71 @@ function setPointerFromEvent(event) {
   pointerDirty = true;
 }
 
+const peekLocalScratch = new THREE.Vector3();
+
+/** Single-pass detail hover evaluation (1 matrix update, 1 raycast). */
 function updateHover() {
   pointerDirty = false;
-  // No hover label while a book is being carried along the shelf.
-  if (shelfDrag.active) {
+  if (shelfDrag.active || document.querySelector("dialog[open]")) {
     setHovered(-1);
-    return;
+    return false;
   }
   if (mode === "detail" && activeBook) {
     setHovered(-1);
+    activeBook.root.updateWorldMatrix(true, true);
+    raycaster.setFromCamera(pointer.ndc, camera);
     if (readingOpen) {
       detailBookHovered = false;
-      const side = pageDrag.active ? 0 : pagePeekAtPointer();
-      if (side !== pagePeek.side) {
-        pagePeek.side = side;
-        requestFrame();
-      }
       canvas.classList.remove("has-closed-book-hover");
-      canvas.classList.toggle(
-        "has-page-hover",
-        pageDrag.active
-          || Boolean(pageSurfaceAtPointer())
-          || Boolean(coverSurfaceAtPointer())
-      );
-    } else {
-      detailBookHovered = Boolean(coverSurfaceAtPointer());
-      canvas.classList.remove("has-page-hover");
-      canvas.classList.toggle(
-        "has-closed-book-hover",
-        detailBookHovered
-      );
+      let side = 0;
+      let overBook = pageDrag.active;
+      if (!pageDrag.active) {
+        const targets = currentSpread === 0
+          ? [...activeBook.pageGestureSurfaces, activeBook.frontCover]
+          : activeBook.pageGestureSurfaces;
+        const hit = raycaster.intersectObjects(targets, false)[0];
+        if (hit) {
+          overBook = true;
+          const obj = hit.object;
+          if (activeBook.pageSurfaces.includes(obj)) {
+            const pivot = obj.parent;
+            if (pivot) {
+              peekLocalScratch.copy(hit.point);
+              pivot.worldToLocal(peekLocalScratch);
+              const w = obj.scale.x || 1;
+              const h = obj.scale.y || 1;
+              if (peekLocalScratch.x / w >= 0.66) {
+                pagePeek.tilt = clamp(peekLocalScratch.y / (h * 0.5), -1, 1);
+                const turned = pivot.rotation.y < -Math.PI / 2;
+                side = turned
+                  ? (currentSpread > 0 ? -1 : 0)
+                  : (currentSpread < spreadLimit() ? 1 : 0);
+              }
+            }
+          }
+        }
+      }
+      const changed = side !== pagePeek.side;
+      if (changed) pagePeek.side = side;
+      canvas.classList.toggle("has-page-hover", overBook);
+      return changed || side !== 0;
     }
-    return;
+    const prevHover = detailBookHovered;
+    detailBookHovered = raycaster.intersectObject(activeBook.frontCover, false).length > 0;
+    canvas.classList.remove("has-page-hover");
+    canvas.classList.toggle("has-closed-book-hover", detailBookHovered);
+    return detailBookHovered !== prevHover || detailBookHovered;
   }
   detailBookHovered = false;
   canvas.classList.remove("has-page-hover", "has-closed-book-hover");
   if (mode !== "hero") {
     setHovered(-1);
-    return;
+    return false;
   }
-  setHovered(bookIndexAtPointer());
+  const prev = hoveredIndex;
+  const next = bookIndexAtPointer();
+  setHovered(next);
+  return next !== prev || next >= 0;
 }
 
 function activeBookAtPointer() {
@@ -3050,28 +3518,6 @@ function pageSurfaceAtPointer() {
     false
   );
   return hits.length ? hits[0].object : null;
-}
-
-/**
- * Which way a page would turn if the pointer, near the outer edge of an open
- * page, pressed it: 1 for the next spread, -1 for the previous, 0 elsewhere.
- * Also notes how high up the page the pointer is, for the corner's tilt.
- */
-function pagePeekAtPointer() {
-  if (mode !== "detail" || !activeBook || !readingOpen) return 0;
-  activeBook.root.updateWorldMatrix(true, true);
-  raycaster.setFromCamera(pointer.ndc, camera);
-  const hit = raycaster.intersectObjects(activeBook.pageSurfaces, false)[0];
-  const pivot = hit?.object.parent;
-  if (!pivot) return 0;
-  const local = pivot.worldToLocal(hit.point.clone());
-  const width = hit.object.scale.x || 1;
-  const height = hit.object.scale.y || 1;
-  if (local.x / width < 0.68) return 0;
-  pagePeek.tilt = clamp(local.y / (height * 0.5), -1, 1);
-  const turned = pivot.rotation.y < -Math.PI / 2;
-  if (turned) return currentSpread > 0 ? -1 : 0;
-  return currentSpread < spreadLimit() ? 1 : 0;
 }
 
 function coverSurfaceAtPointer() {
@@ -3186,6 +3632,19 @@ function onDetailBookPointerEnd(event) {
   detailPress.pointerId = null;
 }
 
+/** Project the open spread width onto screen pixels so page drag tracks 1:1. */
+function measurePageSpanPx() {
+  if (!activeBook) return 220;
+  const a = new THREE.Vector3(-activeBook.base.width * 0.5, 0, 0);
+  const b = new THREE.Vector3(activeBook.base.width * 0.5, 0, 0);
+  activeBook.root.updateWorldMatrix(true, true);
+  activeBook.root.localToWorld(a).project(camera);
+  activeBook.root.localToWorld(b).project(camera);
+  // Full 180-degree turn travels roughly 1.55x one page's projected screen width.
+  const pagePx = Math.abs(b.x - a.x) * 0.5 * viewWidth;
+  return clamp(pagePx * 1.35, 110, 520);
+}
+
 function onPagePointerDown(event) {
   if (
     mode !== "detail"
@@ -3201,13 +3660,13 @@ function onPagePointerDown(event) {
 
   event.preventDefault();
   event.stopImmediatePropagation();
-  // Lifting a leaf (or the cover) can show the one beneath: make sure it is printed.
   flushLeafQueue();
   printDeferredLeaf();
   pageDrag.active = true;
   pageDrag.pointerId = event.pointerId;
   pageDrag.startX = event.clientX;
   pageDrag.startY = event.clientY;
+  pageDrag.spanPx = measurePageSpanPx();
   pageDrag.progress = 0;
   pageDrag.peakProgress = 0;
   pageDrag.committed = false;
@@ -3259,6 +3718,7 @@ function updatePageDragFromEvent(event) {
   const deltaX = event.clientX - pageDrag.startX;
   const deltaY = event.clientY - pageDrag.startY;
   const horizontalDistance = Math.abs(deltaX);
+  const span = pageDrag.spanPx || 220;
 
   if (
     pageDrag.kind === "cover-open"
@@ -3274,16 +3734,16 @@ function updatePageDragFromEvent(event) {
       horizontalDistance >= 3
       && horizontalDistance >= Math.abs(deltaY) * 0.72
     )
-      ? clamp(Math.max(0, signedDistance) / 140, 0, 1)
+      ? clamp(Math.max(0, signedDistance) / (span * 0.85), 0, 1)
       : 0;
     pageDrag.peakProgress = Math.max(
       pageDrag.peakProgress,
       pageDrag.progress
     );
-    if (pageDrag.peakProgress >= commitProgress) {
-      pageDrag.committed = true;
-    }
     updatePageDragMotion(event, deltaY);
+    // Commit on crossing threshold OR a brisk flick; pulling back under 8% cancels naturally.
+    pageDrag.committed = (pageDrag.progress >= commitProgress && pageDrag.progressVelocity > -0.6)
+      || (pageDrag.progress >= 0.06 && pageDrag.progressVelocity > 1.35);
     return;
   }
 
@@ -3293,7 +3753,7 @@ function updatePageDragFromEvent(event) {
   ) {
     pageDrag.progress = 0;
   } else {
-    if (pageDrag.direction === 0 && horizontalDistance >= 6) {
+    if (pageDrag.direction === 0 && horizontalDistance >= 5) {
       const direction = deltaX < 0 ? 1 : -1;
       const directionAvailable = direction > 0
         ? currentSpread < spreadLimit()
@@ -3303,17 +3763,18 @@ function updatePageDragFromEvent(event) {
 
     const signedDistance = pageDrag.direction > 0 ? -deltaX : deltaX;
     pageDrag.progress = pageDrag.direction !== 0
-      ? clamp(Math.max(0, signedDistance) / 150, 0, 1)
+      ? clamp(Math.max(0, signedDistance) / span, 0, 1)
       : 0;
     pageDrag.peakProgress = Math.max(
       pageDrag.peakProgress,
       pageDrag.progress
     );
-    if (pageDrag.peakProgress >= PAGE_TURN_COMMIT_PROGRESS) {
-      pageDrag.committed = true;
-    }
   }
   updatePageDragMotion(event, deltaY);
+  pageDrag.committed = pageDrag.direction !== 0 && (
+    (pageDrag.progress >= Math.max(PAGE_TURN_COMMIT_PROGRESS, 0.24) && pageDrag.progressVelocity > -0.6)
+    || (pageDrag.progress >= 0.06 && pageDrag.progressVelocity > 1.4)
+  );
 }
 
 function onPagePointerMove(event) {
@@ -3366,8 +3827,13 @@ function positionPointerLabel() {
 
 function onPointerMove(event) {
   setPointerFromEvent(event);
-  positionPointerLabel();
-  requestFrame();
+  if (hoveredIndex >= 0) positionPointerLabel();
+  // Avoid waking WebGL when moving over empty background; evaluate hover
+  // cheaply and wake only if a hover target changed or is actively tracked.
+  if (shelfDrag.active || shelfPan.active || pageDrag.active) return;
+  const needsFrame = updateHover();
+  if (hoveredIndex >= 0) positionPointerLabel();
+  if (needsFrame) requestFrame();
 }
 
 function onPointerLeave() {
@@ -3543,6 +4009,26 @@ function applyDetailViewOffset() {
     offset = lerp(offset, full.x, eased);
     lift = lerp(lift, full.y, eased);
   }
+  if (photoAmount > 0) {
+    const pe = smootherstep(photoAmount);
+    offset = lerp(offset, 0, pe);
+    if (viewWidth < 820 && activeBook) {
+      // On narrow mobile screens, inspectCameraTarget sits below the book; project the book center
+      // directly into the exact vertical center of the mobile viewfinder aperture above the photo dock.
+      plainCamera.copy(camera);
+      plainCamera.zoom = 1;
+      plainCamera.clearViewOffset();
+      activeBook.root.getWorldPosition(spinePoint).project(plainCamera);
+      const photoZoom = readingOpen ? 0.78 : 0.96;
+      const desiredScreenY = (viewHeight - 104) * 0.5;
+      const currentScreenY = (1 - spinePoint.y * photoZoom) * 0.5 * viewHeight;
+      const mobileLift = currentScreenY - desiredScreenY;
+      zoom = lerp(zoom, photoZoom, pe);
+      lift = lerp(lift, mobileLift, pe);
+    } else {
+      lift = lerp(lift, 0, pe);
+    }
+  }
   if (occlusionPass) occlusionPass.blendIntensity = AO_BLEND * (1 - 0.55 * smootherstep(readingAmount));
   camera.zoom = zoom;
   if (Math.abs(offset) < 0.5 && Math.abs(lift) < 0.5) {
@@ -3585,6 +4071,45 @@ function updateReadingAmount(delta) {
   motion = true;
 }
 
+function updatePhotoAmount(delta) {
+  const want = photoMode && mode === "detail" ? 1 : 0;
+  if (photoAmount === want) return;
+  photoAmount = reducedMotion
+    ? want
+    : clamp(photoAmount + Math.sign(want - photoAmount) * (delta / 0.42), 0, 1);
+  applyDetailViewOffset();
+  motion = true;
+}
+
+function setPhotoMode(on) {
+  on = Boolean(on) && mode === "detail";
+  if (on === photoMode) return;
+  if (on && readingMode) setReadingMode(false, { restore: false });
+  photoMode = on;
+  experience.classList.toggle("is-photo", photoMode);
+  cancelPageDrag();
+  controls.enabled = mode === "detail" && !readingMode;
+  if (photoMode) {
+    focusView("photo_hero");
+    announce(t("Photo Studio opened. Orbit freely or choose an angle, then capture."));
+  } else {
+    setPhotoBackdrop("match");
+    focusView(readingOpen ? "pages" : "front");
+  }
+  emit("onPhotoMode", photoMode);
+  requestFrame();
+}
+
+function setPhotoAngle(preset) {
+  if (mode !== "detail") return;
+  if (preset === "photo_spread") {
+    if (!readingOpen) setReadingOpen(true, false);
+  } else if (preset === "photo_front" || preset === "photo_spine") {
+    if (readingOpen) setReadingOpen(false, false);
+  }
+  focusView(preset);
+}
+
 /*
  * Reading mode. The panel withdraws, the book opens if it was shut and turns
  * square to the reader, and the spread is framed on the whole screen. Pages
@@ -3594,6 +4119,7 @@ function updateReadingAmount(delta) {
 function setReadingMode(on, { restore = true } = {}) {
   on = Boolean(on) && mode === "detail";
   if (on === readingMode) return;
+  if (on && photoMode) setPhotoMode(false);
   readingMode = on;
   experience.classList.toggle("is-reading", on);
   cancelPageDrag();
@@ -3684,11 +4210,11 @@ function createWoodTexture(repeatX, repeatY, rotation = 0) {
 
 function applyWoodTexture() {
   if (!woodTextureReady || !renderer) return;
-  // A painted or steel shelf keeps the grain aside until wood comes back.
   const plain = Boolean(SHELF_STYLES[room.shelf]?.plain);
 
   const woodMap = createWoodTexture(7, 1.65, Math.PI * 0.5);
   const darkWoodMap = woodMap?.clone() || null;
+  const micro = createWoodMicroMaps(woodTextureImage, 7, 1.65, Math.PI * 0.5);
 
   if (darkWoodMap) {
     darkWoodMap.name = "editorial-walnut-dark";
@@ -3696,52 +4222,85 @@ function applyWoodTexture() {
   }
 
   shared.walnut.userData.woodMap = woodMap;
+  shared.walnut.userData.woodBump = micro.bump;
+  shared.walnut.userData.woodRough = micro.roughness;
   shared.walnutDark.userData.woodMap = darkWoodMap;
+  shared.walnutDark.userData.woodBump = micro.bump;
+  shared.walnutDark.userData.woodRough = micro.roughness;
+
   shared.walnut.map = plain ? null : woodMap;
+  shared.walnut.bumpMap = plain ? null : micro.bump;
+  shared.walnut.bumpScale = 0.008;
+  shared.walnut.roughnessMap = plain ? null : micro.roughness;
   shared.walnut.needsUpdate = true;
+
   shared.walnutDark.map = plain ? null : darkWoodMap;
+  shared.walnutDark.bumpMap = plain ? null : micro.bump;
+  shared.walnutDark.bumpScale = 0.007;
+  shared.walnutDark.roughnessMap = plain ? null : micro.roughness;
   shared.walnutDark.needsUpdate = true;
   requestFrame();
 }
 
+/** Soft warm radial glow decal cast on the timber shelf under the night lamp. */
+function createLampPoolTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createRadialGradient(128, 128, 6, 128, 128, 126);
+  grad.addColorStop(0, "rgba(255,214,142,0.52)");
+  grad.addColorStop(0.35, "rgba(255,186,104,0.26)");
+  grad.addColorStop(0.72, "rgba(255,158,74,0.07)");
+  grad.addColorStop(1, "rgba(255,140,56,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 function addRoom() {
-  const floor = createMesh(shared.plane, new THREE.MeshStandardMaterial({
+  // Matte paper floor & seamless 360-degree studio cyclorama use MeshLambertMaterial:
+  // skips all 5 RectAreaLight LTC lookups on 80%+ of screen pixels while soft
+  // synced emissive bounce keeps gallery paper luminous and floor shadows delicate.
+  const floor = createMesh(shared.plane, new THREE.MeshLambertMaterial({
     color: 0xd8c8aa,
-    roughness: 0.92,
-    metalness: 0
+    emissive: 0xd8c8aa,
+    emissiveIntensity: 0.46
   }), "paper-floor", false, true);
-  floor.scale.set(30, 20, 1);
+  floor.scale.set(52, 52, 1);
   floor.rotation.x = -Math.PI * 0.5;
   floor.position.y = -0.02;
   scene.add(floor);
 
-  const back = createMesh(shared.plane, new THREE.MeshStandardMaterial({
+  // Seamless wrap-around studio cyclorama wall (no visible vertical seam when orbiting to spine/back/edge).
+  const wallGeo = new THREE.CylinderGeometry(22, 22, 24, 48, 1, true);
+  const back = createMesh(wallGeo, new THREE.MeshLambertMaterial({
     color: 0xe9dfcb,
-    roughness: 1,
-    metalness: 0
+    emissive: 0xe9dfcb,
+    emissiveIntensity: 0.4,
+    side: THREE.BackSide
   }), "paper-backdrop", false, true);
-  back.scale.set(28, 14, 1);
-  back.position.set(0, 5.5, -3.3);
+  back.position.set(0, 9.5, 0);
   scene.add(back);
 
-  const shelf = createMesh(shared.box, shared.walnut, "walnut-shelf");
-  shelf.scale.set(17, 0.28, 1.08);
+  // Handcrafted chamfered timber bookshelf (beveled edges catch soft grazing highlights).
+  const shelf = createMesh(new RoundedBoxGeometry(17, 0.28, 1.08, 3, 0.022), shared.walnut, "walnut-shelf");
   shelf.position.set(0, 0.33, -0.03);
   shelfStage.add(shelf);
 
-  const shelfLip = createMesh(shared.box, shared.walnutDark, "walnut-shelf-lip");
-  shelfLip.scale.set(17.05, 0.075, 1.14);
+  const shelfLip = createMesh(new RoundedBoxGeometry(17.08, 0.08, 1.15, 3, 0.016), shared.walnutDark, "walnut-shelf-lip");
   shelfLip.position.set(0, 0.205, 0.02);
   shelfStage.add(shelfLip);
 
-  const backRail = createMesh(shared.box, shared.walnut, "walnut-back-rail");
-  backRail.scale.set(17, 0.17, 0.2);
+  const backRail = createMesh(new RoundedBoxGeometry(17, 0.17, 0.2, 2, 0.015), shared.walnut, "walnut-back-rail");
   backRail.position.set(0, 0.68, -0.52);
   shelfStage.add(backRail);
 
+  const uprightGeo = new RoundedBoxGeometry(0.2, 3.8, 0.72, 2, 0.018);
   [-7.65, 7.65].forEach((x, index) => {
-    const upright = createMesh(shared.box, shared.walnutDark, `shelf-upright-${index}`);
-    upright.scale.set(0.2, 3.8, 0.72);
+    const upright = createMesh(uprightGeo, shared.walnutDark, `shelf-upright-${index}`);
     upright.position.set(x, 2.05, -0.28);
     shelfStage.add(upright);
     roomFrame.push(upright);
@@ -3752,67 +4311,118 @@ function addRoom() {
     color: 0x2f1d13,
     alphaMap: getContactShadowTexture(),
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.28,
     depthWrite: false
   }), "shelf-contact-shadow", false, false);
-  shadowStrip.scale.set(16, 0.85, 1);
+  shadowStrip.scale.set(16, 0.9, 1);
   shadowStrip.rotation.x = -Math.PI * 0.5;
-  shadowStrip.position.set(0, 0.49, 0.06);
+  shadowStrip.position.set(0, 0.482, 0.06);
   shelfStage.add(shadowStrip);
 
   addLamp();
 
   roomMaterials.floor = floor.material;
   roomMaterials.wall = back.material;
+  roomMeshes.floor = floor;
+  roomMeshes.wall = back;
   roomMaterials.shelf = shared.walnut;
   roomMaterials.shelfDark = shared.walnutDark;
   roomMaterials.shadow = shadowStrip.material;
 }
 
 /**
- * A brass desk lamp standing at the left end of the shelf. It is shown with
- * the night light, where the warmed softbox plays its light (no light is
- * added: that would recompile every material); its shade and bulb glow.
+ * A brass desk lamp standing at the left end of the shelf. Shown with the
+ * night light (no light is added at runtime: that would recompile shaders).
  */
 let lamp = null;
 function addLamp() {
-  const brass = new THREE.MeshStandardMaterial({ color: 0xb48a4a, metalness: 0.85, roughness: 0.32 });
-  // Enamelled green outside; inside, lit by the bulb.
-  const shade = new THREE.MeshStandardMaterial({ color: 0x24352a, roughness: 0.42, metalness: 0.25 });
+  const brass = new THREE.MeshStandardMaterial({ color: 0xc29852, metalness: 0.9, roughness: 0.26 });
+  const shade = new THREE.MeshStandardMaterial({ color: 0x1e3024, roughness: 0.34, metalness: 0.28 });
   const shadeInside = new THREE.MeshStandardMaterial({
-    color: 0xf3e6c8, roughness: 0.7, metalness: 0, side: THREE.BackSide,
+    color: 0xf7ebd0, roughness: 0.65, metalness: 0, side: THREE.BackSide,
     emissive: 0xffc070, emissiveIntensity: 0
   });
-  const glow = new THREE.MeshBasicMaterial({ color: 0xfff1d6 });
+  const glow = new THREE.MeshBasicMaterial({ color: 0xfff5dc });
   lamp = new THREE.Group();
   lamp.name = "night-lamp";
-  const base = createMesh(new THREE.CylinderGeometry(0.2, 0.23, 0.05, 40), brass, "lamp-base");
-  base.position.y = 0.025;
-  const stem = createMesh(new THREE.CylinderGeometry(0.016, 0.016, 1.25, 16), brass, "lamp-stem");
+  const base = createMesh(new THREE.CylinderGeometry(0.195, 0.235, 0.044, 40), brass, "lamp-base");
+  base.position.y = 0.022;
+  const baseCollar = createMesh(new THREE.CylinderGeometry(0.055, 0.145, 0.036, 32), brass, "lamp-collar");
+  baseCollar.position.y = 0.058;
+  const stem = createMesh(new THREE.CylinderGeometry(0.015, 0.018, 1.25, 16), brass, "lamp-stem");
   stem.position.set(0.12, 0.64, 0);
   stem.rotation.z = -0.19;
-  const arm = createMesh(new THREE.CylinderGeometry(0.014, 0.014, 0.62, 16), brass, "lamp-arm");
+  const arm = createMesh(new THREE.CylinderGeometry(0.013, 0.015, 0.62, 16), brass, "lamp-arm");
   arm.position.set(0.47, 1.27, 0.03);
   arm.rotation.z = -1.2;
-  const joint = createMesh(new THREE.SphereGeometry(0.028, 16, 12), brass, "lamp-joint");
+  const joint = createMesh(new THREE.SphereGeometry(0.029, 16, 12), brass, "lamp-joint");
   joint.position.set(0.24, 1.25, 0);
-  const hoodGeometry = new THREE.CylinderGeometry(0.06, 0.24, 0.3, 40, 1, true);
+  const hoodGeometry = new THREE.CylinderGeometry(0.062, 0.245, 0.31, 40, 1, true);
   const hood = createMesh(hoodGeometry, shade, "lamp-shade");
   hood.position.set(0.76, 1.12, 0.05);
   hood.rotation.z = 0.5;
   const hoodInside = createMesh(hoodGeometry, shadeInside, "lamp-shade-inside", false, false);
   hood.add(hoodInside);
-  const cap = createMesh(new THREE.SphereGeometry(0.062, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), shade, "lamp-cap");
-  cap.position.set(0.684, 1.25, 0.05);
+  // Subtle rolled brass rim around the lip of the green enamel shade
+  const shadeRim = createMesh(new THREE.TorusGeometry(0.244, 0.006, 10, 40), brass, "lamp-shade-rim", false, true);
+  shadeRim.rotation.x = Math.PI * 0.5;
+  shadeRim.position.y = -0.153;
+  hood.add(shadeRim);
+  const cap = createMesh(new THREE.SphereGeometry(0.064, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), brass, "lamp-cap");
+  cap.position.set(0.684, 1.252, 0.05);
   cap.rotation.z = 0.5;
-  const bulb = createMesh(new THREE.SphereGeometry(0.07, 20, 14), glow, "lamp-bulb", false, false);
+  const bulb = createMesh(new THREE.SphereGeometry(0.068, 20, 14), glow, "lamp-bulb", false, false);
   bulb.position.set(0.79, 1.06, 0.05);
-  lamp.add(base, stem, arm, joint, hood, cap, bulb);
+  // Warm radial pool of lamplight cast onto the walnut shelf directly below the shade
+  const pool = createMesh(shared.plane, new THREE.MeshBasicMaterial({
+    map: createLampPoolTexture(),
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    opacity: 0.72
+  }), "lamp-light-pool", false, false);
+  pool.scale.set(2.8, 1.05, 1);
+  pool.rotation.x = -Math.PI * 0.5;
+  pool.position.set(1.15, 0.008, 0.08);
+  pool.visible = false;
+
+  lamp.add(base, baseCollar, stem, arm, joint, hood, cap, bulb, pool);
   lamp.position.set(-3.35, shelfBoardTop, -0.12);
   lamp.rotation.y = 0.25;
   lamp.visible = false;
   lamp.userData.shade = shadeInside;
+  lamp.userData.pool = pool;
   shelfStage.add(lamp);
+}
+
+/** Tighten the directional shadow frustum around the single book in studio mode for sharper hardware shadows. */
+function updateShadowFrustum(detail = false) {
+  const key = roomLights.key;
+  if (!key) return;
+  if (detail) {
+    key.target.position.copy(inspectPosition);
+    key.position.set(inspectPosition.x - 3.6, inspectPosition.y + 5.4, inspectPosition.z + 4.4);
+    key.shadow.camera.left = -3.6;
+    key.shadow.camera.right = 3.6;
+    key.shadow.camera.top = 3.6;
+    key.shadow.camera.bottom = -3.6;
+    key.shadow.camera.near = 1.2;
+    key.shadow.camera.far = 16;
+    key.shadow.radius = 5.0;
+  } else {
+    key.target.position.set(0, 1.4, 0);
+    key.position.set(-4.6, 7.4, 5.8);
+    key.shadow.camera.left = -6;
+    key.shadow.camera.right = 6;
+    key.shadow.camera.top = 6;
+    key.shadow.camera.bottom = -1.5;
+    key.shadow.camera.near = 1;
+    key.shadow.camera.far = 18;
+    key.shadow.radius = 3.5;
+  }
+  key.target.updateMatrixWorld();
+  key.shadow.camera.updateProjectionMatrix();
+  shadowHold = Math.max(shadowHold, 3);
 }
 
 function addLights() {
@@ -3822,6 +4432,7 @@ function addLights() {
   const key = new THREE.DirectionalLight(0xffe8c2, 1.42);
   key.name = "shadow-key";
   key.position.set(-4.6, 7.4, 5.8);
+  key.target.position.set(0, 1.4, 0);
   key.castShadow = true;
   key.shadow.mapSize.set(quality.shadow, quality.shadow);
   key.shadow.camera.left = -6;
@@ -3830,10 +4441,10 @@ function addLights() {
   key.shadow.camera.bottom = -1.5;
   key.shadow.camera.near = 1;
   key.shadow.camera.far = 18;
-  key.shadow.bias = -0.00018;
-  key.shadow.normalBias = 0.018;
+  key.shadow.bias = -0.00015;
+  key.shadow.normalBias = 0.014;
   key.shadow.radius = 3.5;
-  scene.add(key);
+  scene.add(key, key.target);
   roomLights.key = key;
 
   const softKey = new THREE.RectAreaLight(0xffe8c2, 5.4, 4.8, 5.6);
@@ -3909,9 +4520,22 @@ function addDust() {
   dustPoints = dust;
 }
 
+function syncCycloramaBounce() {
+  const isNight = room.light === "night";
+  if (roomMaterials.floor) {
+    roomMaterials.floor.emissive.copy(roomMaterials.floor.color);
+    roomMaterials.floor.emissiveIntensity = isNight ? 0.16 : 0.46;
+  }
+  if (roomMaterials.wall) {
+    roomMaterials.wall.emissive.copy(roomMaterials.wall.color);
+    roomMaterials.wall.emissiveIntensity = isNight ? 0.14 : 0.4;
+  }
+}
+
 function setThemeColorsImmediately() {
   roomMaterials.floor?.color.copy(themeTargets.floor);
   roomMaterials.wall?.color.copy(themeTargets.wall);
+  syncCycloramaBounce();
   roomMaterials.shelf?.color.copy(themeTargets.shelf);
   roomMaterials.shelfDark?.color.copy(themeTargets.shelfDark);
   roomMaterials.shadow?.color.copy(themeTargets.shadow);
@@ -3946,6 +4570,7 @@ function updateTheme(delta) {
 
   easeColor(roomMaterials.floor?.color, themeTargets.floor);
   easeColor(roomMaterials.wall?.color, themeTargets.wall);
+  syncCycloramaBounce();
   easeColor(roomMaterials.shelf?.color, themeTargets.shelf);
   easeColor(roomMaterials.shelfDark?.color, themeTargets.shelfDark);
   easeColor(roomMaterials.shadow?.color, themeTargets.shadow);
@@ -3974,8 +4599,9 @@ function updateTransition(delta) {
       transitionTime + delta / DETAIL_TRANSITION_DURATION
     );
     applyOpeningPose(transitionTime);
-    // A book in a slipcase slides out of it first.
+    // A book in a slipcase slides out of it first; ribbon releases smoothly from the shelf.
     activeBook.setCase(1 - clamp(transitionTime / 0.35, 0, 1));
+    activeBook.setRibbonShelfRest?.(1 - smootherstep(clamp(transitionTime / 0.55, 0, 1)));
     updatePaginatedBook(activeBook, delta, 0);
     if (transitionTime >= 1) finishOpening();
   } else if (mode === "closing") {
@@ -3984,8 +4610,9 @@ function updateTransition(delta) {
       transitionTime + delta / SHELF_TRANSITION_DURATION
     );
     applyClosingPose(transitionTime);
-    // ...and slides back in as it lands.
+    // ...and slides back in as it lands; ribbon lays gracefully onto the shelf board.
     activeBook.setCase(clamp((transitionTime - 0.65) / 0.35, 0, 1));
+    activeBook.setRibbonShelfRest?.(smootherstep(clamp((transitionTime - 0.45) / 0.55, 0, 1)));
     updatePaginatedBook(activeBook, delta, 0);
     if (transitionTime >= 1) finishClosing();
   } else if (mode === "hero") {

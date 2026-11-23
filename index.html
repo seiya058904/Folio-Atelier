@@ -151,11 +151,138 @@
           <button class="icon-button" id="redo" type="button" aria-label="Redo" data-i18n-attrs="aria-label" disabled>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 4 3 3-3 3M12.8 7H7a3.5 3.5 0 0 0 0 7h2"></path></svg>
           </button>
+          <div class="studio__share-wrap">
+            <button class="icon-button studio__share-btn" id="studio-share" type="button" aria-label="Share & export" aria-haspopup="menu" aria-expanded="false" aria-controls="studio-share-menu" data-i18n-attrs="aria-label">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.8v6.9M5.2 5.4 8 2.6l2.8 2.8M3.2 9.8v2.4a1 1 0 0 0 1 1h7.6a1 1 0 0 0 1-1V9.8"></path></svg>
+            </button>
+            <div class="share-menu" id="studio-share-menu" role="menu" aria-label="Share & export" data-i18n-attrs="aria-label" hidden>
+              <button class="share-menu__item share-menu__item--featured" id="share-photo-studio" type="button" role="menuitem">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.4 5.2h2.2l1-1.5h4.8l1 1.5h2.2a1 1 0 0 1 1 1v5.8a1 1 0 0 1-1 1H2.4a1 1 0 0 1-1-1V6.2a1 1 0 0 1 1-1Z"></path><circle cx="8" cy="8.9" r="2.2"></circle></svg>
+                <span data-i18n>Photo Studio</span>
+              </button>
+              <button class="share-menu__item" id="share-picture" type="button" role="menuitem">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.2" y="3.5" width="11.6" height="9" rx="1.4"></rect><circle cx="6.2" cy="7" r="1.1"></circle><path d="m3.5 11.4 3.2-2.7 2.2 1.8 1.8-1.5 2 2.4"></path></svg>
+                <span data-i18n>Save a picture</span>
+              </button>
+              <button class="share-menu__item" id="share-turntable" type="button" role="menuitem">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.8 8A4.8 4.8 0 1 1 11 4.2M11.2 2.2v2.4H8.8"></path></svg>
+                <span data-i18n>Turntable GIF</span>
+              </button>
+              <button class="share-menu__item" id="share-pdf" type="button" role="menuitem">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.2l2.8 2.8v8.2H4z"></path><path d="M9.2 2.5v2.8H12M5.8 8.5h4.4M5.8 10.8h3.2"></path></svg>
+                <span data-i18n>Pages as PDF</span>
+              </button>
+              <span class="share-menu__rule" role="separator"></span>
+              <button class="share-menu__item" id="share-folio" type="button" role="menuitem">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.8h7.8a1 1 0 0 1 1 1v8.4a1 1 0 0 1-1 1H3.5zM5.6 2.8v10.4"></path></svg>
+                <span data-i18n>Export .folio</span>
+              </button>
+            </div>
+          </div>
         </div>
       </header>
       <div class="studio__tabs" id="studio-tabs" role="tablist" aria-label="Parts of the book" data-i18n-attrs="aria-label"></div>
       <div class="studio__body" id="studio-body" role="tabpanel" data-scroll tabindex="-1"></div>
     </aside>
+
+    <!-- Quick camera angles and lighting preview on the 3D workshop stage. -->
+    <div class="stage-bar" id="stage-bar" role="toolbar" aria-label="Inspect book" data-i18n-attrs="aria-label" aria-hidden="true" inert>
+      <div class="stage-bar__group" role="group" aria-label="Camera angle" data-i18n-attrs="aria-label">
+        <button class="stage-bar__btn" type="button" data-view="front" aria-pressed="true" data-i18n>Front</button>
+        <button class="stage-bar__btn" type="button" data-view="spine" aria-pressed="false" data-i18n>Spine</button>
+        <button class="stage-bar__btn" type="button" data-view="back" aria-pressed="false" data-i18n>Back</button>
+        <button class="stage-bar__btn" type="button" data-view="details" aria-pressed="false" data-i18n>Edge</button>
+      </div>
+      <span class="stage-bar__rule" aria-hidden="true"></span>
+      <div class="stage-bar__group stage-bar__lights" role="group" aria-label="Stage lighting" data-i18n-attrs="aria-label">
+        <button class="stage-bar__light" type="button" data-light="studio" aria-pressed="true" title="Studio" aria-label="Studio" data-i18n-attrs="title aria-label">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.7"></circle><path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M4 4l1.1 1.1M10.9 10.9 12 12M12 4l-1.1 1.1M5.1 10.9 4 12"></path></svg>
+        </button>
+        <button class="stage-bar__light" type="button" data-light="morning" aria-pressed="false" title="Morning" aria-label="Morning" data-i18n-attrs="title aria-label">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.2h11M4.6 11.2a3.4 3.4 0 0 1 6.8 0M8 4.4v1.6M4.2 6.6l1.1 1.1M11.8 6.6l-1.1 1.1"></path></svg>
+        </button>
+        <button class="stage-bar__light" type="button" data-light="golden" aria-pressed="false" title="Golden hour" aria-label="Golden hour" data-i18n-attrs="title aria-label">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.5h11M4.2 11.5a3.8 3.8 0 0 1 7.6 0M2.8 13.5h10.4"></path></svg>
+        </button>
+        <button class="stage-bar__light" type="button" data-light="night" aria-pressed="false" title="Night" aria-label="Night" data-i18n-attrs="title aria-label">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.2 9.9A4.8 4.8 0 0 1 6.1 3.8a4.8 4.8 0 1 0 6.1 6.1Z"></path></svg>
+        </button>
+      </div>
+      <span class="stage-bar__rule" aria-hidden="true"></span>
+      <button class="stage-bar__photo" id="open-photo-studio" type="button" title="Photo Studio" aria-label="Photo Studio" data-i18n-attrs="title aria-label">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.4 5.2h2.2l1-1.5h4.8l1 1.5h2.2a1 1 0 0 1 1 1v5.8a1 1 0 0 1-1 1H2.4a1 1 0 0 1-1-1V6.2a1 1 0 0 1 1-1Z"></path><circle cx="8" cy="8.9" r="2.2"></circle></svg>
+        <span data-i18n>Photo</span>
+      </button>
+    </div>
+
+    <!-- Immersive Photo Studio: live framing viewfinder + collector card darkroom. -->
+    <section class="photo-studio" id="photo-studio" aria-label="Photo Studio" data-i18n-attrs="aria-label" hidden>
+      <div class="photo-viewfinder" id="photo-viewfinder">
+        <div class="photo-frame" id="photo-frame" aria-hidden="true">
+          <span class="photo-frame__corner photo-frame__corner--tl"></span>
+          <span class="photo-frame__corner photo-frame__corner--tr"></span>
+          <span class="photo-frame__corner photo-frame__corner--bl"></span>
+          <span class="photo-frame__corner photo-frame__corner--br"></span>
+          <div class="photo-frame__grid" id="photo-grid" hidden></div>
+        </div>
+        <div class="photo-flash" id="photo-flash" aria-hidden="true"></div>
+        <div class="photo-top">
+          <button class="pill-button photo-exit" id="photo-exit" type="button">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3.5 5 8l4.5 4.5"></path></svg>
+            <span data-i18n>Back to atelier</span>
+          </button>
+          <div class="photo-top__tools">
+            <button class="stage-bar__btn photo-tool" id="photo-grid-toggle" type="button" aria-pressed="false" data-i18n>Grid</button>
+            <button class="stage-bar__btn photo-tool" id="photo-open-book" type="button" aria-pressed="false" data-i18n>Open book</button>
+          </div>
+        </div>
+        <div class="photo-dock" id="photo-dock">
+          <div class="photo-dock__row">
+            <div class="photo-pills" id="photo-angles" role="radiogroup" aria-label="Recommended angles" data-i18n-attrs="aria-label"></div>
+          </div>
+          <div class="photo-dock__bar">
+            <div class="photo-pills photo-pills--compact" id="photo-aspects" role="radiogroup" aria-label="Aspect ratio" data-i18n-attrs="aria-label"></div>
+            <button class="photo-shutter" id="photo-shutter" type="button" aria-label="Take photo" data-i18n-attrs="aria-label">
+              <span class="photo-shutter__ring"></span>
+              <span class="photo-shutter__core"></span>
+            </button>
+            <div class="photo-dock__right">
+              <div class="photo-lights" id="photo-lights" role="radiogroup" aria-label="Stage lighting" data-i18n-attrs="aria-label"></div>
+              <span class="stage-bar__rule" aria-hidden="true"></span>
+              <div class="photo-backdrops" id="photo-backdrops" role="radiogroup" aria-label="Backdrop" data-i18n-attrs="aria-label"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="photo-darkroom" id="photo-darkroom" role="dialog" aria-modal="true" aria-label="Collector card" data-i18n-attrs="aria-label" hidden>
+        <div class="photo-darkroom__stage">
+          <div class="photo-darkroom__developing" id="photo-developing" hidden>
+            <div class="photo-darkroom__shimmer" aria-hidden="true"></div>
+            <p data-i18n>Developing print…</p>
+          </div>
+          <canvas class="photo-darkroom__canvas" id="photo-preview"></canvas>
+        </div>
+        <aside class="photo-darkroom__panel" data-scroll>
+          <header class="photo-darkroom__head">
+            <div>
+              <p class="eyebrow" data-i18n>Photo Studio</p>
+              <h2 data-i18n>Collector card</h2>
+            </div>
+            <button class="icon-button" id="photo-darkroom-close" type="button" aria-label="Close" data-i18n-attrs="aria-label">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"></path></svg>
+            </button>
+          </header>
+          <div class="photo-darkroom__controls" id="photo-darkroom-controls"></div>
+          <footer class="photo-darkroom__actions">
+            <button class="pill-button pill-button--solid" id="photo-download" type="button" data-i18n>Save PNG</button>
+            <button class="pill-button" id="photo-copy" type="button" data-i18n>Copy image</button>
+            <button class="pill-button" id="photo-share" type="button" data-i18n>Share</button>
+            <button class="link-button" id="photo-retake" type="button" data-i18n>Retake</button>
+          </footer>
+        </aside>
+      </div>
+    </section>
 
     <!-- Reading controls, under the book while it is in the atelier. -->
     <div class="reader-bar" id="reader-bar" role="group" aria-label="Reading controls" data-i18n-attrs="aria-label" aria-hidden="true" inert>
@@ -179,7 +306,7 @@
     </div>
 
     <dialog class="sheet" id="new-book-dialog" aria-labelledby="new-book-title">
-      <form class="sheet__form" id="new-book-form" method="dialog">
+      <form class="sheet__form" id="new-book-form" method="dialog" data-scroll>
         <header class="sheet__header">
           <p class="eyebrow" data-i18n>A new volume</p>
           <h2 id="new-book-title" data-i18n>Begin a book</h2>
@@ -198,11 +325,21 @@
           </label>
         </div>
         <fieldset class="sheet__presets">
-          <legend class="field__label" data-i18n>Start from a binding — everything can be changed later</legend>
+          <div class="sheet__presets-head">
+            <legend class="field__label" data-i18n>Start from a binding — everything can be changed later</legend>
+            <div class="preset-themes" id="new-book-themes" role="tablist" aria-label="Binding themes" data-i18n-attrs="aria-label"></div>
+          </div>
+          <p class="preset-theme-note" id="new-book-theme-note"></p>
           <div class="preset-grid" id="new-book-presets" role="radiogroup" aria-label="Starting binding" data-i18n-attrs="aria-label"></div>
         </fieldset>
         <footer class="sheet__footer">
-          <p class="microcopy" id="new-book-note">Ultramarine cloth · copper foil</p>
+          <div class="preset-summary">
+            <div class="preset-summary__line">
+              <span class="preset-swatches" id="new-book-swatches" aria-hidden="true"></span>
+              <p class="microcopy" id="new-book-note">Black leather · gold · gauffered edges · slipcase</p>
+            </div>
+            <div class="preset-tags" id="new-book-tags"></div>
+          </div>
           <button class="pill-button pill-button--solid" type="submit" value="create" data-i18n>Create book</button>
         </footer>
       </form>
@@ -233,7 +370,7 @@
         <input class="finder__input" id="finder-input" type="text" role="combobox" aria-expanded="true" aria-controls="finder-results" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Title, author or words inside" data-i18n-attrs="placeholder">
         <kbd>Esc</kbd>
       </label>
-      <ol class="finder__results" id="finder-results" role="listbox" aria-label="Books found" data-i18n-attrs="aria-label"></ol>
+      <ol class="finder__results" id="finder-results" role="listbox" aria-label="Books found" data-i18n-attrs="aria-label" data-scroll></ol>
       <p class="finder__empty" id="finder-empty" hidden></p>
     </div>
 

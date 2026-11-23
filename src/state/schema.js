@@ -16,7 +16,8 @@ export const TRIMS = [
   { id: "pocket", label: "Pocket", note: "Fits a coat pocket", scale: 0.8 },
   { id: "crown", label: "Crown octavo", note: "A slim novel", scale: 0.91 },
   { id: "standard", label: "Standard", note: "A5-ish, the default", scale: 1 },
-  { id: "large", label: "Large", note: "Royal octavo, a generous hardback", scale: 1.15 }
+  { id: "large", label: "Large", note: "Royal octavo, a generous hardback", scale: 1.15 },
+  { id: "folio", label: "Folio", note: "Grand collector monograph", scale: 1.24 }
 ];
 
 export function trimScale(book) {
@@ -32,14 +33,16 @@ export function defaultStructure(color = "#1d1813") {
     penLoop: { show: false, color: mixHex(color, "#111111", 0.6) },
     // Board corners at the fore-edge: square, or rounded like a notebook.
     corners: "square",
-    clasp: { show: false, metal: "brass" },
-    pocket: { show: false },
-    slipcase: { show: false, color: mixHex(color, "#111111", 0.35) }
+    clasp: { show: false, metal: "brass", style: "single" },
+    pocket: { show: false, card: true },
+    slipcase: { show: false, color: mixHex(color, "#111111", 0.35), label: true }
   };
 }
 
 export const CLASP_METALS = [
   { id: "brass", label: "Brass", color: "#c7a052" },
+  { id: "copper", label: "Copper", color: "#c87046" },
+  { id: "rose", label: "Rose gold", color: "#dfb0a4" },
   { id: "silver", label: "Silver", color: "#c9ccd1" },
   { id: "iron", label: "Blackened iron", color: "#3a3936" }
 ];
@@ -47,6 +50,7 @@ export const CLASP_METALS = [
 export const PAGE_TYPES = [
   { id: "halftitle", label: "Half-title", note: "The title alone" },
   { id: "title", label: "Title page", note: "Title, subtitle, author" },
+  { id: "exlibris", label: "Bookplate", note: "Framed Ex Libris ownership plate" },
   { id: "dedication", label: "Dedication", note: "A short line, centred" },
   { id: "epigraph", label: "Epigraph", note: "A short quotation before the text" },
   { id: "contents", label: "Contents", note: "Built from your chapters" },
@@ -54,10 +58,11 @@ export const PAGE_TYPES = [
   { id: "chapter", label: "Chapter opener", note: "Number, title, opening text" },
   { id: "body", label: "Body text", note: "Flows across pages" },
   { id: "poem", label: "Verse", note: "Keeps your line breaks" },
+  { id: "letter", label: "Letter", note: "Dated correspondence or journal entry" },
   { id: "quote", label: "Pull quote", note: "A large quotation" },
   { id: "plate", label: "Plate", note: "Image or ornament with caption" },
   { id: "colophon", label: "Colophon", note: "Notes on the edition" },
-  { id: "notebook", label: "Notebook", note: "Ruled, dotted or squared pages to write in" },
+  { id: "notebook", label: "Notebook", note: "Ruled, dotted, grid, Cornell, staff or vertical sheets" },
   { id: "blank", label: "Blank", note: "An empty page" }
 ];
 
@@ -74,6 +79,9 @@ const WORDS = {
     firstChapter: "The Empty Room",
     secondChapter: "What Comes Next",
     firstQuote: "Make the thing you wish you had found on the shelf.",
+    letterSalutation: "Dear Reader,",
+    letterBody: "The lamp is lit and the desk is quiet. Write a dated note, a journal entry, or a letter you mean to keep inside these covers.",
+    letterSignoff: "Yours,",
     opening: [
       "Every book begins as an empty room. There is a table, a window, and the particular quiet that comes before anything has been decided. This page is that room: replace these lines with your own.",
       "Write the way you would speak to one attentive reader. Leave the long explanations for later chapters, and let the first paragraphs do only what first paragraphs must \u2014 open the door, and make it easy to step inside.",
@@ -92,6 +100,9 @@ const WORDS = {
     firstChapter: "\u7a7a\u623f\u95f4",
     secondChapter: "\u63a5\u4e0b\u6765",
     firstQuote: "\u53bb\u505a\u90a3\u672c\u4f60\u5e0c\u671b\u5728\u4e66\u67b6\u4e0a\u9047\u89c1\u7684\u4e66\u3002",
+    letterSalutation: "\u89c1\u5b57\u5982\u6664\uff1a",
+    letterBody: "\u53f0\u706f\u521d\u4e0a\uff0c\u4e66\u6848\u5b89\u9759\u3002\u5728\u6b64\u8bb0\u4e0b\u4e00\u5c01\u624b\u672d\u3001\u4e00\u5219\u65e5\u8bb0\uff0c\u6216\u662f\u4e00\u6bb5\u60f3\u957f\u4e45\u5939\u5728\u4e66\u9875\u91cc\u7684\u8bdd\u3002",
+    letterSignoff: "\u8c28\u4e0a",
     opening: [
       "\u6bcf\u4e00\u672c\u4e66\u90fd\u4ece\u4e00\u95f4\u7a7a\u623f\u95f4\u5f00\u59cb\u3002\u4e00\u5f20\u684c\u5b50\uff0c\u4e00\u6247\u7a97\uff0c\u8fd8\u6709\u4e00\u5207\u5c1a\u672a\u51b3\u5b9a\u4e4b\u524d\u90a3\u79cd\u7279\u522b\u7684\u5b89\u9759\u3002\u8fd9\u4e00\u9875\u5c31\u662f\u90a3\u95f4\u623f\u95f4\uff1a\u628a\u8fd9\u51e0\u884c\u5b57\u6362\u6210\u4f60\u81ea\u5df1\u7684\u3002",
       "\u50cf\u5bf9\u4e00\u4f4d\u4e13\u5fc3\u7684\u8bfb\u8005\u8bf4\u8bdd\u90a3\u6837\u53bb\u5199\u3002\u957f\u7bc7\u7684\u89e3\u91ca\u7559\u7ed9\u540e\u9762\u7684\u7ae0\u8282\uff0c\u5f00\u5934\u7684\u51e0\u6bb5\u53ea\u505a\u5f00\u5934\u8be5\u505a\u7684\u4e8b\u2014\u2014\u63a8\u5f00\u95e8\uff0c\u8ba9\u4eba\u613f\u610f\u8d70\u8fdb\u6765\u3002",
@@ -105,6 +116,7 @@ const words = () => WORDS[getLang()] || WORDS.en;
 const PAGE_DEFAULTS = {
   halftitle: () => ({}),
   title: () => ({ imprint: "" }),
+  exlibris: () => ({ owner: "", note: "", edition: "No. 01", motif: "" }),
   dedication: () => ({ text: words().dedication }),
   epigraph: () => ({ text: words().epigraph, attribution: "" }),
   contents: () => ({ heading: words().contents }),
@@ -112,10 +124,11 @@ const PAGE_DEFAULTS = {
   chapter: () => ({ title: words().chapter, text: "" }),
   body: () => ({ heading: "", text: "" }),
   poem: () => ({ title: "", text: words().poem }),
+  letter: () => ({ date: "", salutation: words().letterSalutation, text: words().letterBody, signoff: words().letterSignoff }),
   quote: () => ({ text: words().quote, attribution: "" }),
   plate: () => ({ image: null, motif: "", caption: "", bleed: false }),
   colophon: () => ({ text: "" }),
-  // `count` pages ruled with lines, a dot grid or squares.
+  // `count` pages ruled with lines, dots, grid, Cornell, staff or vertical rules.
   notebook: () => ({ ruling: "lined", count: 4 }),
   blank: () => ({})
 };
@@ -153,7 +166,7 @@ export function defaultPages() {
 // The second foil, for elements stamped in it (`leaf: "second"` on an
 // element; anything else is the main foil): silver beside a warm leaf, gold
 // beside a cool one.
-const COOL_FOILS = new Set(["silver", "aluminum", "gunmetal", "holo", "pearl", "white", "sapphire", "emerald"]);
+const COOL_FOILS = new Set(["silver", "aluminum", "gunmetal", "platinum", "verdigris", "holo", "pearl", "white", "sapphire", "emerald"]);
 export const secondFoilFor = (id) => getFoil(COOL_FOILS.has(id) ? "gold" : "silver").color;
 
 function resolveFoil(foil) {
@@ -195,15 +208,27 @@ function buildFront(layoutId, preset, color) {
   front.texts.forEach((layer) => { if (layer.finish !== "ink") layer.color = ink; });
   front.motif.color = ink;
   // A piece of contrasting leather laid on the board (onlay) or set flush
-  // into a cut-out (inlay). Off until the reader adds one.
+  // into a cut-out (inlay). Off until the reader or preset adds one.
   front.onlay = {
-    show: false, mode: "onlay", shape: "rounded", kind: "leather",
+    show: false, mode: "onlay", shape: "rounded", kind: "leather", border: false,
     color: mixHex(color, luminance(color) < 0.3 ? "#e8dcc4" : "#1d1813", 0.55),
     x: 0.5, y: 0.4, width: 0.62, height: 0.3
   };
-  // A wax seal pressed on the board, with a letter. Off until added.
-  front.seal = { show: false, color: "#7a1c17", letter: "", x: 0.76, y: 0.82 };
+  // A wax seal pressed on the board, with a letter or crest motif.
+  front.seal = { show: false, color: "#7a1c17", letter: "", motif: "", scale: 1, x: 0.76, y: 0.82 };
   if (preset.border) front.border.style = preset.border;
+  const ov = preset.frontOverrides;
+  if (ov) {
+    if (ov.border) Object.assign(front.border, ov.border);
+    if (ov.motif) Object.assign(front.motif, ov.motif);
+    if (ov.onlay) Object.assign(front.onlay, ov.onlay);
+    if (ov.seal) Object.assign(front.seal, ov.seal);
+    if (ov.texts) {
+      front.texts.forEach((layer) => {
+        if (ov.texts[layer.id]) Object.assign(layer, ov.texts[layer.id]);
+      });
+    }
+  }
   if (preset.blank) {
     front.border.style = "none";
     front.texts.forEach((layer) => { layer.show = false; });
@@ -213,39 +238,58 @@ function buildFront(layoutId, preset, color) {
 
 function buildSpine(preset, color) {
   const ink = contrastInk(color);
+  const spec = typeof preset.spine === "object" && preset.spine ? preset.spine : { style: preset.spine };
+  const stitched = Boolean(preset.stitched || preset.details?.stitch?.show);
+  const spineStyle = preset.blank ? "none" : spec.style || "frame";
+  const emblem = preset.blank || stitched ? "none" : (spec.emblem ?? "ring");
+  const label = {
+    show: false, shape: "rect", framed: true,
+    color: mixHex(color, luminance(color) < 0.2 ? "#7a1f2b" : "#1d1813", 0.82),
+    ...(spec.label || {})
+  };
+  const texts = [
+    {
+      id: "spine-title", source: "title", text: "", show: !preset.blank && !stitched,
+      font: "cormorant", size: 66, weight: 500, italic: false, tracking: 0.01, upper: false,
+      orient: "vertical", y: 0.5, finish: "foil", color: ink
+    },
+    {
+      id: "spine-author", source: "author", text: "", show: !preset.blank && !stitched,
+      font: "inter", size: 19, weight: 500, italic: false, tracking: 0.2, upper: true,
+      orient: "vertical", y: 0.8, finish: "foil", color: ink
+    },
+    {
+      id: "spine-mark", source: "custom", text: "I", show: !preset.blank && !stitched,
+      font: "inter", size: 24, weight: 500, italic: false, tracking: 0.2, upper: true,
+      orient: "horizontal", y: 0.077, finish: "foil", color: ink
+    }
+  ];
+  if (spec.texts) {
+    texts.forEach((layer) => {
+      if (spec.texts[layer.id]) Object.assign(layer, spec.texts[layer.id]);
+    });
+  }
   return {
-    style: preset.blank ? "none" : preset.spine || "frame",
-    emblem: preset.blank || preset.stitched ? "none" : "ring",
-    finish: "foil",
-    color: ink,
-    label: { show: false, color: mixHex(color, luminance(color) < 0.2 ? "#7a1f2b" : "#1d1813", 0.82) },
-    texts: [
-      {
-        id: "spine-title", source: "title", text: "", show: !preset.blank && !preset.stitched,
-        font: "cormorant", size: 66, weight: 500, italic: false, tracking: 0.01, upper: false,
-        orient: "vertical", y: 0.5, finish: "foil", color: ink
-      },
-      {
-        id: "spine-author", source: "author", text: "", show: !preset.blank && !preset.stitched,
-        font: "inter", size: 19, weight: 500, italic: false, tracking: 0.2, upper: true,
-        orient: "vertical", y: 0.8, finish: "foil", color: ink
-      },
-      {
-        id: "spine-mark", source: "custom", text: "I", show: !preset.blank && !preset.stitched,
-        font: "inter", size: 24, weight: 500, italic: false, tracking: 0.2, upper: true,
-        orient: "horizontal", y: 0.077, finish: "foil", color: ink
-      }
-    ]
+    style: spineStyle,
+    emblem,
+    finish: spec.finish || "foil",
+    ...(spec.leaf ? { leaf: spec.leaf } : {}),
+    color: spec.color || ink,
+    label,
+    texts
   };
 }
 
 function buildBack(preset, color) {
   const ink = contrastInk(color);
+  const spec = preset.back || {};
   return {
-    border: { style: "none", inset: 0.055, finish: "foil", color: ink },
+    border: { style: "none", inset: 0.055, finish: "foil", color: ink, ...(spec.border || {}) },
+    badge: { style: "none", code: "978-0-486-28473-6", price: "", ...(spec.badge || {}) },
     motif: {
       key: preset.blank ? "none" : "rings", x: 0.71, y: 0.325, scale: 1,
-      finish: "foil", color: ink, opacity: 0.9
+      finish: "foil", color: ink, opacity: 0.9,
+      ...(spec.motif || {})
     },
     texts: [
       {
@@ -273,13 +317,44 @@ function buildBack(preset, color) {
 }
 
 function buildDetails(preset, color, foil) {
+  const det = preset.details || {};
+  const edge = det.edge || preset.edge;
+  const endpaper = typeof det.endpaper === "object"
+    ? det.endpaper
+    : { color: mixHex(color, "#efe6d4", 0.72), pattern: preset.endpaper || "grid" };
+  const corners = typeof det.corners === "string"
+    ? { style: det.corners }
+    : det.corners || { style: preset.corners || "none" };
   return {
-    edge: preset.edge ? { ...preset.edge } : { style: "plain", color: "#c6532f" },
-    endpaper: { color: mixHex(color, "#efe6d4", 0.72), pattern: preset.endpaper || "grid" },
-    ribbon: { show: true, color: mixHex(foil.color, color, 0.28), double: false, second: mixHex(foil.color, "#f3ece0", 0.4) },
-    headband: { color: mixHex(foil.color, "#c6a66d", 0.5), striped: false, second: "#f3ece0" },
-    corners: { style: preset.corners || "none" },
-    stitch: { show: Boolean(preset.stitched), color: "#f3ece0", holes: 4 }
+    edge: edge ? { ...edge } : { style: "plain", color: "#c6532f" },
+    endpaper: { color: mixHex(color, "#efe6d4", 0.72), pattern: "grid", ...endpaper },
+    ribbon: {
+      show: true, color: mixHex(foil.color, color, 0.28), double: false, second: mixHex(foil.color, "#f3ece0", 0.4),
+      ...(det.ribbon || {})
+    },
+    headband: {
+      color: mixHex(foil.color, "#c6a66d", 0.5), striped: false, second: "#f3ece0",
+      ...(det.headband || {})
+    },
+    corners,
+    stitch: {
+      show: Boolean(preset.stitched), color: "#f3ece0", holes: 4, pattern: "standard",
+      ...(det.stitch || {})
+    }
+  };
+}
+
+function buildStructure(preset, color) {
+  const base = defaultStructure(color);
+  const spec = preset.structure || {};
+  return {
+    ...base,
+    ...spec,
+    band: { ...base.band, ...(spec.band || {}) },
+    penLoop: { ...base.penLoop, ...(spec.penLoop || {}) },
+    clasp: { ...base.clasp, ...(spec.clasp || {}) },
+    pocket: { ...base.pocket, ...(spec.pocket || {}) },
+    slipcase: { ...base.slipcase, ...(spec.slipcase || {}) }
   };
 }
 
@@ -295,10 +370,11 @@ function buildPattern(preset, color) {
   };
 }
 
-function buildInterior() {
-  return {
-    bodyFont: getLang() === "zh" ? "notoserifsc" : "garamond",
-    headingFont: getLang() === "zh" ? "notoserifsc" : "cormorant",
+function buildInterior(preset = null, existingLabels = null) {
+  const lang = existingLabels || getLang();
+  const base = {
+    bodyFont: lang === "zh" ? "notoserifsc" : "garamond",
+    headingFont: lang === "zh" ? "notoserifsc" : "cormorant",
     paper: "cream",
     scale: 1,
     leading: 1.5,
@@ -309,8 +385,19 @@ function buildInterior() {
     justify: true,
     chapterStyle: "classic",
     ink: "black",
-    labels: getLang()
+    labels: lang
   };
+  if (preset?.interior) {
+    Object.assign(base, preset.interior);
+    // Keep Chinese serif readable when the book's interior language is Chinese,
+    // unless the preset explicitly chose a CJK face.
+    if (lang === "zh") {
+      if (!["notoserifsc", "notosanssc", "xiaowei", "mashan", "longcang"].includes(base.bodyFont)) {
+        base.bodyFont = "notoserifsc";
+      }
+    }
+  }
+  return base;
 }
 
 /** Apply a whole-book preset, keeping the words and pages the user wrote. */
@@ -339,13 +426,15 @@ export function applyPreset(book, presetId) {
   book.foil = foil;
   book.palette = preset.palette ? { ...preset.palette } : null;
   const image = book.front?.image || null;
-  const seal = book.front?.seal || null;
   book.front = keep(book.front, buildFront(preset.layout, preset, color));
   book.front.image = image;
-  if (seal) book.front.seal = seal;
   book.spine = keep(book.spine, buildSpine(preset, color));
   book.back = keep(book.back, buildBack(preset, color));
   book.details = buildDetails(preset, color, foil);
+  book.structure = buildStructure(preset, color);
+  book.stamp = { relief: "deboss", depth: 0.5, ...(preset.stamp || {}) };
+  book.wear = { scuff: 0, fade: 0, ...(preset.wear || {}) };
+  book.interior = buildInterior(preset, book.interior?.labels);
   return book;
 }
 
@@ -477,6 +566,9 @@ export function normalizeBook(value) {
   };
   if (book.structure.corners !== "rounded") book.structure.corners = "square";
   if (!CLASP_METALS.some((metal) => metal.id === book.structure.clasp.metal)) book.structure.clasp.metal = "brass";
+  if (!["single", "twin"].includes(book.structure.clasp.style)) book.structure.clasp.style = "single";
+  if (book.structure.pocket.card === undefined) book.structure.pocket.card = true;
+  if (book.structure.slipcase.label === undefined) book.structure.slipcase.label = true;
   if (!TRIMS.some((trim) => trim.id === book.structure.trim)) book.structure.trim = "standard";
   book.structure.bulk = Math.min(1.6, Math.max(0.55, Number(book.structure.bulk) || 1));
   book.pattern = { ...base.pattern, ...(value.pattern || {}) };
@@ -499,13 +591,15 @@ export function normalizeBook(value) {
       ...stored,
       border: { ...base[face].border, ...(stored.border || {}) },
       ...(face === "front" ? {
-        onlay: { ...base.front.onlay, ...(stored.onlay || {}) },
-        seal: { ...base.front.seal, ...(stored.seal || {}) },
+        onlay: { ...base.front.onlay, show: false, ...(stored.onlay || {}) },
+        seal: { ...base.front.seal, show: false, ...(stored.seal || {}) },
         // Pictures stored before framing existed show as they did: centred.
         image: stored.image && typeof stored.image === "object" && stored.image.id
           ? { mode: "full", opacity: 1, treatment: "none", zoom: 1, focusX: 0.5, focusY: 0.5, ...stored.image }
           : null
-      } : {}),
+      } : {
+        badge: { ...base.back.badge, style: "none", ...(stored.badge || {}) }
+      }),
       motif: { ...base[face].motif, ...(stored.motif || {}) },
       texts: Array.isArray(stored.texts) && stored.texts.length
         ? stored.texts.map((layer) => ({ ...base[face].texts[0], vertical: false, ...layer }))

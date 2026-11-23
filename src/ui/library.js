@@ -1,7 +1,7 @@
 // The shelf interface: empty state, selection read-out, navigation markers,
 // the "begin a book" dialog, and duplicate / delete / export / import.
 
-import { PRESETS, getPreset } from "../data/presets.js";
+import { PRESETS, PRESET_THEMES, getFoil, getPreset } from "../data/presets.js";
 import { ensureFonts } from "../data/fonts.js";
 import { getLang, t } from "../i18n.js";
 import { bookImageIds, getImageBlob, restoreImage } from "../state/images.js";
@@ -37,10 +37,15 @@ export function createLibraryUi({ store, engine, audio }) {
   const nameInput = $("#new-book-name");
   const authorInput = $("#new-book-author");
   const presetGrid = $("#new-book-presets");
+  const presetThemes = $("#new-book-themes");
+  const presetThemeNote = $("#new-book-theme-note");
   const presetNote = $("#new-book-note");
+  const presetSwatches = $("#new-book-swatches");
+  const presetTags = $("#new-book-tags");
   const importInput = $("#import-file");
 
   let chosenPreset = PRESETS[0].id;
+  let activeTheme = "all";
   let thumbTimer = 0;
 
   /* ----- shelf read-out ----- */
@@ -96,11 +101,15 @@ export function createLibraryUi({ store, engine, audio }) {
   /* ----- begin a book ----- */
 
   function sampleBook(presetId) {
-    return createBook({
-      presetId,
-      title: nameInput.value.trim() || t("Untitled"),
-      author: authorInput.value.trim()
-    });
+    const preset = getPreset(presetId);
+    const typedTitle = nameInput.value.trim();
+    const typedAuthor = authorInput.value.trim();
+    const zh = getLang() === "zh";
+    const title = typedTitle || (zh ? preset.specimen?.zh : preset.specimen?.en) || t("Untitled");
+    const author = typedTitle
+      ? typedAuthor
+      : (typedAuthor || (zh ? preset.specimen?.authorZh : preset.specimen?.authorEn) || "");
+    return createBook({ presetId, title, author });
   }
 
   // The preset covers are painted in idle time after the shelf is up (a
@@ -155,19 +164,80 @@ export function createLibraryUi({ store, engine, audio }) {
     loadThumbFonts();
   }
 
+  function resolvePresetFoilColor(preset) {
+    if (preset.foil && typeof preset.foil === "object") {
+      return preset.foil.color || getFoil(preset.foil.preset).color;
+    }
+    return getFoil(preset.foil).color;
+  }
+
   function choosePreset(id) {
-    chosenPreset = id;
+    const preset = getPreset(id);
+    chosenPreset = preset.id;
     presetGrid.querySelectorAll("[role='radio']").forEach((button) => {
-      const checked = button.dataset.value === id;
+      const checked = button.dataset.value === chosenPreset;
       button.setAttribute("aria-checked", String(checked));
       button.tabIndex = checked ? 0 : -1;
     });
-    presetNote.textContent = t(getPreset(id).note);
+    presetNote.textContent = t(preset.note);
+    if (presetSwatches) {
+      const foilColor = resolvePresetFoilColor(preset);
+      const foilObj = typeof preset.foil === "object" ? getFoil(preset.foil.preset) : getFoil(preset.foil);
+      const metal = (preset.foil?.metalness ?? foilObj.metalness) > 0.5;
+      const matDot = h("i", { class: "preset-swatch" });
+      matDot.style.setProperty("--swatch", preset.material.color);
+      const foilDot = h("i", { class: `preset-swatch${metal ? " preset-swatch--metal" : ""}` });
+      foilDot.style.setProperty("--swatch", foilColor);
+      presetSwatches.replaceChildren(matDot, foilDot);
+    }
+    if (presetTags) {
+      presetTags.replaceChildren(...(preset.tags || []).map((tag) => h("span", { class: "preset-tag", text: t(tag) })));
+    }
+  }
+
+  function setPresetTheme(themeId) {
+    activeTheme = themeId;
+    const theme = PRESET_THEMES.find((item) => item.id === themeId) || PRESET_THEMES[0];
+    presetThemes?.querySelectorAll("[role='tab']").forEach((button) => {
+      const selected = button.dataset.theme === theme.id;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
+    if (presetThemeNote) presetThemeNote.textContent = t(theme.subtitle);
+    const filtered = theme.id !== "all";
+    presetGrid.dataset.filtered = String(filtered);
+    let firstVisible = null;
+    let chosenVisible = false;
+    presetGrid.querySelectorAll("[role='radio']").forEach((button) => {
+      const visible = !filtered || button.dataset.theme === theme.id;
+      button.hidden = !visible;
+      if (visible && !firstVisible) firstVisible = button.dataset.value;
+      if (visible && button.dataset.value === chosenPreset) chosenVisible = true;
+    });
+    if (!chosenVisible && firstVisible) choosePreset(firstVisible);
+  }
+
+  function buildThemeTabs() {
+    if (!presetThemes) return;
+    presetThemes.replaceChildren(...PRESET_THEMES.map((theme) => h("button", {
+      type: "button",
+      role: "tab",
+      class: "preset-theme-btn",
+      dataset: { theme: theme.id },
+      "aria-selected": String(theme.id === activeTheme),
+      tabIndex: theme.id === activeTheme ? 0 : -1,
+      text: t(theme.label),
+      onclick: () => {
+        audio.playCue("tap");
+        setPresetTheme(theme.id);
+      }
+    })));
   }
 
   function buildPresetGrid() {
     thumbFonts = false;
     thumbsQueued = false;
+    buildThemeTabs();
     presetGrid.replaceChildren(...PRESETS.map((preset) => {
       const canvas = h("canvas", { class: "tile__art", width: 192, height: 288, dataset: { preset: preset.id } });
       return h("button", {
@@ -175,21 +245,37 @@ export function createLibraryUi({ store, engine, audio }) {
         role: "radio",
         class: "tile",
         title: t(preset.note),
-        dataset: { value: preset.id },
-        onclick: () => choosePreset(preset.id)
-      }, canvas, h("span", { text: t(preset.label) }));
+        dataset: {
+          value: preset.id,
+          theme: preset.theme || "gallery",
+          rounded: String(preset.structure?.corners === "rounded")
+        },
+        onclick: () => {
+          audio.playCue("tap");
+          choosePreset(preset.id);
+        }
+      }, h("span", { class: "tile__frame" }, canvas), h("span", { text: t(preset.label) }));
     }));
+    setPresetTheme(activeTheme);
   }
 
   function wirePresetGrid() {
     presetGrid.addEventListener("keydown", (event) => {
-      const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
-      if (!step) return;
-      const buttons = [...presetGrid.querySelectorAll("[role='radio']")];
+      if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(event.key)) return;
+      const buttons = [...presetGrid.querySelectorAll("[role='radio']")].filter((b) => !b.hidden);
       const index = buttons.indexOf(document.activeElement);
       if (index < 0) return;
+      // Measure real computed CSS Grid column count (6 desktop, 4 filtered/tablet, 3 mobile).
+      let cols = 1;
+      const firstTop = buttons[0]?.offsetTop ?? 0;
+      for (let i = 1; i < buttons.length; i += 1) {
+        if (Math.abs(buttons[i].offsetTop - firstTop) < 4) cols += 1;
+        else break;
+      }
+      const delta = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[event.key];
       event.preventDefault();
-      const next = buttons[(index + step + buttons.length) % buttons.length];
+      const nextIndex = (index + delta + buttons.length) % buttons.length;
+      const next = buttons[nextIndex];
       next.focus();
       next.click();
     });
@@ -541,6 +627,7 @@ export function createLibraryUi({ store, engine, audio }) {
 
   function openFinder() {
     if (engine.mode !== "hero" || !store.books.length || !finder.hidden) return;
+    setRoomPanel(false);
     finderFrom = engine.selectedIndex;
     finder.classList.remove("is-leaving");
     finder.hidden = false;
@@ -639,7 +726,11 @@ export function createLibraryUi({ store, engine, audio }) {
     if (open) renderRoomPanel();
   }
 
-  roomButton.addEventListener("click", () => setRoomPanel(roomPanel.hidden));
+  roomButton.addEventListener("click", (event) => {
+    const opening = roomPanel.hidden;
+    setRoomPanel(opening);
+    if (!opening && event.detail) roomButton.blur();
+  });
   document.addEventListener("pointerdown", (event) => {
     if (!roomPanel.hidden && !roomPanel.contains(event.target) && event.target !== roomButton) setRoomPanel(false);
   });

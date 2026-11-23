@@ -307,7 +307,7 @@ const DRAW = {
     ctx.arc(cx, cy, size * 0.92, 0, TAU);
     ctx.stroke();
     ctx.globalAlpha = alpha;
-    const letter = (options.text || "A").trim().slice(0, 1).toUpperCase() || "A";
+    const letter = ([...(options.text || "A").trim()][0] || "A").toUpperCase();
     ctx.font = `500 ${size * 1.05}px "Cormorant Garamond", "Noto Serif SC", Georgia, serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
@@ -718,6 +718,222 @@ const DRAW = {
     heart(1);
     ctx.globalAlpha = alpha * 0.55;
     heart(0.62);
+  },
+
+  astrolabe(ctx, cx, cy, size, alpha) {
+    // Armillary ring, ecliptic meridian, degree ticks and suspension throne.
+    ctx.beginPath();
+    ctx.arc(cx, cy - size * 0.94, size * 0.12, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy + size * 0.06, size * 0.82, 0, TAU);
+    ctx.stroke();
+    ctx.globalAlpha = alpha * 0.65;
+    ctx.beginPath();
+    ctx.arc(cx, cy + size * 0.06, size * 0.68, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + size * 0.06, size * 0.68, size * 0.28, -0.45, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + size * 0.06, size * 0.28, size * 0.68, 0.2, 0, TAU);
+    ctx.stroke();
+    // Degree ticks round the outer mater
+    for (let i = 0; i < 24; i += 1) {
+      const a = (i / 24) * TAU;
+      const r0 = size * (i % 3 === 0 ? 0.69 : 0.75);
+      const r1 = size * 0.82;
+      line(ctx, cx + Math.cos(a) * r0, cy + size * 0.06 + Math.sin(a) * r0, cx + Math.cos(a) * r1, cy + size * 0.06 + Math.sin(a) * r1);
+    }
+    ctx.globalAlpha = alpha;
+    // Alidade rule with pointer tips
+    line(ctx, cx - size * 0.72, cy + size * 0.36, cx + size * 0.72, cy - size * 0.24);
+    ctx.beginPath();
+    ctx.arc(cx, cy + size * 0.06, size * 0.075, 0, TAU);
+    ctx.fill();
+  },
+
+  moth(ctx, cx, cy, size, alpha) {
+    // Nocturnal luna moth with symmetrical forewings, hindwing tails and eyespots.
+    ctx.lineJoin = "round";
+    [-1, 1].forEach((side) => {
+      ctx.globalAlpha = alpha;
+      // Forewing
+      ctx.beginPath();
+      ctx.moveTo(cx + side * size * 0.06, cy - size * 0.22);
+      ctx.bezierCurveTo(cx + side * size * 0.56, cy - size * 0.78, cx + side * size * 1.05, cy - size * 0.42, cx + side * size * 0.88, cy + size * 0.02);
+      ctx.bezierCurveTo(cx + side * size * 0.72, cy + size * 0.24, cx + side * size * 0.3, cy + size * 0.16, cx + side * size * 0.06, cy + size * 0.08);
+      ctx.stroke();
+      // Hindwing + swallowtail
+      ctx.beginPath();
+      ctx.moveTo(cx + side * size * 0.06, cy + size * 0.08);
+      ctx.bezierCurveTo(cx + side * size * 0.64, cy + size * 0.14, cx + side * size * 0.68, cy + size * 0.66, cx + side * size * 0.34, cy + size * 0.68);
+      ctx.quadraticCurveTo(cx + side * size * 0.28, cy + size * 0.94, cx + side * size * 0.2, cy + size * 0.96);
+      ctx.quadraticCurveTo(cx + side * size * 0.18, cy + size * 0.62, cx + side * size * 0.05, cy + size * 0.44);
+      ctx.stroke();
+      // Eyespots & veins
+      ctx.globalAlpha = alpha * 0.65;
+      ctx.beginPath();
+      ctx.arc(cx + side * size * 0.52, cy - size * 0.16, size * 0.11, 0, TAU);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx + side * size * 0.52, cy - size * 0.16, size * 0.04, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + side * size * 0.34, cy + size * 0.42, size * 0.065, 0, TAU);
+      ctx.stroke();
+      // Feathered antenna
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.moveTo(cx + side * size * 0.05, cy - size * 0.38);
+      ctx.quadraticCurveTo(cx + side * size * 0.22, cy - size * 0.72, cx + side * size * 0.36, cy - size * 0.74);
+      ctx.stroke();
+    });
+    // Thorax & abdomen
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + size * 0.08, size * 0.075, size * 0.44, 0, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy - size * 0.36, size * 0.065, 0, TAU);
+    ctx.fill();
+  },
+
+  plum(ctx, cx, cy, size, alpha) {
+    // Classic winter plum branch with angular twigs and five-petal blossoms.
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx - size * 0.85, cy + size * 0.72);
+    ctx.lineTo(cx - size * 0.22, cy + size * 0.16);
+    ctx.lineTo(cx + size * 0.14, cy + size * 0.24);
+    ctx.lineTo(cx + size * 0.78, cy - size * 0.54);
+    ctx.stroke();
+    line(ctx, cx - size * 0.22, cy + size * 0.16, cx - size * 0.46, cy - size * 0.56);
+    line(ctx, cx + size * 0.14, cy + size * 0.24, cx + size * 0.62, cy + size * 0.48);
+    const blossom = (bx, by, r, filled = false) => {
+      for (let p = 0; p < 5; p += 1) {
+        const a = (p / 5) * TAU - Math.PI / 2;
+        ctx.beginPath();
+        ctx.arc(bx + Math.cos(a) * r * 0.58, by + Math.sin(a) * r * 0.58, r * 0.42, 0, TAU);
+        if (filled) ctx.fill();
+        else ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(bx, by, r * 0.18, 0, TAU);
+      ctx.fill();
+    };
+    ctx.globalAlpha = alpha;
+    blossom(cx + size * 0.46, cy - size * 0.18, size * 0.24, false);
+    blossom(cx - size * 0.42, cy - size * 0.48, size * 0.2, false);
+    blossom(cx - size * 0.12, cy + size * 0.12, size * 0.15, false);
+    ctx.globalAlpha = alpha * 0.78;
+    // Buds
+    [[0.78, -0.54], [0.64, 0.48], [-0.56, -0.2], [0.22, -0.34]].forEach(([dx, dy]) => {
+      ctx.beginPath();
+      ctx.arc(cx + dx * size, cy + dy * size, size * 0.055, 0, TAU);
+      ctx.fill();
+    });
+  },
+
+  swallow(ctx, cx, cy, size, alpha) {
+    // Soaring swallow in flight with swept wings and forked tail.
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    // Upper left swept wing
+    ctx.moveTo(cx - size * 0.14, cy - size * 0.08);
+    ctx.bezierCurveTo(cx - size * 0.42, cy - size * 0.68, cx - size * 0.96, cy - size * 0.72, cx - size * 0.98, cy - size * 0.44);
+    ctx.bezierCurveTo(cx - size * 0.78, cy - size * 0.18, cx - size * 0.46, cy + size * 0.04, cx - size * 0.18, cy + size * 0.14);
+    ctx.stroke();
+    // Upper right wing
+    ctx.beginPath();
+    ctx.moveTo(cx + size * 0.14, cy - size * 0.16);
+    ctx.bezierCurveTo(cx + size * 0.46, cy - size * 0.66, cx + size * 0.96, cy - size * 0.56, cx + size * 0.94, cy - size * 0.28);
+    ctx.bezierCurveTo(cx + size * 0.7, cy - size * 0.02, cx + size * 0.4, cy + size * 0.12, cx + size * 0.12, cy + size * 0.16);
+    ctx.stroke();
+    // Body, head & forked tail
+    ctx.beginPath();
+    ctx.moveTo(cx + size * 0.24, cy - size * 0.42);
+    ctx.quadraticCurveTo(cx + size * 0.06, cy - size * 0.26, cx - size * 0.06, cy + size * 0.16);
+    ctx.lineTo(cx - size * 0.52, cy + size * 0.78);
+    ctx.lineTo(cx - size * 0.12, cy + size * 0.42);
+    ctx.lineTo(cx + size * 0.16, cy + size * 0.84);
+    ctx.lineTo(cx + size * 0.12, cy + size * 0.16);
+    ctx.quadraticCurveTo(cx + size * 0.24, cy - size * 0.18, cx + size * 0.24, cy - size * 0.42);
+    ctx.stroke();
+    // Delicate sprig held in beak
+    ctx.globalAlpha = alpha * 0.72;
+    ctx.beginPath();
+    ctx.moveTo(cx + size * 0.24, cy - size * 0.42);
+    ctx.quadraticCurveTo(cx + size * 0.48, cy - size * 0.54, cx + size * 0.66, cy - size * 0.44);
+    ctx.stroke();
+    leaf(ctx, cx + size * 0.48, cy - size * 0.48, size * 0.16, size * 0.045, -0.5);
+  },
+
+  archway(ctx, cx, cy, size, alpha) {
+    // Classical arched portal with fluted pilasters, keystone and crescent star inside.
+    const w = size * 0.68;
+    const base = cy + size * 0.86;
+    const spring = cy - size * 0.16;
+    ctx.beginPath();
+    ctx.moveTo(cx - w, base);
+    ctx.lineTo(cx - w, spring);
+    ctx.arc(cx, spring, w, Math.PI, 0);
+    ctx.lineTo(cx + w, base);
+    ctx.stroke();
+    ctx.globalAlpha = alpha * 0.65;
+    const wi = w * 0.78;
+    ctx.beginPath();
+    ctx.moveTo(cx - wi, base);
+    ctx.lineTo(cx - wi, spring);
+    ctx.arc(cx, spring, wi, Math.PI, 0);
+    ctx.lineTo(cx + wi, base);
+    ctx.stroke();
+    // Plinth & steps
+    ctx.globalAlpha = alpha;
+    line(ctx, cx - w * 1.18, base, cx + w * 1.18, base);
+    line(ctx, cx - w * 1.05, base - size * 0.08, cx + w * 1.05, base - size * 0.08);
+    // Perspective floor & star at apex
+    ctx.globalAlpha = alpha * 0.55;
+    for (let i = -2; i <= 2; i += 1) {
+      line(ctx, cx + i * wi * 0.18, cy + size * 0.32, cx + i * wi * 0.44, base - size * 0.08);
+    }
+    ctx.globalAlpha = alpha;
+    const sy = spring - size * 0.1;
+    line(ctx, cx - size * 0.14, sy, cx + size * 0.14, sy);
+    line(ctx, cx, sy - size * 0.14, cx, sy + size * 0.14);
+  },
+
+  rose(ctx, cx, cy, size, alpha) {
+    // Heraldic Tudor rose: double ring of five sculpted petals, sepals and stamen crown.
+    const ring = (count, r, petalR, rot) => {
+      for (let i = 0; i < count; i += 1) {
+        const a = (i / count) * TAU + rot;
+        ctx.save();
+        ctx.translate(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+        ctx.rotate(a);
+        ctx.beginPath();
+        ctx.arc(0, 0, petalR, -Math.PI * 0.58, Math.PI * 0.58);
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+    // Five outer pointed sepals
+    ctx.globalAlpha = alpha * 0.72;
+    for (let i = 0; i < 5; i += 1) {
+      const a = (i / 5) * TAU + Math.PI / 5 - Math.PI / 2;
+      leaf(ctx, cx + Math.cos(a) * size * 0.56, cy + Math.sin(a) * size * 0.56, size * 0.42, size * 0.1, a);
+    }
+    ctx.globalAlpha = alpha;
+    ring(5, size * 0.46, size * 0.36, -Math.PI / 2);
+    ring(5, size * 0.25, size * 0.22, Math.PI / 5 - Math.PI / 2);
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.15, 0, TAU);
+    ctx.stroke();
+    for (let i = 0; i < 8; i += 1) {
+      const a = (i / 8) * TAU;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * size * 0.08, cy + Math.sin(a) * size * 0.08, size * 0.022, 0, TAU);
+      ctx.fill();
+    }
   },
 
   // Back-cover registration rings, carried over from the original back boards.

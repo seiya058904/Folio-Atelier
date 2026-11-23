@@ -15,14 +15,16 @@ import {
   MOTIFS,
   PATTERNS,
   PRESETS,
+  PRESET_THEMES,
   SPINE_EMBLEMS,
   SPINE_STYLES,
-  getFoil
+  getFoil,
+  getPreset
 } from "../data/presets.js";
 import { t } from "../i18n.js";
 import { whenIdle } from "../motion.js";
 import { perf } from "../perf.js";
-import { addImage, getImage } from "../state/images.js";
+import { addImage, bookImageIds, getImage, getImageBlob } from "../state/images.js";
 import { parseManuscript } from "../state/manuscript.js";
 import {
   PAGE_TYPES,
@@ -36,6 +38,16 @@ import {
   isStarterPage
 } from "../state/schema.js";
 import { PAGE_INKS, PAGE_SIZE, paintPage } from "../textures/pages.js";
+import {
+  PHOTO_ANGLES,
+  PHOTO_ASPECTS,
+  PHOTO_BACKDROPS,
+  PHOTO_TEMPLATES,
+  canvasToPngBlob,
+  composePhotoCard,
+  copyCardToClipboard,
+  shareCardNative
+} from "../photo.js";
 import { buildPdf, encodeGif } from "../share.js";
 import { patternMask } from "../textures/patterns.js";
 import { PAPER_STOCKS, paintMaterialBase } from "../textures/surface.js";
@@ -68,8 +80,8 @@ const TABS = [
 ];
 
 const CLOTH_COLORS = [
-  "#182a43", "#1537a1", "#78a7bd", "#1f4033", "#5d6b3a", "#afc400", "#cdbf9f", "#b9ae98",
-  "#c24d24", "#c83222", "#da3b2f", "#5a1a1c", "#4a2046", "#3c4a45", "#17181b", "#efe8da"
+  "#182a43", "#1537a1", "#24344d", "#78a7bd", "#1f4033", "#4e6248", "#5d6b3a", "#afc400", "#cdbf9f", "#d6c8ad",
+  "#b9ae98", "#c24d24", "#c83222", "#9e201b", "#da3b2f", "#5a1a1c", "#4a2046", "#3c4a45", "#17181b", "#efe8da"
 ];
 const INK_COLORS = ["#f3ece0", "#1d1813", "#c6532f", "#b8892f", "#2f4a3c", "#1f3a6b", "#7a2a34"];
 const EDGE_COLORS = ["#d9b25f", "#c9ccd1", "#c6532f", "#1f3a6b", "#2f4a3c", "#17181b", "#e7a9b4"];
@@ -112,6 +124,9 @@ export function createStudioUi({ store, engine, audio }) {
   const undoButton = $("#undo");
   const redoButton = $("#redo");
   const closeButton = $("#close-detail");
+  const shareButton = $("#studio-share");
+  const shareMenu = $("#studio-share-menu");
+  const stageBar = $("#stage-bar");
   const manuscriptInput = $("#manuscript-file");
   const readerBar = $("#reader-bar");
   const previousPage = $("#previous-page");
@@ -124,6 +139,7 @@ export function createStudioUi({ store, engine, audio }) {
   let bookId = null;
   let tab = "design";
   let selectedPageId = null;
+  let studioPresetTheme = "all";
   const openLayers = new Set();
 
   // Each tab is built once and then shown or hidden. A pane is rebuilt only
@@ -177,6 +193,8 @@ export function createStudioUi({ store, engine, audio }) {
       button.tabIndex = selected ? 0 : -1;
     });
     body.setAttribute("aria-labelledby", `tab-${tab}`);
+    // Place indicator synchronously when tabs are already laid out (zero 1-frame lag).
+    placeTabIndicator();
     requestAnimationFrame(() => {
       placeTabIndicator();
       keepTabInView();
@@ -229,6 +247,7 @@ export function createStudioUi({ store, engine, audio }) {
   }, { passive: false });
 
   function setTab(next, { focusView = true } = {}) {
+    setShareMenu(false);
     if (next === tab && currentPane) {
       if (focusView) applyTabView();
       return;
@@ -341,7 +360,12 @@ export function createStudioUi({ store, engine, audio }) {
         copy.height = canvas.height;
         copy.getContext("2d").drawImage(canvas, 0, 0);
         thumbCache.set(key, copy);
-        if (thumbCache.size > THUMB_CACHE_LIMIT) thumbCache.delete(thumbCache.keys().next().value);
+        if (thumbCache.size > THUMB_CACHE_LIMIT) {
+          const oldest = thumbCache.keys().next().value;
+          const evicted = thumbCache.get(oldest);
+          if (evicted) { evicted.width = 0; evicted.height = 0; }
+          thumbCache.delete(oldest);
+        }
       }
       entry.shown = key;
       if (canvas.classList.contains("is-pending")) {
@@ -411,6 +435,13 @@ export function createStudioUi({ store, engine, audio }) {
       ctx.moveTo(30, 6); ctx.lineTo(48, 30); ctx.lineTo(30, 54); ctx.lineTo(12, 30); ctx.closePath();
     } else if (shape === "arch") {
       ctx.moveTo(13, 54); ctx.lineTo(13, 24); ctx.arc(30, 24, 17, Math.PI, 0); ctx.lineTo(47, 54); ctx.closePath();
+    } else if (shape === "shield") {
+      ctx.moveTo(13, 9); ctx.lineTo(47, 9); ctx.lineTo(47, 30);
+      ctx.bezierCurveTo(47, 44, 38, 50, 30, 54);
+      ctx.bezierCurveTo(22, 50, 13, 44, 13, 30); ctx.closePath();
+    } else if (shape === "octagon") {
+      ctx.moveTo(22, 8); ctx.lineTo(38, 8); ctx.lineTo(48, 18); ctx.lineTo(48, 42);
+      ctx.lineTo(38, 52); ctx.lineTo(22, 52); ctx.lineTo(12, 42); ctx.lineTo(12, 18); ctx.closePath();
     } else if (shape === "rounded") ctx.roundRect(13, 7, 34, 46, 9);
     else ctx.rect(13, 7, 34, 46);
     ctx.stroke();
@@ -518,7 +549,7 @@ export function createStudioUi({ store, engine, audio }) {
           onInput: (value) => edit(() => { motif().scale = value; }, [face], { key: `${face}-motif-scale` })
         }),
         slider({
-          label: "Across", value: motif().x, min: 0.1, max: 0.9, step: 0.005, format: percent,
+          label: "Across", value: motif().x, min: 0.1, max: 0.9, step: 0.005, detent: 0.5, format: percent,
           onInput: (value) => edit(() => { motif().x = value; }, [face], { key: `${face}-motif-x` })
         }),
         slider({
@@ -562,7 +593,7 @@ export function createStudioUi({ store, engine, audio }) {
     ];
   }
 
-  /** One collapsible lettering layer. */
+  /** One smoothly animated collapsible lettering layer. */
   function layerEditor(face, layerId) {
     const layer = () => book()[face].texts.find((candidate) => candidate.id === layerId);
     const current = layer();
@@ -572,9 +603,10 @@ export function createStudioUi({ store, engine, audio }) {
     const isSpine = face === "spine";
     const removable = layerId.startsWith("extra-");
     const font = getFont(current.font);
+    let isOpen = openLayers.has(layerId);
 
     const preview = h("span", { class: "layer__preview" });
-    const details = h("details", { class: "layer", open: openLayers.has(layerId) });
+    const details = h("div", { class: "layer", dataset: { open: String(isOpen) } });
     const refreshSummary = () => {
       const value = layerText(book(), layer());
       preview.textContent = value || t("Empty");
@@ -582,10 +614,6 @@ export function createStudioUi({ store, engine, audio }) {
       details.dataset.hidden = String(!layer().show);
     };
     refreshSummary();
-    details.addEventListener("toggle", () => {
-      if (details.open) openLayers.add(layerId);
-      else openLayers.delete(layerId);
-    });
 
     const customText = h("div");
     const paintCustom = () => {
@@ -622,11 +650,11 @@ export function createStudioUi({ store, engine, audio }) {
         }),
         row(
           slider({
-            label: "Across", value: current.x, min: 0.04, max: 0.96, step: 0.005, format: percent,
+            label: "Across", value: current.x, min: 0.04, max: 0.96, step: 0.005, detent: 0.5, format: percent,
             onInput: (value) => edit(() => { layer().x = value; }, dirty, { key: key("x") })
           }),
           slider({
-            label: "Down", value: current.y, min: 0.04, max: 0.96, step: 0.005, format: percent,
+            label: "Down", value: current.y, min: 0.04, max: 0.96, step: 0.005, detent: 0.5, format: percent,
             onInput: (value) => edit(() => { layer().y = value; }, dirty, { key: key("y") })
           }),
           slider({
@@ -636,12 +664,16 @@ export function createStudioUi({ store, engine, audio }) {
         )
       ];
 
-    details.append(
-      h("summary", { class: "layer__summary" },
-        h("span", { class: "layer__name", text: t(LAYER_NAMES[layerId] || "Line") }),
-        preview,
-        icon(ICONS.chevron, "layer__chevron")
-      ),
+    const summaryButton = h("button", {
+      type: "button",
+      class: "layer__summary",
+      "aria-expanded": String(isOpen)
+    },
+      h("span", { class: "layer__name", text: t(LAYER_NAMES[layerId] || "Line") }),
+      preview,
+      icon(ICONS.chevron, "layer__chevron")
+    );
+    const collapse = h("div", { class: "layer__collapse", inert: !isOpen },
       h("div", { class: "layer__body" },
         toggle({
           label: "Show on the cover", value: current.show,
@@ -677,7 +709,7 @@ export function createStudioUi({ store, engine, audio }) {
             onInput: (value) => edit(() => { layer().size = value; }, dirty, { key: key("size") })
           }),
           slider({
-            label: "Tracking", value: current.tracking, min: -0.04, max: 0.5, step: 0.005,
+            label: "Tracking", value: current.tracking, min: -0.04, max: 0.5, step: 0.005, detent: 0,
             format: (value) => `${Math.round(value * 1000)}`,
             onInput: (value) => edit(() => { layer().tracking = value; }, dirty, { key: key("tracking") })
           })
@@ -710,6 +742,17 @@ export function createStudioUi({ store, engine, audio }) {
         }) : null
       )
     );
+    summaryButton.addEventListener("click", () => {
+      isOpen = !isOpen;
+      if (isOpen) openLayers.add(layerId);
+      else openLayers.delete(layerId);
+      details.dataset.open = String(isOpen);
+      summaryButton.setAttribute("aria-expanded", String(isOpen));
+      collapse.inert = !isOpen;
+      audio.playCue("tap");
+    });
+
+    details.append(summaryButton, collapse);
     return details;
   }
 
@@ -757,14 +800,77 @@ export function createStudioUi({ store, engine, audio }) {
 
     const presetTiles = tiles({
       label: "Binding preset",
+      className: "tiles--presets",
       value: current.preset,
       options: PRESETS,
-      render: (option) => coverThumb(() => applyPreset(coverSample(), option.id)),
+      render: (option) => h("span", { class: "tile__frame" }, coverThumb(() => applyPreset(coverSample(), option.id))),
       onChange: (value) => {
         audio.playCue("select", { gain: 0.5 });
         edit(() => { applyPreset(book(), value); }, ["all"], { rerender: true });
       }
     });
+    presetTiles.querySelectorAll("[role='radio']").forEach((button) => {
+      const p = getPreset(button.dataset.value);
+      button.dataset.theme = p.theme || "gallery";
+      button.dataset.rounded = String(p.structure?.corners === "rounded");
+    });
+
+    const themeNote = h("p", { class: "preset-theme-note preset-theme-note--studio" });
+    const themeBar = h("div", {
+      class: "preset-themes preset-themes--studio",
+      role: "tablist",
+      "aria-label": t("Binding themes")
+    });
+    const applyStudioTheme = (themeId) => {
+      studioPresetTheme = themeId;
+      const entry = PRESET_THEMES.find((item) => item.id === themeId) || PRESET_THEMES[0];
+      const filtered = entry.id !== "all";
+      presetTiles.dataset.filtered = String(filtered);
+      themeNote.textContent = t(entry.subtitle);
+      themeBar.querySelectorAll("[role='tab']").forEach((btn) => {
+        const selected = btn.dataset.theme === entry.id;
+        btn.setAttribute("aria-selected", String(selected));
+        btn.tabIndex = selected ? 0 : -1;
+      });
+      presetTiles.querySelectorAll("[role='radio']").forEach((btn) => {
+        btn.hidden = filtered && btn.dataset.theme !== entry.id;
+      });
+      refreshThumbs();
+    };
+    themeBar.replaceChildren(...PRESET_THEMES.map((entry) => h("button", {
+      type: "button",
+      role: "tab",
+      class: "preset-theme-btn",
+      dataset: { theme: entry.id },
+      text: t(entry.label),
+      onclick: () => {
+        audio.playCue("tap");
+        applyStudioTheme(entry.id);
+      }
+    })));
+    applyStudioTheme(studioPresetTheme);
+
+    const activePreset = getPreset(current.preset);
+    const activeFoilColor = activePreset.foil && typeof activePreset.foil === "object"
+      ? (activePreset.foil.color || getFoil(activePreset.foil.preset).color)
+      : getFoil(activePreset.foil).color;
+    const activeFoilObj = typeof activePreset.foil === "object"
+      ? getFoil(activePreset.foil.preset)
+      : getFoil(activePreset.foil);
+    const activeFoilMetal = (activePreset.foil?.metalness ?? activeFoilObj.metalness) > 0.5;
+    const matDot = h("i", { class: "preset-swatch" });
+    matDot.style.setProperty("--swatch", activePreset.material.color);
+    const foilDot = h("i", { class: `preset-swatch${activeFoilMetal ? " preset-swatch--metal" : ""}` });
+    foilDot.style.setProperty("--swatch", activeFoilColor);
+    const presetSummary = h("div", { class: "preset-summary preset-summary--studio" },
+      h("div", { class: "preset-summary__line" },
+        h("span", { class: "preset-swatches", "aria-hidden": "true" }, matDot, foilDot),
+        h("p", { class: "microcopy", text: t(activePreset.note) })
+      ),
+      activePreset.tags?.length
+        ? h("div", { class: "preset-tags" }, ...activePreset.tags.map((tag) => h("span", { class: "preset-tag", text: t(tag) })))
+        : null
+    );
 
     const foilSwatches = FOILS.filter((foil) => foil.id !== "custom").map((foil) => ({
       color: foil.color, label: foil.label, value: foil.id, metal: foil.metalness > 0.5
@@ -797,7 +903,10 @@ export function createStudioUi({ store, engine, audio }) {
         row(sharedField("author", "Author", "Your name"), sharedField("series", "Series", "Optional"))
       ),
       group("Bindings", "A complete starting point: cloth, foil, layout and ornament. Your words and pages are kept.",
-        presetTiles
+        themeBar,
+        themeNote,
+        presetTiles,
+        presetSummary
       ),
       group("Material", null,
         materialTiles,
@@ -895,12 +1004,20 @@ export function createStudioUi({ store, engine, audio }) {
           onInput: (value) => edit(() => { book().foil.second = value; }, ["foil"], { key: "foil-second" })
         })
       ),
-      group("Share", "Keep a picture of the book, a turntable to send, or its pages to print.",
-        h("div", { class: "share-actions" },
-          h("button", { class: "pill-button", type: "button", text: t("Save a picture"), onclick: sharePicture }),
-          h("button", { class: "pill-button", type: "button", text: t("Turntable GIF"), onclick: shareTurntable }),
-          h("button", { class: "pill-button", type: "button", text: t("Pages as PDF"), onclick: sharePdf })
-        )
+      group("Stamping", "How deep the die presses foil and blind stamps into the boards. Print lies flat.",
+        segmented({
+          label: "Impression", value: current.stamp.relief,
+          options: [
+            { id: "deboss", label: "Debossed" },
+            { id: "flat", label: "Flat" },
+            { id: "emboss", label: "Embossed" }
+          ],
+          onChange: (value) => edit(() => { book().stamp.relief = value; }, ["foil"])
+        }),
+        slider({
+          label: "Depth", value: current.stamp.depth, min: 0, max: 1, step: 0.01, detent: 0.5, format: percent,
+          onInput: (value) => edit(() => { book().stamp.depth = value; }, ["foil"], { key: "stamp-depth" })
+        })
       ),
       group("Age", "A well-loved copy: corners and edges rubbed, colour faded by the sun, foil worn thin.",
         row(
@@ -913,21 +1030,6 @@ export function createStudioUi({ store, engine, audio }) {
             onInput: (value) => edit(() => { book().wear.fade = value; }, ["front", "spine", "back"], { key: "wear-fade" })
           })
         )
-      ),
-      group("Stamping", "How deep the die presses foil and blind stamps into the boards. Print lies flat.",
-        segmented({
-          label: "Impression", value: current.stamp.relief,
-          options: [
-            { id: "deboss", label: "Debossed" },
-            { id: "flat", label: "Flat" },
-            { id: "emboss", label: "Embossed" }
-          ],
-          onChange: (value) => edit(() => { book().stamp.relief = value; }, ["foil"])
-        }),
-        slider({
-          label: "Depth", value: current.stamp.depth, min: 0, max: 1, step: 0.01, format: percent,
-          onInput: (value) => edit(() => { book().stamp.depth = value; }, ["foil"], { key: "stamp-depth" })
-        })
       )
     ];
   }
@@ -1026,28 +1128,38 @@ export function createStudioUi({ store, engine, audio }) {
   function sealGroup() {
     const current = book().front.seal;
     const change = (mutate, key = null, rerender = false) => edit(() => mutate(book().front.seal), ["front"], { key, rerender });
-    return group("Wax seal", "A seal of wax pressed on the board, with a letter. It takes the first letter of the title unless you give it one.",
+    return group("Wax seal", "A seal of wax pressed on the board, stamped with a letter or crest.",
       toggle({
         label: "Wax seal", value: current.show,
         onChange: (value) => change((target) => { target.show = value; }, null, true)
       }),
       current.show ? row(
         textField({
-          label: "Letter", value: current.letter, placeholder: "From the title", maxLength: 1,
+          label: "Seal letter", value: current.letter, placeholder: "From the title", maxLength: 1,
           onInput: (value) => change((target) => { target.letter = value; }, "seal-letter")
         }),
-        colorField({
-          label: "Wax", value: current.color, swatches: ["#7a1c17", "#1f2a44", "#2f4a2f", "#1b1714", "#b48a3a"], custom: true,
-          onInput: (value) => change((target) => { target.color = value; }, "seal-color")
+        select({
+          label: "Crest", value: current.motif || "",
+          options: [{ id: "", label: "Letter only" }, ...MOTIFS.slice(1)],
+          preview: (option) => listThumb(motifThumb(option.id || "none")),
+          onChange: (value) => change((target) => { target.motif = value; })
         })
       ) : null,
+      current.show ? colorField({
+        label: "Wax", value: current.color, swatches: ["#7a1c17", "#1f2a44", "#2f4a2f", "#1b1714", "#b48a3a", "#5c2542"], custom: true,
+        onInput: (value) => change((target) => { target.color = value; }, "seal-color")
+      }) : null,
       current.show ? row(
         slider({
-          label: "Across", value: current.x, min: 0.15, max: 0.85, step: 0.01, format: percent,
+          label: "Scale", value: current.scale ?? 1, min: 0.7, max: 1.45, step: 0.01, detent: 1, format: percent,
+          onInput: (value) => change((target) => { target.scale = value; }, "seal-scale")
+        }),
+        slider({
+          label: "Across", value: current.x, min: 0.15, max: 0.85, step: 0.01, detent: 0.5, format: percent,
           onInput: (value) => change((target) => { target.x = value; }, "seal-x")
         }),
         slider({
-          label: "Down", value: current.y, min: 0.12, max: 0.88, step: 0.01, format: percent,
+          label: "Down", value: current.y, min: 0.12, max: 0.88, step: 0.01, detent: 0.5, format: percent,
           onInput: (value) => change((target) => { target.y = value; }, "seal-y")
         })
       ) : null
@@ -1064,14 +1176,16 @@ export function createStudioUi({ store, engine, audio }) {
     if (sharing) return;
     sharing = true;
     toast(t(message));
-    // Let the toast paint before the heavy work starts.
-    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 30)));
+    const stopBusy = shareButton ? busy(shareButton) : () => {};
     try {
+      // Let the toast and busy underline paint before heavy work starts.
+      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 30)));
       await work();
     } catch (error) {
       console.warn(error);
       toast(t("That did not work. Please try again."));
     } finally {
+      stopBusy();
       sharing = false;
     }
   }
@@ -1107,14 +1221,47 @@ export function createStudioUi({ store, engine, audio }) {
       const target = { canvas, context: canvas.getContext("2d"), commit() {} };
       const pages = [];
       for (let index = 0; index < flat.length; index += 1) {
+        if (flat.length > 1) {
+          toast(t("Printing page {n} of {total}…", { n: index + 1, total: flat.length }), 4000, { inplace: true });
+        }
         paintPage(current, flat[index], index, target, () => {});
         const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
         pages.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), width, height });
+        // Yield briefly between pages so the progress indicator and UI stay alive.
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
       if (!pages.length) throw new Error("no pages");
       downloadBlob(buildPdf(pages, { title: current.title }), fileName(".pdf"));
       toast(t("Saved {name}", { name: fileName(".pdf") }));
     });
+  }
+
+  function shareFolio() {
+    share("Exporting…", async () => {
+      const current = book();
+      if (!current) return;
+      const images = {};
+      for (const id of bookImageIds(current)) {
+        const blob = await getImageBlob(id).catch(() => null);
+        if (!blob) continue;
+        images[id] = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+      }
+      const payload = { format: "folio-atelier", version: 1, exportedAt: new Date().toISOString(), book: current, images };
+      const name = fileName(".folio");
+      downloadBlob(new Blob([JSON.stringify(payload)], { type: "application/json" }), name);
+      toast(t("Exported {name}.folio", { name: name.replace(/\.folio$/, "") }));
+    });
+  }
+
+  function setShareMenu(open) {
+    if (!shareMenu || !shareButton) return;
+    shareMenu.hidden = !open;
+    shareButton.setAttribute("aria-expanded", String(open));
   }
 
   /** A contrasting piece of leather on the front board. */
@@ -1137,7 +1284,8 @@ export function createStudioUi({ store, engine, audio }) {
           label: "Shape", value: current.shape,
           options: [
             { id: "rect", label: "Rectangle" }, { id: "rounded", label: "Rounded" }, { id: "oval", label: "Oval" },
-            { id: "diamond", label: "Diamond" }, { id: "arch", label: "Arch" }
+            { id: "diamond", label: "Diamond" }, { id: "arch", label: "Arch" },
+            { id: "shield", label: "Shield" }, { id: "octagon", label: "Octagon" }
           ],
           preview: (option) => shapeGlyph(option.id),
           onChange: (value) => change((target) => { target.shape = value; })
@@ -1148,6 +1296,10 @@ export function createStudioUi({ store, engine, audio }) {
           onChange: (value) => change((target) => { target.kind = value; })
         })
       ) : null,
+      current.show ? toggle({
+        label: "Gilded border", value: Boolean(current.border),
+        onChange: (value) => change((target) => { target.border = value; })
+      }) : null,
       current.show ? colorField({
         label: "Leather colour", value: current.color, swatches: CLOTH_COLORS,
         onInput: (value) => change((target) => { target.color = value; }, "onlay-color")
@@ -1181,7 +1333,7 @@ export function createStudioUi({ store, engine, audio }) {
           onChange: (value) => change((target) => { target.trim = value; })
         }),
         slider({
-          label: "Thickness", value: current.structure.bulk, min: 0.55, max: 1.6, step: 0.01, format: percent,
+          label: "Thickness", value: current.structure.bulk, min: 0.55, max: 1.6, step: 0.01, detent: 1, format: percent,
           onInput: (value) => change((target) => { target.bulk = value; }, "structure-bulk")
         }),
         segmented({
@@ -1190,7 +1342,7 @@ export function createStudioUi({ store, engine, audio }) {
           onChange: (value) => change((target) => { target.corners = value; })
         })
       ),
-      group("Closure", "An elastic band that holds the book shut. It slips off when you open the book.",
+      group("Closure", "An elastic band or metal clasp that holds the book shut. It slips off when you open the book.",
         toggle({
           label: "Elastic band", value: current.structure.band.show,
           onChange: (value) => change((target) => { target.band.show = value; }, null, true)
@@ -1203,6 +1355,11 @@ export function createStudioUi({ store, engine, audio }) {
           label: "Metal clasp", value: current.structure.clasp.show,
           onChange: (value) => change((target) => { target.clasp.show = value; }, null, true)
         }),
+        current.structure.clasp.show ? segmented({
+          label: "Clasp style", value: current.structure.clasp.style || "single",
+          options: [{ id: "single", label: "Single" }, { id: "twin", label: "Twin" }],
+          onChange: (value) => change((target) => { target.clasp.style = value; })
+        }) : null,
         current.structure.clasp.show ? segmented({
           label: "Clasp metal", value: current.structure.clasp.metal, options: CLASP_METALS,
           onChange: (value) => change((target) => { target.clasp.metal = value; })
@@ -1221,12 +1378,20 @@ export function createStudioUi({ store, engine, audio }) {
       group("Pocket and slipcase", "A paper pocket inside the front board, and a case that keeps the book on the shelf. The book slides out of it when you open it.",
         toggle({
           label: "Inside pocket", value: current.structure.pocket.show,
-          onChange: (value) => change((target) => { target.pocket.show = value; })
+          onChange: (value) => change((target) => { target.pocket.show = value; }, null, true)
         }),
+        current.structure.pocket.show ? toggle({
+          label: "Insert card", value: current.structure.pocket.card !== false,
+          onChange: (value) => change((target) => { target.pocket.card = value; })
+        }) : null,
         toggle({
           label: "Slipcase", value: current.structure.slipcase.show,
           onChange: (value) => change((target) => { target.slipcase.show = value; }, null, true)
         }),
+        current.structure.slipcase.show ? toggle({
+          label: "Slipcase label", value: current.structure.slipcase.label !== false,
+          onChange: (value) => change((target) => { target.slipcase.label = value; })
+        }) : null,
         current.structure.slipcase.show ? colorField({
           label: "Slipcase colour", value: current.structure.slipcase.color, swatches: CLOTH_COLORS,
           onInput: (value) => change((target) => { target.slipcase.color = value; }, "slipcase-color")
@@ -1255,8 +1420,17 @@ export function createStudioUi({ store, engine, audio }) {
       group("Title label", "A pasted label behind the title, as on a library binding.",
         toggle({
           label: "Show the label", value: Boolean(current.spine.label?.show),
-          onChange: (value) => edit(() => { spine().label.show = value; }, ["spine"])
+          onChange: (value) => edit(() => { spine().label.show = value; }, ["spine"], { rerender: true })
         }),
+        current.spine.label?.show ? segmented({
+          label: "Label shape", value: current.spine.label.shape || "rect",
+          options: [{ id: "rect", label: "Rectangle" }, { id: "bevel", label: "Bevelled" }, { id: "oval", label: "Oval" }],
+          onChange: (value) => edit(() => { spine().label.shape = value; }, ["spine"])
+        }) : null,
+        current.spine.label?.show ? toggle({
+          label: "Gilded frame", value: current.spine.label.framed !== false,
+          onChange: (value) => edit(() => { spine().label.framed = value; }, ["spine"])
+        }) : null,
         colorField({
           label: "Label colour", value: current.spine.label.color, swatches: LABEL_COLORS,
           onInput: (value) => edit(() => { spine().label.color = value; spine().label.show = true; }, ["spine"], { key: "spine-label" })
@@ -1269,6 +1443,8 @@ export function createStudioUi({ store, engine, audio }) {
   function backTab() {
     const current = book();
     const blurb = () => book().back.texts.find((layer) => layer.id === "back-blurb");
+    const badge = () => book().back.badge;
+    const badgeStyle = current.back.badge?.style || "none";
     return [
       blurb() ? group("Blurb", "A few lines for the back board.",
         textArea({
@@ -1276,8 +1452,52 @@ export function createStudioUi({ store, engine, audio }) {
           onInput: (value) => edit(() => { blurb().text = value; blurb().show = true; }, ["back"], { key: "back-blurb-text" })
         })
       ) : null,
+      group("Publisher mark", "Add a barcode plate, collector ex-libris stamp, or numbered edition mark to the back cover.",
+        segmented({
+          label: "Mark", value: badgeStyle,
+          options: [
+            { id: "none", label: "None" },
+            { id: "isbn", label: "ISBN" },
+            { id: "exlibris", label: "Ex-Libris" },
+            { id: "edition", label: "Edition" }
+          ],
+          onChange: (value) => edit(() => {
+            const target = badge();
+            target.style = value;
+            if (value === "exlibris" && /^978-/.test(target.code || "")) target.code = "EX LIBRIS";
+            else if (value === "edition" && (/^978-/.test(target.code || "") || target.code === "EX LIBRIS")) target.code = "NO. 001 / 500";
+            else if (value === "isbn" && !/^\d/.test(target.code || "")) target.code = "978-0-486-28473-6";
+          }, ["back"], { rerender: true })
+        }),
+        badgeStyle !== "none" ? row(
+          textField({
+            label: badgeStyle === "isbn" ? "ISBN number" : badgeStyle === "edition" ? "Edition number" : "Stamp line",
+            value: current.back.badge?.code || "",
+            placeholder: badgeStyle === "isbn" ? "978-0-486-28473-6" : badgeStyle === "edition" ? "NO. 001 / 500" : "EX LIBRIS",
+            maxLength: 32,
+            onInput: (value) => edit(() => { badge().code = value; }, ["back"], { key: "back-badge-code" })
+          }),
+          badgeStyle !== "exlibris" ? textField({
+            label: badgeStyle === "isbn" ? "Price" : "Subline",
+            value: current.back.badge?.price || "",
+            placeholder: badgeStyle === "isbn" ? "$24.00" : "FOLIO ATELIER EDITION",
+            maxLength: 32,
+            onInput: (value) => edit(() => { badge().price = value; }, ["back"], { key: "back-badge-price" })
+          }) : null
+        ) : null
+      ),
       group("Ornament", null, ...motifEditor("back", [{ id: "rings", label: "Registration rings" }])),
-      group("Border", null, ...borderEditor("back")),
+      group("Border", null,
+        h("button", {
+          class: "link-button", type: "button", text: t("Match front border"), style: { justifySelf: "start" },
+          onclick: () => edit(() => {
+            const front = book().front.border;
+            const style = ["panel", "slip"].includes(front.style) ? "double" : front.style;
+            book().back.border = { ...deepClone(front), style };
+          }, ["back"], { rerender: true })
+        }),
+        ...borderEditor("back")
+      ),
       current.back.texts.length ? letteringGroup("back", null) : null
     ];
   }
@@ -1287,11 +1507,13 @@ export function createStudioUi({ store, engine, audio }) {
     const details = () => book().details;
     const edgeColour = h("div");
     const paintEdge = () => {
-      edgeColour.replaceChildren(details().edge.style === "plain" ? "" : colorField({
-        label: ["gilt", "gauffered"].includes(details().edge.style) ? "Leaf" : details().edge.style === "sprinkled" ? "Sprinkle" : "Stain",
+      const style = details().edge.style;
+      const fixedEdge = ["plain", "foreedge", "gilt_crimson", "botanical"].includes(style);
+      edgeColour.replaceChildren(fixedEdge ? "" : colorField({
+        label: ["gilt", "gauffered"].includes(style) ? "Leaf" : style === "sprinkled" ? "Sprinkle" : "Stain",
         value: details().edge.color,
         swatches: EDGE_COLORS,
-        metal: ["gilt", "gauffered"].includes(details().edge.style),
+        metal: ["gilt", "gauffered"].includes(style),
         onInput: (value) => edit(() => { details().edge.color = value; }, ["details"], { key: "edge-color" })
       }));
     };
@@ -1322,13 +1544,22 @@ export function createStudioUi({ store, engine, audio }) {
       group("Stab stitching", "Thread sewn through the boards and wrapped round the spine, as on a thread-bound book.",
         toggle({
           label: "Sew the binding", value: Boolean(current.details.stitch.show),
-          onChange: (value) => edit(() => { details().stitch.show = value; }, boards)
+          onChange: (value) => edit(() => { details().stitch.show = value; }, boards, { rerender: true })
         }),
         row(
           segmented({
             label: "Holes", value: String(current.details.stitch.holes),
             options: [{ id: "4", label: "Four" }, { id: "6", label: "Six" }],
             onChange: (value) => edit(() => { details().stitch.holes = Number(value); }, boards)
+          }),
+          segmented({
+            label: "Stitch pattern", value: current.details.stitch.pattern || "standard",
+            options: [
+              { id: "standard", label: "Classic" },
+              { id: "asanoha", label: "Hemp leaf" },
+              { id: "kikko", label: "Tortoiseshell" }
+            ],
+            onChange: (value) => edit(() => { details().stitch.pattern = value; }, boards)
           })
         ),
         colorField({
@@ -1411,6 +1642,8 @@ export function createStudioUi({ store, engine, audio }) {
       case "plate": return first(page.caption) || t(page.image ? "Image" : "Ornament");
       case "colophon": return first(page.text) || t("Written for you");
       case "contents": return page.heading || t("Contents");
+      case "exlibris": return page.owner || current.author || t("Ex-Libris");
+      case "letter": return page.salutation || first(page.text) || t("Letter");
       case "notebook": return t("{count} pages", { count: Math.round(page.count || 1) });
       default: return "—";
     }
@@ -1517,11 +1750,45 @@ export function createStudioUi({ store, engine, audio }) {
         }),
         textField({ label: "Caption", value: page.caption, placeholder: "Optional", onInput: set("caption", { later: true }) })
       );
+    } else if (page.type === "exlibris") {
+      fields.push(
+        textField({ label: "Owner", value: page.owner || "", placeholder: book().author || "Your name", onInput: set("owner", { later: true }) }),
+        textField({ label: "Motto or note", value: page.note || "", placeholder: "Optional", onInput: set("note") }),
+        row(
+          textField({ label: "Edition number", value: page.edition || "", placeholder: "No. 01 / 50", onInput: set("edition") }),
+          select({
+            label: "Ornament", value: page.motif || "",
+            options: [{ id: "", label: "Same as the cover" }, ...MOTIFS.slice(1)],
+            preview: (option) => listThumb(motifThumb(option.id || book().front.motif.key)),
+            onChange: set("motif")
+          })
+        )
+      );
+    } else if (page.type === "letter") {
+      fields.push(
+        row(
+          textField({ label: "Date & place", value: page.date || "", placeholder: "Autumn, Studio Desk", onInput: set("date") }),
+          textField({ label: "Salutation", value: page.salutation || "", placeholder: "Dear Reader,", onInput: set("salutation", { later: true }) })
+        ),
+        textArea({
+          label: "Letter", value: page.text || "", tall: true,
+          placeholder: "Write your letter here…",
+          onInput: set("text", { later: true })
+        }),
+        textField({ label: "Sign-off", value: page.signoff || "", placeholder: "With warmth,", onInput: set("signoff") })
+      );
     } else if (page.type === "notebook") {
       fields.push(
-        segmented({
+        select({
           label: "Ruling", value: page.ruling || "lined",
-          options: [{ id: "lined", label: "Lined" }, { id: "dotted", label: "Dot grid" }, { id: "grid", label: "Squared" }],
+          options: [
+            { id: "lined", label: "Lined" },
+            { id: "dotted", label: "Dot grid" },
+            { id: "grid", label: "Squared" },
+            { id: "cornell", label: "Cornell notes" },
+            { id: "music", label: "Music staff" },
+            { id: "wusilan", label: "Wusilan columns" }
+          ],
           onChange: set("ruling")
         }),
         slider({
@@ -1751,7 +2018,12 @@ export function createStudioUi({ store, engine, audio }) {
         ),
         segmented({
           label: "Chapter openings", value: current.interior.chapterStyle || "classic",
-          options: [{ id: "classic", label: "Classic" }, { id: "centered", label: "Centred" }, { id: "numeral", label: "Numeral" }],
+          options: [
+            { id: "classic", label: "Classic" },
+            { id: "centered", label: "Centred" },
+            { id: "numeral", label: "Numeral" },
+            { id: "ornament", label: "Ornament" }
+          ],
           onChange: (value) => edit(() => { interior().chapterStyle = value; }, ["interior"])
         }),
         row(
@@ -1947,6 +2219,10 @@ export function createStudioUi({ store, engine, audio }) {
     nextPage.disabled = state.locked || state.spread >= state.spreads - 1;
     toggleBook.textContent = t(state.open ? "Close book" : "Open book");
     toggleBook.setAttribute("aria-pressed", String(state.open));
+    if (photoOpenBook) {
+      photoOpenBook.textContent = t(state.open ? "Close book" : "Open book");
+      photoOpenBook.setAttribute("aria-pressed", String(state.open));
+    }
     if (!state.open) {
       pageLabel.textContent = t("Closed");
       pageCounter.textContent = t("Click the book to open it");
@@ -1980,16 +2256,35 @@ export function createStudioUi({ store, engine, audio }) {
   /* Show / hide                                                        */
   /* ---------------------------------------------------------------- */
 
+  /** Single source of truth for panel, stage bar and reader bar inert states. */
+  function syncStudioChrome() {
+    const inDetail = Boolean(bookId);
+    const inPhoto = inDetail && engine.photoMode;
+    const inReading = inDetail && engine.readingMode && !inPhoto;
+    const panelActive = inDetail && !inPhoto && !inReading;
+    const stageActive = inDetail && !inPhoto && !inReading;
+    const readerActive = inDetail && !inPhoto;
+
+    panel.inert = !panelActive;
+    panel.setAttribute("aria-hidden", String(!panelActive));
+    if (stageBar) {
+      stageBar.inert = !stageActive;
+      stageBar.setAttribute("aria-hidden", String(!stageActive));
+    }
+    readerBar.inert = !readerActive;
+    readerBar.setAttribute("aria-hidden", String(!readerActive));
+  }
+
   function show(target) {
     bookId = target.id;
     tab = "design";
     selectedPageId = null;
     openLayers.clear();
-    panel.inert = false;
-    panel.setAttribute("aria-hidden", "false");
-    readerBar.inert = false;
-    readerBar.setAttribute("aria-hidden", "false");
+    setShareMenu(false);
+    syncStudioChrome();
     showSaved();
+    renderView(engine.view || "front");
+    renderRoom(engine.room);
     panes.forEach((pane) => {
       pane.stale = true;
       pane.scroll = 0;
@@ -1999,16 +2294,30 @@ export function createStudioUi({ store, engine, audio }) {
   }
 
   function hide() {
+    setShareMenu(false);
     // Move focus out before the panel is hidden from assistive technology.
-    if (panel.contains(document.activeElement) || readerBar.contains(document.activeElement)) {
+    if (panel.contains(document.activeElement) || readerBar.contains(document.activeElement) || stageBar?.contains(document.activeElement)) {
       document.activeElement.blur();
     }
-    panel.inert = true;
-    panel.setAttribute("aria-hidden", "true");
-    readerBar.inert = true;
-    readerBar.setAttribute("aria-hidden", "true");
     store.flush();
     bookId = null;
+    syncStudioChrome();
+  }
+
+  /** Keep the quick-angle stage bar synced with the 3D camera station. */
+  function renderView(view) {
+    if (!stageBar) return;
+    stageBar.querySelectorAll("[data-view]").forEach((btn) => {
+      btn.setAttribute("aria-pressed", String(btn.dataset.view === view));
+    });
+  }
+
+  /** Keep the quick lighting preview pills synced with the room lighting. */
+  function renderRoom(room) {
+    if (!stageBar || !room) return;
+    stageBar.querySelectorAll("[data-light]").forEach((btn) => {
+      btn.setAttribute("aria-pressed", String(btn.dataset.light === room.light));
+    });
   }
 
   /* ---------------------------------------------------------------- */
@@ -2096,9 +2405,484 @@ export function createStudioUi({ store, engine, audio }) {
     setSheet(sheetStop);
   });
 
+  // Subtle top scroll hairline shadow when studio panel body scrolls.
+  const updateBodyScroll = () => body.classList.toggle("is-scrolled", body.scrollTop > 4);
+  body.addEventListener("scroll", updateBodyScroll, { passive: true });
+
+  /* ----- Photo Studio (viewfinder + collector card darkroom) ----- */
+  const photoStudio = $("#photo-studio");
+  const photoViewfinder = $("#photo-viewfinder");
+  const photoFrame = $("#photo-frame");
+  const photoGrid = $("#photo-grid");
+  const photoFlash = $("#photo-flash");
+  const photoExit = $("#photo-exit");
+  const photoGridToggle = $("#photo-grid-toggle");
+  const photoOpenBook = $("#photo-open-book");
+  const photoAnglesBox = $("#photo-angles");
+  const photoAspectsBox = $("#photo-aspects");
+  const photoLightsBox = $("#photo-lights");
+  const photoBackdropsBox = $("#photo-backdrops");
+  const photoShutter = $("#photo-shutter");
+  const photoDarkroom = $("#photo-darkroom");
+  const photoDeveloping = $("#photo-developing");
+  const photoPreview = $("#photo-preview");
+  const photoDock = $("#photo-dock");
+  const photoTopBar = photoStudio?.querySelector(".photo-top") || null;
+  const photoDarkroomControls = $("#photo-darkroom-controls");
+  const photoDownload = $("#photo-download");
+  const photoCopy = $("#photo-copy");
+  const photoShare = $("#photo-share");
+  const photoRetake = $("#photo-retake");
+  const photoDarkroomClose = $("#photo-darkroom-close");
+
+  const photoState = {
+    angle: "photo_hero",
+    aspect: "4:5",
+    backdrop: "match",
+    grid: false,
+    template: "specimen",
+    showTitle: true,
+    showSpecs: true,
+    showSwatches: true,
+    showMark: true,
+    showDate: true,
+    caption: "",
+    rawCanvas: null,
+    darkroomOpen: false,
+    developing: false,
+    captureToken: 0
+  };
+
+  function currentAspectRatio() {
+    return (PHOTO_ASPECTS.find((a) => a.id === photoState.aspect) || PHOTO_ASPECTS[0]).ratio;
+  }
+
+  function layoutPhotoFrame() {
+    if (!photoFrame || !photoStudio || photoStudio.hidden) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const narrow = vw < 820;
+    const topRect = photoTopBar?.getBoundingClientRect();
+    const dockRect = photoDock?.getBoundingClientRect();
+    const safeTop = (topRect && topRect.height > 0 ? topRect.bottom : (narrow ? 66 : 74)) + (narrow ? 12 : 16);
+    const safeBottom = (dockRect && dockRect.height > 0 ? dockRect.top : vh - (narrow ? 190 : 158)) - (narrow ? 12 : 18);
+    const maxW = Math.max(160, vw - (narrow ? 28 : 96));
+    const maxH = Math.max(160, safeBottom - safeTop);
+    const ratio = currentAspectRatio();
+    let fw = maxW;
+    let fh = fw / ratio;
+    if (fh > maxH) {
+      fh = maxH;
+      fw = fh * ratio;
+    }
+    photoFrame.style.width = `${Math.round(fw)}px`;
+    photoFrame.style.height = `${Math.round(fh)}px`;
+    photoFrame.style.top = `${Math.round(safeTop + maxH * 0.5)}px`;
+  }
+
+  function renderPhotoDock() {
+    if (!photoAnglesBox) return;
+    photoAnglesBox.replaceChildren(...PHOTO_ANGLES.map((item) => h("button", {
+      type: "button",
+      role: "radio",
+      class: "photo-pill",
+      "aria-checked": String(photoState.angle === item.id),
+      text: t(item.label),
+      onclick: () => {
+        photoState.angle = item.id;
+        // An open spread is wide: switch portrait framing to 3:2 landscape so
+        // both pages stay comfortably inside the viewfinder.
+        if (item.id === "photo_spread" && currentAspectRatio() < 1) {
+          photoState.aspect = "3:2";
+        }
+        audio.playCue("tap");
+        engine.setPhotoAngle(item.id);
+        renderPhotoDock();
+        layoutPhotoFrame();
+      }
+    })));
+    photoAspectsBox.replaceChildren(...PHOTO_ASPECTS.map((item) => h("button", {
+      type: "button",
+      role: "radio",
+      class: "photo-pill photo-pill--compact",
+      "aria-checked": String(photoState.aspect === item.id),
+      text: item.label,
+      onclick: () => {
+        photoState.aspect = item.id;
+        audio.playCue("tap");
+        renderPhotoDock();
+        layoutPhotoFrame();
+      }
+    })));
+    const lights = [
+      { id: "studio", label: "Studio", svg: '<circle cx="8" cy="8" r="2.7"/><path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M4 4l1.1 1.1M10.9 10.9 12 12M12 4l-1.1 1.1M5.1 10.9 4 12"/>' },
+      { id: "morning", label: "Morning", svg: '<path d="M2.5 11.2h11M4.6 11.2a3.4 3.4 0 0 1 6.8 0M8 4.4v1.6M4.2 6.6l1.1 1.1M11.8 6.6l-1.1 1.1"/>' },
+      { id: "golden", label: "Golden hour", svg: '<path d="M2.5 11.5h11M4.2 11.5a3.8 3.8 0 0 1 7.6 0M2.8 13.5h10.4"/>' },
+      { id: "night", label: "Night", svg: '<path d="M12.2 9.9A4.8 4.8 0 0 1 6.1 3.8a4.8 4.8 0 1 0 6.1 6.1Z"/>' }
+    ];
+    const currentLight = engine.room?.light || "studio";
+    photoLightsBox.replaceChildren(...lights.map((item) => {
+      const glyph = icon([], "");
+      glyph.innerHTML = item.svg;
+      return h("button", {
+        type: "button",
+        role: "radio",
+        class: "stage-bar__light photo-light-btn",
+        title: t(item.label),
+        "aria-label": t(item.label),
+        "aria-checked": String(currentLight === item.id),
+        "aria-pressed": String(currentLight === item.id),
+        onclick: () => {
+          audio.playCue("tap");
+          engine.setRoom({ light: item.id });
+          try { localStorage.setItem("folio-atelier-room", JSON.stringify(engine.room)); } catch (e) { /* private */ }
+          renderPhotoDock();
+        }
+      }, glyph);
+    }));
+    photoBackdropsBox.replaceChildren(...PHOTO_BACKDROPS.map((item) => h("button", {
+      type: "button",
+      role: "radio",
+      class: "photo-backdrop-dot",
+      title: t(item.label),
+      "aria-label": t(item.label),
+      "aria-checked": String(photoState.backdrop === item.id),
+      style: { background: item.swatch },
+      onclick: () => {
+        photoState.backdrop = item.id;
+        audio.playCue("swatch");
+        engine.setPhotoBackdrop?.(item.id);
+        renderPhotoDock();
+      }
+    })));
+    photoGrid.hidden = !photoState.grid;
+    photoGridToggle.setAttribute("aria-pressed", String(photoState.grid));
+    const isOpen = engine.pageState.open;
+    photoOpenBook.textContent = t(isOpen ? "Close book" : "Open book");
+    photoOpenBook.setAttribute("aria-pressed", String(isOpen));
+  }
+
+  function renderDarkroomPreview() {
+    const current = book();
+    if (!photoState.rawCanvas || !current || !photoPreview) return;
+    composePhotoCard(photoState.rawCanvas, current, {
+      template: photoState.template,
+      showTitle: photoState.showTitle,
+      showSpecs: photoState.showSpecs,
+      showSwatches: photoState.showSwatches,
+      showMark: photoState.showMark,
+      showDate: photoState.showDate,
+      caption: photoState.caption,
+      light: engine.room?.light || "studio",
+      transparent: photoState.backdrop === "transparent",
+      pageCount: engine.pagination.length || current.pages.length,
+      scale: 0.65,
+      target: photoPreview
+    });
+    photoPreview.classList.toggle("is-transparent", photoState.template === "clean" && photoState.backdrop === "transparent");
+  }
+
+  function renderDarkroomControls() {
+    if (!photoDarkroomControls) return;
+    const isClean = photoState.template === "clean";
+    const infoToggles = [
+      !isClean ? toggle({
+        label: "Title & author", value: photoState.showTitle,
+        onChange: (value) => { photoState.showTitle = value; renderDarkroomPreview(); }
+      }) : null,
+      !isClean ? toggle({
+        label: "Craft specs", value: photoState.showSpecs,
+        onChange: (value) => { photoState.showSpecs = value; renderDarkroomPreview(); }
+      }) : null,
+      !isClean ? toggle({
+        label: "Palette swatches", value: photoState.showSwatches,
+        onChange: (value) => { photoState.showSwatches = value; renderDarkroomPreview(); }
+      }) : null,
+      toggle({
+        label: "Atelier mark", value: photoState.showMark,
+        onChange: (value) => { photoState.showMark = value; renderDarkroomPreview(); }
+      }),
+      toggle({
+        label: "Date & light", value: photoState.showDate,
+        onChange: (value) => { photoState.showDate = value; renderDarkroomPreview(); }
+      })
+    ].filter(Boolean);
+
+    photoDarkroomControls.replaceChildren(
+      h("div", { class: "photo-section" },
+        h("span", { class: "field__label", text: t("Card style") }),
+        h("div", { class: "photo-templates", role: "radiogroup", "aria-label": t("Card style") },
+          PHOTO_TEMPLATES.map((tpl) => h("button", {
+            type: "button",
+            role: "radio",
+            class: "photo-template-btn",
+            "aria-checked": String(photoState.template === tpl.id),
+            text: t(tpl.label),
+            onclick: () => {
+              photoState.template = tpl.id;
+              audio.playCue("tap");
+              renderDarkroomControls();
+              renderDarkroomPreview();
+            }
+          }))
+        )
+      ),
+      h("div", { class: "photo-section" },
+        h("span", { class: "field__label", text: t("Card details") }),
+        h("div", { class: "photo-toggles" }, infoToggles)
+      ),
+      !isClean ? h("div", { class: "photo-section" },
+        textField({
+          label: "Ex-Libris caption",
+          value: photoState.caption,
+          placeholder: "An optional note on the print…",
+          maxLength: 72,
+          onInput: (value) => {
+            photoState.caption = value;
+            renderDarkroomPreview();
+          }
+        })
+      ) : null
+    );
+    const canShare = Boolean(navigator.share && navigator.canShare);
+    if (photoShare) photoShare.hidden = !canShare;
+  }
+
+  function openDarkroom(rawCanvas) {
+    photoState.rawCanvas = rawCanvas;
+    photoState.darkroomOpen = true;
+    photoState.developing = false;
+    photoViewfinder.hidden = true;
+    photoDarkroom.hidden = false;
+    photoDarkroom.classList.remove("is-developing");
+    if (photoDeveloping) photoDeveloping.hidden = true;
+    renderDarkroomControls();
+    renderDarkroomPreview();
+    photoDownload?.focus({ preventScroll: true });
+  }
+
+  function closeDarkroom({ exitStudio = false } = {}) {
+    photoState.captureToken += 1;
+    photoState.developing = false;
+    photoState.darkroomOpen = false;
+    photoDarkroom.classList.remove("is-developing");
+    if (photoDeveloping) photoDeveloping.hidden = true;
+    photoDarkroom.hidden = true;
+    photoViewfinder.hidden = false;
+    if (photoState.rawCanvas) {
+      photoState.rawCanvas.width = 0;
+      photoState.rawCanvas.height = 0;
+      photoState.rawCanvas = null;
+    }
+    if (exitStudio) engine.setPhotoMode(false);
+    else if (engine.photoMode) layoutPhotoFrame();
+  }
+
+  function exportCardCanvas() {
+    const current = book();
+    if (!photoState.rawCanvas || !current) return null;
+    return composePhotoCard(photoState.rawCanvas, current, {
+      template: photoState.template,
+      showTitle: photoState.showTitle,
+      showSpecs: photoState.showSpecs,
+      showSwatches: photoState.showSwatches,
+      showMark: photoState.showMark,
+      showDate: photoState.showDate,
+      caption: photoState.caption,
+      light: engine.room?.light || "studio",
+      transparent: photoState.backdrop === "transparent",
+      pageCount: engine.pagination.length || current.pages.length,
+      scale: 1
+    });
+  }
+
+  function triggerPhotoCapture() {
+    if (!book() || !engine.photoMode || photoState.darkroomOpen || photoState.developing) return;
+    const token = (photoState.captureToken += 1);
+    photoState.developing = true;
+    audio.playCue("shutter");
+    if (photoFlash) {
+      photoFlash.classList.remove("is-flashing");
+      void photoFlash.offsetWidth;
+      photoFlash.classList.add("is-flashing");
+    }
+    const frameRect = photoFrame?.getBoundingClientRect();
+    const cropHeightRatio = frameRect && frameRect.height > 40 ? frameRect.height / window.innerHeight : 0.72;
+    // Open the darkroom immediately in a smooth "Developing print…" state so
+    // the shutter feels instantaneous and hides the WebGL supersampling cost.
+    photoState.darkroomOpen = true;
+    photoViewfinder.hidden = true;
+    photoDarkroom.hidden = false;
+    photoDarkroom.classList.add("is-developing");
+    if (photoDeveloping) photoDeveloping.hidden = false;
+    renderDarkroomControls();
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (token !== photoState.captureToken || !engine.photoMode || !photoState.darkroomOpen) return;
+        const captured = engine.captureStudioPhoto({
+          aspect: currentAspectRatio(),
+          maxEdge: 1440,
+          backdrop: photoState.backdrop,
+          cropHeightRatio
+        });
+        if (token !== photoState.captureToken || !engine.photoMode || !photoState.darkroomOpen) {
+          if (captured) { captured.width = 0; captured.height = 0; }
+          return;
+        }
+        if (!captured) {
+          closeDarkroom({ exitStudio: false });
+          toast(t("That did not work. Please try again."));
+          return;
+        }
+        openDarkroom(captured);
+      });
+    });
+  }
+
+  function renderPhotoMode(on) {
+    if (!photoStudio) return;
+    if (on) {
+      setShareMenu(false);
+      photoState.angle = "photo_hero";
+      photoState.backdrop = "match";
+      photoState.darkroomOpen = false;
+      photoState.developing = false;
+      photoState.captureToken += 1;
+      photoStudio.hidden = false;
+      photoViewfinder.hidden = false;
+      photoDarkroom.hidden = true;
+      photoDarkroom.classList.remove("is-developing");
+      if (photoDeveloping) photoDeveloping.hidden = true;
+      engine.setPhotoBackdrop?.("match");
+      renderPhotoDock();
+      layoutPhotoFrame();
+      requestAnimationFrame(layoutPhotoFrame);
+    } else {
+      closeDarkroom({ exitStudio: false });
+      photoStudio.hidden = true;
+      engine.setPhotoBackdrop?.("match");
+    }
+    syncStudioChrome();
+  }
+
+  $("#open-photo-studio")?.addEventListener("click", () => {
+    audio.playCue("tap");
+    engine.setPhotoMode(true);
+  });
+  $("#share-photo-studio")?.addEventListener("click", () => {
+    setShareMenu(false);
+    audio.playCue("tap");
+    engine.setPhotoMode(true);
+  });
+  photoExit?.addEventListener("click", () => {
+    audio.playCue("tap");
+    engine.setPhotoMode(false);
+  });
+  photoGridToggle?.addEventListener("click", () => {
+    photoState.grid = !photoState.grid;
+    audio.playCue("tap");
+    renderPhotoDock();
+  });
+  photoOpenBook?.addEventListener("click", () => {
+    engine.toggleReading();
+    setTimeout(renderPhotoDock, 40);
+  });
+  photoShutter?.addEventListener("click", triggerPhotoCapture);
+  photoRetake?.addEventListener("click", () => {
+    audio.playCue("tap");
+    closeDarkroom({ exitStudio: false });
+  });
+  photoDarkroomClose?.addEventListener("click", () => {
+    audio.playCue("tap");
+    closeDarkroom({ exitStudio: true });
+  });
+  photoDownload?.addEventListener("click", async () => {
+    const out = exportCardCanvas();
+    if (!out) return;
+    const blob = await canvasToPngBlob(out);
+    out.width = 0; out.height = 0;
+    if (!blob) return;
+    const suffix = photoState.template === "clean" ? ".png" : `-${photoState.template}.png`;
+    downloadBlob(blob, fileName(suffix));
+    toast(t("Saved {name}", { name: fileName(suffix) }));
+  });
+  photoCopy?.addEventListener("click", async () => {
+    const out = exportCardCanvas();
+    if (!out) return;
+    try {
+      const ok = await copyCardToClipboard(out);
+      toast(t(ok ? "Copied card to clipboard" : "Clipboard copy is unavailable here"));
+    } catch (error) {
+      toast(t("Clipboard copy is unavailable here"));
+    } finally {
+      out.width = 0; out.height = 0;
+    }
+  });
+  photoShare?.addEventListener("click", async () => {
+    const out = exportCardCanvas();
+    if (!out) return;
+    try {
+      const status = await shareCardNative(out, fileName(`-${photoState.template}.png`), book()?.title);
+      if (status === "unsupported") toast(t("Native share is unavailable here — use Save PNG"));
+    } finally {
+      out.width = 0; out.height = 0;
+    }
+  });
+  window.addEventListener("resize", () => {
+    if (engine.photoMode && !photoState.darkroomOpen) layoutPhotoFrame();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && photoState.darkroomOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeDarkroom({ exitStudio: false });
+    }
+  }, true);
+
   closeButton.addEventListener("click", () => engine.closeDetail());
   undoButton.addEventListener("click", () => store.step(bookId, -1));
   redoButton.addEventListener("click", () => store.step(bookId, 1));
+  shareButton?.addEventListener("click", () => {
+    audio.playCue("tap");
+    setShareMenu(shareMenu.hidden);
+  });
+  $("#share-picture")?.addEventListener("click", () => { setShareMenu(false); sharePicture(); });
+  $("#share-turntable")?.addEventListener("click", () => { setShareMenu(false); shareTurntable(); });
+  $("#share-pdf")?.addEventListener("click", () => { setShareMenu(false); sharePdf(); });
+  $("#share-folio")?.addEventListener("click", () => { setShareMenu(false); shareFolio(); });
+  document.addEventListener("pointerdown", (event) => {
+    if (shareMenu && !shareMenu.hidden && !shareMenu.contains(event.target) && !shareButton.contains(event.target)) {
+      setShareMenu(false);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && shareMenu && !shareMenu.hidden) {
+      event.preventDefault();
+      event.stopPropagation();
+      setShareMenu(false);
+      shareButton?.focus({ preventScroll: true });
+    }
+  }, true);
+
+  // Quick 3D camera angles & studio lighting switcher on the workshop stage.
+  stageBar?.addEventListener("click", (event) => {
+    const viewBtn = event.target.closest("[data-view]");
+    if (viewBtn) {
+      const view = viewBtn.dataset.view;
+      audio.playCue("tap");
+      if (engine.pageState.open && view !== "front") engine.setReadingOpen(false, false);
+      engine.focusView(view);
+      return;
+    }
+    const lightBtn = event.target.closest("[data-light]");
+    if (lightBtn) {
+      audio.playCue("tap");
+      engine.setRoom({ light: lightBtn.dataset.light });
+      try { localStorage.setItem("folio-atelier-room", JSON.stringify(engine.room)); } catch (e) { /* private */ }
+    }
+  });
+
   previousPage.addEventListener("click", () => engine.turnPage(-1));
   nextPage.addEventListener("click", () => engine.turnPage(1));
   toggleBook.addEventListener("click", () => engine.toggleReading());
@@ -2110,7 +2894,8 @@ export function createStudioUi({ store, engine, audio }) {
   function renderReading(on) {
     readingLabel.textContent = t(on ? "Leave reading" : "Read");
     readingButton.setAttribute("aria-pressed", String(on));
-    if (bookId) panel.inert = on;
+    syncStudioChrome();
+    if (on) setShareMenu(false);
     if (on && panel.contains(document.activeElement)) readingButton.focus({ preventScroll: true });
   }
   $("#reset-view").addEventListener("click", () => engine.resetView());
@@ -2180,7 +2965,24 @@ export function createStudioUi({ store, engine, audio }) {
     renderBody({ keepScroll: true });
     renderPageState(engine.pageState);
     renderReading(engine.readingMode);
+    if (engine.photoMode) {
+      renderPhotoDock();
+      if (photoState.darkroomOpen) {
+        renderDarkroomControls();
+        renderDarkroomPreview();
+      }
+    }
   }
 
-  return { show, hide, relocalize, renderPageState, renderReading, focus: () => closeButton.focus({ preventScroll: true }) };
+  return {
+    show,
+    hide,
+    relocalize,
+    renderPageState,
+    renderReading,
+    renderPhotoMode,
+    renderView,
+    renderRoom,
+    focus: () => closeButton.focus({ preventScroll: true })
+  };
 }

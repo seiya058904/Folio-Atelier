@@ -9,18 +9,21 @@ import { FOILS, MATERIALS } from "../data/presets.js";
 
 // The book's own colophon is printed in the book's language, not the interface's.
 const ZH_MATERIAL = {
-  cloth: "\u4e66\u5e03", buckram: "\u7c97\u5e06\u5e03", linen: "\u4e9a\u9ebb", silk: "\u4e1d\u7ef8", leather: "\u76ae\u9769",
-  suede: "\u9e82\u76ae", vellum: "\u7f8a\u76ae\u7eb8", paper: "\u7eb8\u9762", velvet: "\u4e1d\u7ed2"
+  cloth: "\u4e66\u5e03", buckram: "\u7c97\u5e06\u5e03", linen: "\u4e9a\u9ebb", canvas: "\u753b\u5e03", denim: "\u725b\u4ed4\u5e03",
+  silk: "\u4e1d\u7ef8", velvet: "\u4e1d\u7ed2", leather: "\u76ae\u9769", suede: "\u9e82\u76ae", snakeskin: "\u86c7\u7eb9\u76ae",
+  vellum: "\u7f8a\u76ae\u7eb8", paper: "\u7eb8\u9762", cork: "\u8f6f\u6728", wood: "\u6728\u7eb9", acrylic: "\u4e9a\u514b\u529b",
+  washi: "\u548c\u7eb8", lacquer: "\u5927\u6f06", tweed: "\u7c97\u82b1\u5462"
 };
 const ZH_FOIL = {
   gold: "\u91d1\u7b94", antique: "\u53e4\u91d1\u7b94", champagne: "\u9999\u69df\u91d1\u7b94", copper: "\u94dc\u7b94", bronze: "\u9752\u94dc\u7b94",
-  rose: "\u73ab\u7470\u91d1\u7b94", silver: "\u94f6\u7b94", aluminum: "\u94dd\u7b94", gunmetal: "\u67aa\u7070\u7b94", emerald: "\u7fe1\u7fe0\u7b94",
-  sapphire: "\u84dd\u5b9d\u77f3\u7b94", ruby: "\u7ea2\u5b9d\u77f3\u7b94", holo: "\u5e7b\u5f69\u7b94", pearl: "\u73cd\u73e0\u7b94", white: "\u767d\u8272\u989c\u6599", black: "\u4eae\u9ed1"
+  rose: "\u73ab\u7470\u91d1\u7b94", silver: "\u94f6\u7b94", aluminum: "\u94dd\u7b94", platinum: "\u94c2\u91d1\u7b94", gunmetal: "\u67aa\u7070\u7b94",
+  emerald: "\u7fe1\u7fe0\u7b94", verdigris: "\u94dc\u7eff\u7b94", sapphire: "\u84dd\u5b9d\u77f3\u7b94", ruby: "\u7ea2\u5b9d\u77f3\u7b94",
+  holo: "\u5e7b\u5f69\u7b94", aurora: "\u6781\u5149\u7b94", pearl: "\u73cd\u73e0\u7b94", white: "\u767d\u8272\u989c\u6599", black: "\u4eae\u9ed1"
 };
 import { hashSeed, mixHex, pad, rgba, seededRandom } from "../util.js";
 import { drawMotif, hasMotif } from "./motifs.js";
 import { paintContext } from "./gl.js";
-import { drawPaperSurface } from "./surface.js";
+import { PAPER_STOCKS, drawPaperSurface } from "./surface.js";
 import { breakText, drawLine, fitDisplayText, setTracking, tokenize } from "./text.js";
 
 export const PAGE_SIZE = { width: 512, height: 768 };
@@ -289,6 +292,19 @@ export function paginate(book) {
           lines
         });
       });
+    } else if (page.type === "letter") {
+      const hasSalutation = Boolean(page.salutation?.trim());
+      const firstTop = MARGIN.top + 68 + (hasSalutation ? 38 : 0);
+      const chunks = flow(page.text || "", firstTop, {});
+      (chunks.length ? chunks : [[]]).forEach((lines, index, arr) => {
+        flat.push({
+          type: "letter", source: page.id, running: page.date || "",
+          first: index === 0,
+          last: index === arr.length - 1,
+          page,
+          lines
+        });
+      });
     } else if (page.type === "notebook") {
       const count = Math.max(1, Math.min(48, Math.round(page.count || 1)));
       for (let index = 0; index < count; index += 1) flat.push({ type: "notebook", source: page.id, page });
@@ -310,7 +326,7 @@ export function paginate(book) {
 const TYPE_LABELS = {
   halftitle: "Half-title", title: "Title page", dedication: "Dedication", epigraph: "Epigraph",
   quote: "Quotation", plate: "Plate", colophon: "Colophon", blank: "Blank", contents: "Contents",
-  notebook: "Notebook"
+  notebook: "Notebook", exlibris: "Ex-Libris", letter: "Letter"
 };
 
 /** What the reader bar calls a page, in the interface language. */
@@ -329,7 +345,10 @@ export function pageFontRuns(book) {
   book.pages.forEach((page) => {
     if (page.title) head.push(page.title);
     if (page.heading) head.push(page.heading);
-    ["text", "caption", "attribution", "imprint"].forEach((field) => { if (page[field]) body.push(page[field]); });
+    if (page.owner) head.push(page.owner);
+    ["text", "caption", "attribution", "imprint", "note", "edition", "date", "salutation", "signoff"].forEach((field) => {
+      if (page[field]) body.push(page[field]);
+    });
   });
   const sample = (parts) => parts.filter(Boolean).join(" ").slice(0, 380) || "A";
   const bodyFace = getFont(book.interior.bodyFont);
@@ -341,7 +360,7 @@ export function pageFontRuns(book) {
     { font: book.interior.headingFont, weight: 400, italic: true, text: sample(head) },
     { font: "inter", weight: 500, text: sample([book.title, ...head]).toUpperCase() },
     book.interior.labels === "zh"
-      ? { font: "notosanssc", weight: 500, text: "\u7b2c\u7ae0\u90e8\u76ee\u5f55\u7248\u672c\u8bb0\u96f6\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341" }
+      ? { font: "notosanssc", weight: 500, text: "\u7b2c\u7ae0\u90e8\u76ee\u5f55\u7248\u672c\u8bb0\u85cf\u4e66\u7968\u96f6\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341" }
       : null
   ];
 }
@@ -352,13 +371,25 @@ export const PAGE_INKS = {
   black: { label: "Black", color: "#1b1612" },
   sepia: { label: "Sepia", color: "#4a2f1b" },
   blue: { label: "Blue-black", color: "#1b2440" },
-  green: { label: "Bottle green", color: "#1d3328" }
+  green: { label: "Bottle green", color: "#1d3328" },
+  burgundy: { label: "Oxblood", color: "#6b1d24" },
+  slate: { label: "Slate", color: "#3b434d" },
+  ivory: { label: "Warm ivory", color: "#e5d3a8" }
 };
 
 function inks(book) {
-  const text = (PAGE_INKS[book.interior.ink] || PAGE_INKS.black).color;
+  const darkPaper = Boolean(PAPER_STOCKS[book.interior.paper]?.dark);
+  const key = book.interior.ink || "black";
+  const raw = (PAGE_INKS[key] || PAGE_INKS.black).color;
+  if (darkPaper) {
+    // On dark obsidian art stock, lift inks to luminous parchment/metallic tones for luxury legibility.
+    const text = key === "ivory" ? "#efe2c4" : mixHex(raw, "#f2eadc", 0.84);
+    const accent = mixHex(book.foil?.color || "#d8b464", "#f3e7d1", 0.25);
+    return { text, soft: rgba(text, 0.7), accent, rule: rgba(accent, 0.45), darkPaper: true };
+  }
+  const text = key === "ivory" ? "#7a643d" : raw;
   const accent = mixHex(book.material.binding && book.material.binding !== "full" ? book.material.second : book.material.color, "#211b16", 0.5);
-  return { text, soft: rgba(text, 0.66), accent, rule: rgba(accent, 0.55) };
+  return { text, soft: rgba(text, 0.66), accent, rule: rgba(accent, 0.55), darkPaper: false };
 }
 
 function centered(ctx, text, y, maxWidth, { font, size, lineHeight = 1.25, maxLines = 6, minScale = 0.6, tracking = 0 }) {
@@ -438,7 +469,7 @@ function drawFurniture(ctx, book, entry, recto, ink) {
 const PAINT = {
   blank() {},
 
-  /** Writing paper: lines, a dot grid or squares in a pale rule colour. */
+  /** Writing paper: lines, dots, grid, Cornell notes, music staves, or traditional Wusilan columns. */
   notebook(ctx, book, entry, recto, ink) {
     const ruling = entry.page?.ruling || "lined";
     const left = recto ? MARGIN.inner : MARGIN.outer;
@@ -459,6 +490,67 @@ const PAINT = {
           ctx.fill();
         }
       }
+    } else if (ruling === "cornell") {
+      const headerY = top + 36;
+      const summaryY = bottom - 108;
+      const cueX = left + TEXT_WIDTH * 0.29;
+      ctx.fillRect(left, headerY, TEXT_WIDTH, 1.2);
+      ctx.fillRect(left, summaryY, TEXT_WIDTH, 1.2);
+      ctx.fillRect(cueX, headerY, 1.1, summaryY - headerY);
+      ctx.globalAlpha = 0.65;
+      for (let y = headerY + 24; y < summaryY - 6; y += 24) ctx.fillRect(cueX + 10, y, right - cueX - 10, 0.7);
+      for (let y = summaryY + 24; y <= bottom; y += 24) ctx.fillRect(left, y, TEXT_WIDTH, 0.7);
+    } else if (ruling === "music") {
+      const staves = 10;
+      const lineGap = 6.4;
+      const staffHeight = lineGap * 4;
+      const stride = (bottom - top - staffHeight) / (staves - 1);
+      ctx.lineWidth = 0.75;
+      for (let s = 0; s < staves; s += 1) {
+        const y0 = top + s * stride;
+        for (let l = 0; l < 5; l += 1) {
+          const y = y0 + l * lineGap;
+          ctx.beginPath();
+          ctx.moveTo(left, y);
+          ctx.lineTo(right, y);
+          ctx.stroke();
+        }
+        ctx.fillRect(left, y0, 1.2, staffHeight);
+        ctx.fillRect(right - 1.2, y0, 1.2, staffHeight);
+      }
+    } else if (ruling === "wusilan") {
+      // Traditional East Asian vertical woodblock frame (乌丝栏 / 朱丝栏) with double outer border & fishtail mark.
+      const padX = 8;
+      const x0 = left + padX;
+      const w = TEXT_WIDTH - padX * 2;
+      const y0 = top - 8;
+      const h = bottom - y0 + 8;
+      ctx.lineWidth = 2.2;
+      ctx.strokeRect(x0, y0, w, h);
+      ctx.lineWidth = 0.85;
+      ctx.strokeRect(x0 + 5, y0 + 5, w - 10, h - 10);
+      const cols = 10;
+      const colW = (w - 10) / cols;
+      ctx.globalAlpha = 0.72;
+      for (let c = 1; c < cols; c += 1) {
+        const x = x0 + 5 + c * colW;
+        ctx.beginPath();
+        ctx.moveTo(x, y0 + 5);
+        ctx.lineTo(x, y0 + h - 5);
+        ctx.stroke();
+      }
+      // Classic fishtail (鱼尾) bookmark ornament in the binding-side center column
+      ctx.globalAlpha = 0.85;
+      const tailX = recto ? x0 + 5 : x0 + w - 5 - colW;
+      const tailY = y0 + h * 0.27;
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(tailX + colW, tailY);
+      ctx.lineTo(tailX + colW, tailY + 11);
+      ctx.lineTo(tailX + colW * 0.5, tailY + 6);
+      ctx.lineTo(tailX, tailY + 11);
+      ctx.closePath();
+      ctx.fill();
     } else {
       ctx.globalAlpha = 0.7;
       ctx.lineWidth = 0.6;
@@ -568,13 +660,24 @@ const PAINT = {
   chapter(ctx, book, entry, recto, ink, metrics) {
     const left = recto ? MARGIN.inner : MARGIN.outer;
     const style = book.interior.chapterStyle || "classic";
-    const centre = style === "centered";
+    const centre = style === "centered" || style === "ornament";
     const anchor = centre ? left + TEXT_WIDTH / 2 : left;
     const words = printed(book);
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = ink.accent;
     ctx.textAlign = centre ? "center" : "left";
-    if (style === "numeral") {
+    if (style === "ornament") {
+      const motifKey = hasMotif(book.front?.motif?.key) ? book.front.motif.key : "fleur";
+      drawMotif(ctx, motifKey, { cx: anchor, cy: 132, size: 28, color: ink.accent, alpha: 0.88, lineWidth: 1.3, text: book.title });
+      ctx.fillStyle = ink.rule;
+      ctx.fillRect(anchor - 74, 132, 34, 0.9);
+      ctx.fillRect(anchor + 40, 132, 34, 0.9);
+      ctx.fillStyle = ink.accent;
+      ctx.font = SMALL(9.2);
+      setTracking(ctx, 0.26, 9.2);
+      ctx.fillText(words.chapter(entry.number), anchor + 9.2 * 0.13, 174);
+      ctx.letterSpacing = "0px";
+    } else if (style === "numeral") {
       ctx.font = headFont(book, 50, { weight: 400 });
       ctx.fillText(words.numeral(entry.number), left - 1, 184);
     } else {
@@ -731,6 +834,100 @@ const PAINT = {
     }
   },
 
+  exlibris(ctx, book, entry, recto, ink) {
+    const left = recto ? MARGIN.inner : MARGIN.outer;
+    const cx = left + TEXT_WIDTH / 2;
+    const words = printed(book);
+    const fx = left + 26;
+    const fy = 128;
+    const fw = TEXT_WIDTH - 52;
+    const fh = 508;
+    ctx.save();
+    ctx.strokeStyle = ink.accent;
+    ctx.lineWidth = 1.6;
+    ctx.strokeRect(fx, fy, fw, fh);
+    ctx.strokeStyle = ink.rule;
+    ctx.lineWidth = 0.85;
+    ctx.strokeRect(fx + 9, fy + 9, fw - 18, fh - 18);
+    // Corner diamond studs
+    ctx.fillStyle = ink.accent;
+    [[fx + 17, fy + 17], [fx + fw - 17, fy + 17], [fx + 17, fy + fh - 17], [fx + fw - 17, fy + fh - 17]].forEach(([dx, dy]) => {
+      ctx.beginPath();
+      ctx.moveTo(dx, dy - 3.5);
+      ctx.lineTo(dx + 3.5, dy);
+      ctx.lineTo(dx, dy + 3.5);
+      ctx.lineTo(dx - 3.5, dy);
+      ctx.closePath();
+      ctx.fill();
+    });
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = ink.accent;
+    ctx.font = SMALL(10);
+    setTracking(ctx, 0.34, 10);
+    ctx.textAlign = "center";
+    ctx.fillText(words.zh ? "\u85cf\u4e66\u7968 \u00b7 EX LIBRIS" : "EX LIBRIS", cx + 1.6, fy + 58);
+    ctx.letterSpacing = "0px";
+    ctx.fillStyle = ink.rule;
+    ctx.fillRect(cx - 46, fy + 72, 92, 0.9);
+    const motifKey = hasMotif(entry.page?.motif) ? entry.page.motif : hasMotif(book.front?.motif?.key) ? book.front.motif.key : "fleur";
+    drawMotif(ctx, motifKey, { cx, cy: fy + 206, size: 112, color: ink.accent, alpha: 0.92, lineWidth: 1.6, text: book.title });
+    ctx.fillStyle = ink.rule;
+    ctx.fillRect(cx - 56, fy + 332, 112, 0.9);
+    const owner = (entry.page?.owner || book.author || "Folio Atelier").trim();
+    ctx.fillStyle = ink.text;
+    const afterOwner = centered(ctx, owner, fy + 382, fw - 58, {
+      font: (size) => headFont(book, size), size: 28, maxLines: 2, lineHeight: 1.2, minScale: 0.6
+    });
+    if (entry.page?.note) {
+      ctx.fillStyle = ink.soft;
+      centered(ctx, entry.page.note, afterOwner + 6, fw - 66, {
+        font: (size) => bodyFont(book, size, { italic: true }), size: 13.5, maxLines: 3, lineHeight: 1.4
+      });
+    }
+    if (entry.page?.edition) {
+      ctx.fillStyle = ink.soft;
+      ctx.font = SMALL(9.2);
+      setTracking(ctx, 0.22, 9.2);
+      ctx.textAlign = "center";
+      ctx.fillText(entry.page.edition.toUpperCase(), cx + 1, fy + fh - 26);
+      ctx.letterSpacing = "0px";
+    }
+    ctx.restore();
+  },
+
+  letter(ctx, book, entry, recto, ink, metrics) {
+    const left = recto ? MARGIN.inner : MARGIN.outer;
+    const right = left + TEXT_WIDTH;
+    ctx.textBaseline = "alphabetic";
+    let top = MARGIN.top + 22;
+    if (entry.first) {
+      if (entry.page?.date) {
+        ctx.fillStyle = ink.soft;
+        ctx.font = bodyFont(book, 13.5, { italic: true });
+        ctx.textAlign = "right";
+        ctx.fillText(entry.page.date, right, MARGIN.top + 18);
+        ctx.fillStyle = ink.rule;
+        ctx.fillRect(right - 92, MARGIN.top + 28, 92, 0.7);
+      }
+      top = MARGIN.top + 68;
+      if (entry.page?.salutation) {
+        ctx.fillStyle = ink.text;
+        ctx.font = headFont(book, 20, { italic: true, weight: 400 });
+        ctx.textAlign = "left";
+        ctx.fillText(entry.page.salutation, left, top);
+        top += 38;
+      }
+    }
+    drawRunningText(ctx, book, entry, top, left, metrics, ink);
+    if (entry.last && entry.page?.signoff) {
+      const signY = Math.min(TEXT_BOTTOM - 8, top + entry.lines.length * metrics.lineHeight + 34);
+      ctx.fillStyle = ink.text;
+      ctx.font = headFont(book, 19, { italic: true, weight: 400 });
+      ctx.textAlign = "right";
+      ctx.fillText(entry.page.signoff, right, signY);
+    }
+  },
+
   colophon(ctx, book, entry, recto, ink) {
     const left = recto ? MARGIN.inner : MARGIN.outer;
     ctx.textBaseline = "alphabetic";
@@ -810,12 +1007,22 @@ export function paintPage(book, entry, index, target, onAsset) {
   ctx.letterSpacing = "0px";
   ctx.drawImage(paperSheet(book.interior.paper || "cream", index % 4, canvas.width, canvas.height), 0, 0, W, H);
 
-  // Gutter shadow: the sheet curls away into the binding.
-  const gutter = ctx.createLinearGradient(recto ? 0 : W, 0, recto ? 70 : W - 70, 0);
-  gutter.addColorStop(0, "rgba(40,30,20,0.2)");
-  gutter.addColorStop(0.4, "rgba(40,30,20,0.05)");
+  // Gutter shadow: the sheet curls gently into the bound spine valley.
+  const darkStock = Boolean(PAPER_STOCKS[book.interior.paper]?.dark);
+  const gutter = ctx.createLinearGradient(recto ? 0 : W, 0, recto ? 88 : W - 88, 0);
+  gutter.addColorStop(0, darkStock ? "rgba(0,0,0,0.52)" : "rgba(32,22,13,0.34)");
+  gutter.addColorStop(0.14, darkStock ? "rgba(0,0,0,0.28)" : "rgba(36,26,16,0.18)");
+  gutter.addColorStop(0.42, darkStock ? "rgba(0,0,0,0.1)" : "rgba(40,30,20,0.06)");
+  gutter.addColorStop(0.75, "rgba(40,30,20,0.015)");
   gutter.addColorStop(1, "rgba(40,30,20,0)");
   ctx.fillStyle = gutter;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle paper light roll-off near the outer edge for page tactility.
+  const outerShade = ctx.createLinearGradient(recto ? W : 0, 0, recto ? W - 26 : 26, 0);
+  outerShade.addColorStop(0, darkStock ? "rgba(255,248,232,0.04)" : "rgba(48,38,26,0.06)");
+  outerShade.addColorStop(1, darkStock ? "rgba(255,248,232,0)" : "rgba(48,38,26,0)");
+  ctx.fillStyle = outerShade;
   ctx.fillRect(0, 0, W, H);
 
   if (entry) {

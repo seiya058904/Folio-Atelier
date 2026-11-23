@@ -396,6 +396,135 @@ const DRAW = {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+  },
+
+  // Classical woven baroque damask ogee medallions
+  damask(ctx, w, h, u) {
+    const sx = u * 1.15;
+    const sy = u * 1.45;
+    for (let row = -1; row * sy < h + sy; row += 1) {
+      for (let col = -1; col * sx < w + sx; col += 1) {
+        const cx = col * sx + (row % 2 ? sx * 0.5 : 0);
+        const cy = row * sy;
+        // Ogee frame
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - sy * 0.46);
+        ctx.bezierCurveTo(cx + sx * 0.36, cy - sy * 0.2, cx + sx * 0.36, cy + sy * 0.2, cx, cy + sy * 0.46);
+        ctx.bezierCurveTo(cx - sx * 0.36, cy + sy * 0.2, cx - sx * 0.36, cy - sy * 0.2, cx, cy - sy * 0.46);
+        ctx.stroke();
+        // Central stylized palmette
+        ctx.beginPath();
+        ctx.arc(cx, cy, u * 0.12, 0, TAU);
+        ctx.stroke();
+        [-1, 1].forEach((s) => {
+          ctx.beginPath();
+          ctx.moveTo(cx, cy + sy * 0.24);
+          ctx.quadraticCurveTo(cx + s * sx * 0.24, cy + sy * 0.02, cx + s * sx * 0.14, cy - sy * 0.16);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(cx + s * sx * 0.18, cy - sy * 0.04, u * 0.045, 0, TAU);
+          ctx.fill();
+        });
+        ctx.beginPath();
+        ctx.arc(cx, cy - sy * 0.25, u * 0.05, 0, TAU);
+        ctx.fill();
+      }
+    }
+  },
+
+  // Antique celestial chart: ecliptic arcs, constellation segments and 4-point stars
+  celestial(ctx, w, h, u, random) {
+    const rStep = u * 1.85;
+    ctx.globalAlpha = 0.42;
+    for (let r = rStep * 0.6; r < Math.hypot(w, h) * 1.05; r += rStep) {
+      ctx.beginPath();
+      ctx.arc(w * 0.5, h * 0.46, r, 0, TAU);
+      ctx.stroke();
+    }
+    for (let a = 0; a < 12; a += 1) {
+      const ang = (a / 12) * TAU;
+      line(ctx, w * 0.5, h * 0.46, w * 0.5 + Math.cos(ang) * Math.hypot(w, h), h * 0.46 + Math.sin(ang) * Math.hypot(w, h));
+    }
+    ctx.globalAlpha = 0.9;
+    const pts = [];
+    const count = Math.round((w * h) / (u * u * 1.4));
+    for (let i = 0; i < count; i += 1) {
+      const x = random() * w;
+      const y = random() * h;
+      pts.push([x, y]);
+      if (i % 5 === 0) star(ctx, x, y, u * 0.11, u * 0.028);
+      else {
+        ctx.beginPath();
+        ctx.arc(x, y, u * (0.018 + random() * 0.022), 0, TAU);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 0.35;
+    for (let i = 0; i < pts.length; i += 1) {
+      for (let j = i + 1; j < pts.length; j += 1) {
+        const d = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]);
+        if (d > u * 0.4 && d < u * 1.15 && random() < 0.22) line(ctx, pts[i][0], pts[i][1], pts[j][0], pts[j][1]);
+      }
+    }
+    ctx.globalAlpha = 1;
+  },
+
+  // Flowing Art Nouveau botanical whiplash vines & lily buds
+  artnouveau(ctx, w, h, u) {
+    const sx = u * 1.1;
+    const sy = u * 1.5;
+    for (let col = -1; col * sx < w + sx; col += 1) {
+      const x0 = col * sx;
+      const dir = col % 2 ? 1 : -1;
+      ctx.beginPath();
+      for (let y = -sy; y < h + sy; y += sy) {
+        ctx.moveTo(x0, y);
+        ctx.bezierCurveTo(x0 + dir * sx * 0.55, y + sy * 0.3, x0 - dir * sx * 0.55, y + sy * 0.7, x0, y + sy);
+      }
+      ctx.stroke();
+      for (let y = 0; y < h + sy; y += sy) {
+        const bx = x0 + dir * sx * 0.28;
+        const by = y + sy * 0.42;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.quadraticCurveTo(bx + dir * sx * 0.26, by - sy * 0.16, bx + dir * sx * 0.14, by - sy * 0.26);
+        ctx.quadraticCurveTo(bx - dir * sx * 0.04, by - sy * 0.18, bx, by);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(bx + dir * sx * 0.12, by - sy * 0.22, u * 0.04, 0, TAU);
+        ctx.fill();
+      }
+    }
+  },
+
+  // Traditional East Asian ice-crackle window lattice (Bingliewen)
+  icecrack(ctx, w, h, u, random) {
+    const step = u * 0.92;
+    const cols = Math.ceil(w / step) + 2;
+    const rows = Math.ceil(h / step) + 2;
+    const pts = [];
+    for (let r = 0; r <= rows; r += 1) {
+      pts[r] = [];
+      for (let c = 0; c <= cols; c += 1) {
+        pts[r][c] = [
+          (c - 0.5) * step + (random() - 0.5) * step * 0.56,
+          (r - 0.5) * step + (random() - 0.5) * step * 0.56
+        ];
+      }
+    }
+    ctx.lineJoin = "bevel";
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        const a = pts[r][c];
+        const b = pts[r][c + 1];
+        const d = pts[r + 1][c];
+        const e = pts[r + 1][c + 1];
+        line(ctx, a[0], a[1], b[0], b[1]);
+        line(ctx, a[0], a[1], d[0], d[1]);
+        if ((r + c) % 2 === 0) line(ctx, a[0], a[1], e[0], e[1]);
+        else line(ctx, b[0], b[1], d[0], d[1]);
+      }
+    }
   }
 };
 

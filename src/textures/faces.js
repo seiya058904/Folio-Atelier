@@ -73,6 +73,25 @@ function traceOnlay(ctx, onlay, width, height, inset = 0) {
     ctx.arc(x + w / 2, y + radius, w / 2, Math.PI, 0);
     ctx.lineTo(x + w, y + h);
     ctx.closePath();
+  } else if (onlay.shape === "shield") {
+    const cx = x + w / 2;
+    ctx.moveTo(x, y);
+    ctx.quadraticCurveTo(cx, y - Math.min(w, h) * 0.04, x + w, y);
+    ctx.lineTo(x + w, y + h * 0.48);
+    ctx.bezierCurveTo(x + w, y + h * 0.78, cx + w * 0.22, y + h * 0.92, cx, y + h);
+    ctx.bezierCurveTo(cx - w * 0.22, y + h * 0.92, x, y + h * 0.78, x, y + h * 0.48);
+    ctx.closePath();
+  } else if (onlay.shape === "octagon") {
+    const cut = Math.min(w, h) * 0.24;
+    ctx.moveTo(x + cut, y);
+    ctx.lineTo(x + w - cut, y);
+    ctx.lineTo(x + w, y + cut);
+    ctx.lineTo(x + w, y + h - cut);
+    ctx.lineTo(x + w - cut, y + h);
+    ctx.lineTo(x + cut, y + h);
+    ctx.lineTo(x, y + h - cut);
+    ctx.lineTo(x, y + cut);
+    ctx.closePath();
   } else if (onlay.shape === "rounded") {
     ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.12);
   } else {
@@ -83,7 +102,8 @@ function traceOnlay(ctx, onlay, width, height, inset = 0) {
 /**
  * Onlay: a pared piece of leather laid on the board, standing a little proud
  * with a soft shadow. Inlay: the same piece set flush into a cut-out, seen by
- * the fine line where the two meet.
+ * the fine line where the two meet. Optional `border` tools a fine gilded
+ * fillet right inside the patch edge.
  */
 function drawOnlay(layers, book, onlay, width, height) {
   if (!onlay?.show) return;
@@ -109,6 +129,24 @@ function drawOnlay(layers, book, onlay, width, height) {
   ctx.strokeStyle = inlay ? "rgba(0,0,0,0.5)" : "rgba(255,255,255,0.16)";
   ctx.stroke();
   ctx.restore();
+  if (onlay.border) {
+    if (onlay.borderFinish === "ink" && onlay.borderColor) {
+      ctx.save();
+      traceOnlay(ctx, onlay, width, height, 6);
+      ctx.lineWidth = 2.1;
+      ctx.strokeStyle = onlay.borderColor;
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      const foil = layers.foil;
+      foil.save();
+      traceOnlay(foil, onlay, width, height, 6);
+      foil.lineWidth = 2.1;
+      foil.strokeStyle = leafInk({ leaf: onlay.borderLeaf });
+      foil.stroke();
+      foil.restore();
+    }
+  }
   if (layers.relief) {
     const relief = layers.relief;
     relief.save();
@@ -120,6 +158,12 @@ function drawOnlay(layers, book, onlay, width, height) {
     } else {
       relief.fillStyle = "#c4c4c4";
       relief.fill();
+    }
+    if (onlay.border) {
+      traceOnlay(relief, onlay, width, height, 6);
+      relief.lineWidth = 2.2;
+      relief.strokeStyle = layers.tone;
+      relief.stroke();
     }
     relief.restore();
   }
@@ -281,36 +325,72 @@ function paintBoard(layers, target, book, face, width, height) {
   }
 
   // Stab binding: thread through holes near the hinge, wrapped round the spine.
+  // Supports traditional four/six-hole ("standard"), hemp-leaf ("asanoha"), and tortoiseshell ("kikko").
   const stitch = book.details.stitch;
   if (stitch?.show) {
     const left = hinge === "left";
-    const x = left ? width * 0.062 : width * (1 - 0.062);
+    const dir = left ? 1 : -1;
+    const x = left ? width * 0.064 : width * (1 - 0.064);
     const edge = left ? 0 : width;
     const holes = stitchHoles(stitch.holes);
+    const pattern = stitch.pattern || "standard";
     ctx.save();
     ctx.lineCap = "round";
-    const thread = (x1, y1, x2, y2) => {
+    const thread = (x1, y1, x2, y2, w = 3.4) => {
       ctx.strokeStyle = "rgba(0,0,0,0.3)";
-      ctx.lineWidth = 4.6;
+      ctx.lineWidth = w + 1.2;
       ctx.beginPath();
       ctx.moveTo(x1 + 1, y1 + 1.4);
       ctx.lineTo(x2 + 1, y2 + 1.4);
       ctx.stroke();
       ctx.strokeStyle = stitch.color;
-      ctx.lineWidth = 3.4;
+      ctx.lineWidth = w;
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
     };
+    const holeDot = (hx, hy) => {
+      ctx.fillStyle = "rgba(0,0,0,0.52)";
+      ctx.beginPath();
+      ctx.arc(hx, hy, 2.3, 0, Math.PI * 2);
+      ctx.fill();
+    };
     thread(x, 0, x, height);
     holes.forEach((position) => thread(edge, position * height, x, position * height));
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    holes.forEach((position) => {
-      ctx.beginPath();
-      ctx.arc(x, position * height, 2.3, 0, Math.PI * 2);
-      ctx.fill();
-    });
+    if (pattern === "asanoha") {
+      // Hemp-leaf binding: intermediate spine edge holes connected diagonally to main stitch holes.
+      const xMid = x - dir * width * 0.032;
+      for (let i = 0; i < holes.length - 1; i += 1) {
+        const y0 = holes[i] * height;
+        const y1 = holes[i + 1] * height;
+        const ym = (y0 + y1) * 0.5;
+        thread(edge, ym, xMid, ym, 2.8);
+        thread(xMid, ym, x, y0, 2.7);
+        thread(xMid, ym, x, y1, 2.7);
+        holeDot(xMid, ym);
+      }
+      // Head & tail corner diagonals
+      thread(x, holes[0] * height, edge, 0, 2.7);
+      thread(x, holes[holes.length - 1] * height, edge, height, 2.7);
+    } else if (pattern === "kikko") {
+      // Tortoiseshell binding: crisp hexagonal cell stitches nested at each binding station.
+      const dx = dir * width * 0.028;
+      const dy = height * 0.022;
+      holes.forEach((position) => {
+        const y = position * height;
+        const innerX = x + dx;
+        const outerX = x - dx * 0.65;
+        thread(x, y - dy, innerX, y - dy * 0.52, 2.6);
+        thread(innerX, y - dy * 0.52, innerX, y + dy * 0.52, 2.6);
+        thread(innerX, y + dy * 0.52, x, y + dy, 2.6);
+        thread(x, y - dy, outerX, y, 2.5);
+        thread(x, y + dy, outerX, y, 2.5);
+        holeDot(innerX, y - dy * 0.52);
+        holeDot(innerX, y + dy * 0.52);
+      });
+    }
+    holes.forEach((position) => holeDot(x, position * height));
     ctx.restore();
   }
 }
@@ -332,7 +412,7 @@ function drawCorners(ctx, style, width, height, hinge) {
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x + dir * leg, y);
-    if (style === "scalloped") {
+    if (style === "scalloped" || style === "filigree") {
       ctx.quadraticCurveTo(x + dir * leg * 0.62, y + dy * leg * 0.3, x + dir * leg * 0.5, y + dy * leg * 0.5);
       ctx.quadraticCurveTo(x + dir * leg * 0.3, y + dy * leg * 0.62, x, y + dy * leg);
     } else {
@@ -341,7 +421,7 @@ function drawCorners(ctx, style, width, height, hinge) {
     ctx.closePath();
     ctx.fill();
     if (style !== "plain") {
-      // Engraving: lines and a rivet cut out of the leaf.
+      // Engraving: lines, filigree scroll, and a rivet cut out of the leaf.
       ctx.save();
       ctx.globalCompositeOperation = "destination-out";
       ctx.lineWidth = 1.6;
@@ -351,6 +431,14 @@ function drawCorners(ctx, style, width, height, hinge) {
         ctx.lineTo(x + dir * 5, y + dy * leg * t);
         ctx.stroke();
       });
+      if (style === "filigree") {
+        ctx.beginPath();
+        ctx.arc(x + dir * leg * 0.38, y + dy * leg * 0.19, leg * 0.09, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x + dir * leg * 0.19, y + dy * leg * 0.38, leg * 0.09, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       ctx.beginPath();
       ctx.arc(x + dir * leg * 0.2, y + dy * leg * 0.2, 4.2, 0, Math.PI * 2);
       ctx.fill();
@@ -1006,7 +1094,7 @@ function commitLayers(baseTarget, foilTarget, commit) {
   if (!commit || commit.foil) foilTarget.commit();
 }
 
-export function paintFront(book, baseTarget, foilTarget, onAsset, commit, reliefTarget = null) {
+export function paintFront(book, baseTarget, foilTarget, onAsset, commit, reliefTarget = null, options = {}) {
   const { width, height } = FACE_SIZE.front;
   const layers = {
     base: begin(baseTarget, FACE_SIZE.front),
@@ -1057,14 +1145,132 @@ export function paintFront(book, baseTarget, foilTarget, onAsset, commit, relief
   }
   drawMotifLayer(layers, book, front.motif, width, height);
   front.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
-  drawCorners(layers.foil, book.details.corners?.style, width, height, "left");
+  // 2D thumbnails draw painted corners; the 3D book mounts sculpted metal hardware.
+  if (!options.corners3d) drawCorners(layers.foil, book.details.corners?.style, width, height, "left");
   pressGroove(layers, book, "left", width, height);
   applyWear(layers, book, width, height, "front");
   commitLayers(baseTarget, foilTarget, commit);
   reliefTarget?.commit();
 }
 
-export function paintBack(book, baseTarget, foilTarget, onAsset, commit, reliefTarget = null) {
+/** Optional publisher / collector mark stamped on the back board. */
+function drawBackBadge(layers, book, width, height) {
+  const badge = book.back?.badge;
+  if (!badge || !badge.style || badge.style === "none") return;
+  const finishSpec = {
+    finish: book.back.border?.finish || "foil",
+    color: book.back.border?.color || "#efe7d8",
+    leaf: book.back.border?.leaf || "main"
+  };
+  if (badge.style === "isbn") {
+    // Classic cream ISBN barcode plate tucked cleanly in the lower-right corner (clear of back title & imprint).
+    const ctx = layers.base;
+    const plateW = width * 0.285;
+    const plateH = height * 0.118;
+    const px = width * 0.60;
+    const py = height * 0.735;
+    const code = (badge.code || "978-0-486-28473-6").trim();
+    const price = (badge.price || "").trim();
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.26)";
+    ctx.shadowBlur = 7;
+    ctx.shadowOffsetY = 2;
+    ctx.fillStyle = "#f4eee1";
+    ctx.fillRect(px, py, plateW, plateH);
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "rgba(28,23,18,0.22)";
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(px + 3, py + 3, plateW - 6, plateH - 6);
+    ctx.fillStyle = "#181512";
+    ctx.font = '600 9.5px "Inter", "Helvetica Neue", Arial, sans-serif';
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
+    ctx.fillText(`ISBN ${code}`, px + 11, py + 20);
+    if (price) {
+      ctx.textAlign = "right";
+      ctx.fillText(price, px + plateW - 11, py + 20);
+    }
+    // Deterministic EAN-13 style bar pattern
+    const rand = seededRandom(hashSeed(`isbn-${code}`));
+    const barLeft = px + 13;
+    const barRight = px + plateW - 13;
+    const barTop = py + 28;
+    const barHeight = plateH - 50;
+    let x = barLeft;
+    let barIndex = 0;
+    while (x < barRight - 3) {
+      const guard = barIndex < 2 || x > barRight - 10 || Math.abs(x - (barLeft + barRight) * 0.5) < 4;
+      const w = guard ? 2.1 : (1.4 + Math.floor(rand() * 3) * 1.3);
+      const gap = guard ? 2.1 : (1.5 + Math.floor(rand() * 2.6) * 1.3);
+      if (x + w <= barRight) {
+        ctx.fillRect(x, barTop, w, guard ? barHeight + 6 : barHeight);
+      }
+      x += w + gap;
+      barIndex += 1;
+    }
+    const digits = code.replace(/[^0-9]/g, "") || "9780486284736";
+    ctx.font = '500 10.2px "JetBrains Mono", "Inter", monospace';
+    ctx.textAlign = "center";
+    ctx.fillText(digits.split("").join(" "), px + plateW * 0.5, py + plateH - 9);
+    ctx.restore();
+  } else if (badge.style === "exlibris") {
+    const cx = width * 0.5;
+    const cy = height * 0.59;
+    const bw = width * 0.34;
+    const bh = height * 0.088;
+    withFinish(layers, finishSpec, (ctx, color) => {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 1.6;
+      ctx.strokeRect(cx - bw / 2, cy - bh / 2, bw, bh);
+      ctx.lineWidth = 0.85;
+      ctx.strokeRect(cx - bw / 2 + 7, cy - bh / 2 + 7, bw - 14, bh - 14);
+      const motifKey = hasMotif(book.front?.motif?.key) ? book.front.motif.key : "fleur";
+      drawMotif(ctx, motifKey, { cx, cy: cy - 11, size: 22, color, alpha: 1, lineWidth: 1.4, text: book.title });
+      ctx.font = '500 12px "Inter", "Noto Sans SC", sans-serif';
+      setTracking(ctx, 0.24, 12);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText((badge.code || "EX LIBRIS").toUpperCase().slice(0, 26), cx + 1.4, cy + 20);
+      ctx.letterSpacing = "0px";
+      ctx.restore();
+    });
+  } else if (badge.style === "edition") {
+    const cx = width * 0.5;
+    const cy = height * 0.59;
+    const bw = width * 0.38;
+    const bh = height * 0.072;
+    const line1 = (badge.code || "NO. 001 / 500").trim();
+    const line2 = (badge.price || "FOLIO ATELIER EDITION").trim();
+    withFinish(layers, finishSpec, (ctx, color) => {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx - bw / 2, cy - bh / 2);
+      ctx.lineTo(cx + bw / 2, cy - bh / 2);
+      ctx.moveTo(cx - bw / 2, cy + bh / 2);
+      ctx.lineTo(cx + bw / 2, cy + bh / 2);
+      ctx.stroke();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = '600 15px "Cormorant Garamond", "Noto Serif SC", serif';
+      setTracking(ctx, 0.16, 15);
+      ctx.fillText(line1.slice(0, 32), cx + 1, cy - (line2 ? 10 : 0));
+      if (line2) {
+        ctx.font = '500 10.5px "Inter", "Noto Sans SC", sans-serif';
+        setTracking(ctx, 0.22, 10.5);
+        ctx.fillText(line2.toUpperCase().slice(0, 36), cx + 1, cy + 14);
+      }
+      ctx.letterSpacing = "0px";
+      ctx.restore();
+    });
+  }
+}
+
+export function paintBack(book, baseTarget, foilTarget, onAsset, commit, reliefTarget = null, options = {}) {
   const { width, height } = FACE_SIZE.back;
   const layers = {
     base: begin(baseTarget, FACE_SIZE.back),
@@ -1082,7 +1288,8 @@ export function paintBack(book, baseTarget, foilTarget, onAsset, commit, reliefT
   }
   drawMotifLayer(layers, book, back.motif, width, height);
   back.texts.forEach((layer) => drawTextLayer(layers, book, layer, width, height));
-  drawCorners(layers.foil, book.details.corners?.style, width, height, "right");
+  drawBackBadge(layers, book, width, height);
+  if (!options.corners3d) drawCorners(layers.foil, book.details.corners?.style, width, height, "right");
   pressGroove(layers, book, "right", width, height);
   applyWear(layers, book, width, height, "back");
   commitLayers(baseTarget, foilTarget, commit);
@@ -1120,8 +1327,33 @@ function drawSpineText(layers, book, layer, width, height, room) {
   });
 }
 
-const BAND_POSITIONS = [0.135, 0.3, 0.7, 0.865];
-const BANDED = new Set(["bands", "panels", "compartments"]);
+export const BAND_POSITIONS_4 = [0.135, 0.3, 0.7, 0.865];
+export const BAND_POSITIONS_5 = [0.115, 0.27, 0.635, 0.77, 0.905];
+export const BANDED = new Set(["bands", "bands5", "panels", "compartments"]);
+
+export function spineBandPositions(style) {
+  return style === "bands5" ? BAND_POSITIONS_5 : BAND_POSITIONS_4;
+}
+
+function traceSpineLabel(ctx, shape, x, top, w, h) {
+  ctx.beginPath();
+  if (shape === "oval") {
+    ctx.ellipse(x + w / 2, top + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+  } else if (shape === "bevel") {
+    const cut = Math.min(w, h) * 0.16;
+    ctx.moveTo(x + cut, top);
+    ctx.lineTo(x + w - cut, top);
+    ctx.lineTo(x + w, top + cut);
+    ctx.lineTo(x + w, top + h - cut);
+    ctx.lineTo(x + w - cut, top + h);
+    ctx.lineTo(x + cut, top + h);
+    ctx.lineTo(x, top + h - cut);
+    ctx.lineTo(x, top + cut);
+    ctx.closePath();
+  } else {
+    ctx.rect(x, top, w, h);
+  }
+}
 
 export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, reliefTarget = null) {
   const { width, height } = FACE_SIZE.spine;
@@ -1145,7 +1377,8 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
   }
 
   const stitch = book.details.stitch;
-  if (stitch?.show) {
+  const isStab = Boolean(stitch?.show);
+  if (isStab) {
     const ctx = layers.base;
     ctx.save();
     stitchHoles(stitch.holes).forEach((position) => {
@@ -1154,39 +1387,73 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
       ctx.fillStyle = stitch.color;
       ctx.fillRect(0, position * height - 1.7, width, 3.4);
     });
+    if (stitch.pattern === "asanoha") {
+      const holes = stitchHoles(stitch.holes);
+      for (let i = 0; i < holes.length - 1; i += 1) {
+        const ym = ((holes[i] + holes[i + 1]) * 0.5) * height;
+        ctx.fillStyle = "rgba(0,0,0,0.24)";
+        ctx.fillRect(0, ym + 0.6, width, 3.8);
+        ctx.fillStyle = stitch.color;
+        ctx.fillRect(0, ym - 1.3, width, 2.8);
+      }
+    }
     ctx.restore();
   }
 
   // A pasted title label, as on a leather-backed library binding.
   const title = spine.texts.find((layer) => layer.id === "spine-title");
   const labelled = Boolean(spine.label?.show && title);
+  const labelShape = spine.label?.shape || "rect";
+  const labelFramed = spine.label?.framed !== false;
   const labelHalf = labelled ? (title.orient === "horizontal" ? 0.085 : 0.2) * height : 0;
+  const labelMinNorm = labelled ? title.y - labelHalf / height - 0.022 : -1;
+  const labelMaxNorm = labelled ? title.y + labelHalf / height + 0.022 : -1;
+  const bandPositions = spineBandPositions(spine.style);
+  const activeBands = !isStab && BANDED.has(spine.style)
+    ? bandPositions.filter((pos) => !(labelled && pos > labelMinNorm && pos < labelMaxNorm))
+    : [];
+
   if (labelled) {
     const ctx = layers.base;
     const top = title.y * height - labelHalf;
+    const lx = 22;
+    const lw = width - 44;
+    const lh = labelHalf * 2;
     ctx.save();
     ctx.shadowColor = "rgba(0,0,0,0.35)";
     ctx.shadowBlur = 6;
     ctx.shadowOffsetY = 2;
     ctx.fillStyle = spine.label.color;
-    ctx.fillRect(22, top, width - 44, labelHalf * 2);
+    traceSpineLabel(ctx, labelShape, lx, top, lw, lh);
+    ctx.fill();
     ctx.restore();
+    ctx.save();
+    traceSpineLabel(ctx, labelShape, lx, top, lw, lh);
+    ctx.clip();
     const shade = ctx.createLinearGradient(0, 0, width, 0);
     shade.addColorStop(0, "rgba(0,0,0,0.16)");
-    shade.addColorStop(0.3, "rgba(255,255,255,0.04)");
+    shade.addColorStop(0.3, "rgba(255,255,255,0.05)");
     shade.addColorStop(1, "rgba(0,0,0,0.14)");
     ctx.fillStyle = shade;
-    ctx.fillRect(22, top, width - 44, labelHalf * 2);
+    ctx.fillRect(lx, top, lw, lh);
+    ctx.restore();
   }
 
   withFinish(layers, spine, (ctx, color) => {
     ctx.save();
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    if (labelled) {
-      [-1, 1].forEach((side) => {
-        ctx.fillRect(30, title.y * height + side * (labelHalf - 9) - 1, width - 60, 2);
-      });
+    if (labelled && labelFramed) {
+      const top = title.y * height - labelHalf;
+      if (labelShape === "rect") {
+        [-1, 1].forEach((side) => {
+          ctx.fillRect(30, title.y * height + side * (labelHalf - 9) - 1, width - 60, 2);
+        });
+      } else {
+        ctx.lineWidth = 1.8;
+        traceSpineLabel(ctx, labelShape, 30, top + 8, width - 60, labelHalf * 2 - 16);
+        ctx.stroke();
+      }
     }
     if (spine.style === "frame" || spine.style === "double") {
       ctx.lineWidth = 2.4;
@@ -1199,8 +1466,25 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
       [44, 60, height - 60, height - 44].forEach((y, index) => {
         ctx.fillRect(26, y, width - 52, index === 0 || index === 3 ? 4 : 1.6);
       });
-    } else if (BANDED.has(spine.style)) {
-      BAND_POSITIONS.forEach((position) => {
+    } else if (spine.style === "artdeco") {
+      // Stepped Art Deco architectural head/tail chevrons & crisp double verticals.
+      ctx.lineWidth = 2;
+      ctx.strokeRect(28, 36, width - 56, height - 72);
+      ctx.lineWidth = 1.2;
+      [[36, 1], [height - 36, -1]].forEach(([baseY, dy]) => {
+        [0, 1, 2].forEach((tier) => {
+          const inset = 38 + tier * 20;
+          const y = baseY + dy * (16 + tier * 16);
+          ctx.beginPath();
+          ctx.moveTo(inset, y);
+          ctx.lineTo(width / 2, y + dy * 18);
+          ctx.lineTo(width - inset, y);
+          ctx.stroke();
+        });
+        ctx.fillRect(width / 2 - 4, baseY + dy * 72, 8, 8);
+      });
+    } else if (!isStab && BANDED.has(spine.style)) {
+      activeBands.forEach((position) => {
         const y = position * height;
         ctx.fillRect(18, y - 9, width - 36, 2);
         ctx.fillRect(18, y + 7, width - 36, 2);
@@ -1209,7 +1493,7 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
       if (spine.style === "compartments") {
         // Tooled compartments: a fillet round each one and a fleuron in
         // those that carry no lettering.
-        const stops = [36 / height, ...BAND_POSITIONS, 1 - 36 / height];
+        const stops = [36 / height, ...bandPositions, 1 - 36 / height];
         const lettered = spine.texts
           .filter((layer) => layer.show && layerText(book, layer).trim())
           .map((layer) => layer.y);
@@ -1218,10 +1502,10 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
           const top = stops[index] * height + 18;
           const bottom = stops[index + 1] * height - 18;
           if (bottom - top < 40) continue;
+          if (labelled && title.y > stops[index] && title.y < stops[index + 1]) continue;
           ctx.strokeRect(28, top, width - 56, bottom - top);
           ctx.strokeRect(36, top + 8, width - 72, bottom - top - 16);
-          const occupied = lettered.some((y) => y > stops[index] && y < stops[index + 1])
-            || (labelled && title.y > stops[index] && title.y < stops[index + 1]);
+          const occupied = lettered.some((y) => y > stops[index] && y < stops[index + 1]);
           if (occupied) continue;
           drawMotif(ctx, "fleur", {
             cx: width / 2, cy: (top + bottom) / 2, size: Math.min(34, (bottom - top) * 0.3),
@@ -1230,15 +1514,15 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
         }
       }
       if (spine.style === "panels") {
-        const stops = [36 / height, ...BAND_POSITIONS, 1 - 36 / height];
+        const stops = [36 / height, ...bandPositions, 1 - 36 / height];
         ctx.lineWidth = 1.2;
         for (let index = 0; index < stops.length - 1; index += 1) {
           const top = stops[index] * height + 22;
           const bottom = stops[index + 1] * height - 22;
-          if (labelled && index === 2) continue;
+          if (labelled && title.y > stops[index] && title.y < stops[index + 1]) continue;
           ctx.strokeRect(34, top, width - 68, bottom - top);
         }
-        const cy = ((BAND_POSITIONS[0] + BAND_POSITIONS[1]) / 2) * height;
+        const cy = ((bandPositions[0] + bandPositions[1]) / 2) * height;
         ctx.beginPath();
         ctx.moveTo(width / 2, cy - 30);
         ctx.lineTo(width / 2 + 20, cy);
@@ -1248,43 +1532,45 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
         ctx.fill();
       }
     }
+    const emblemY = height - 122;
     if (spine.emblem === "diamond") {
-      const y = height - 122;
       ctx.lineWidth = 2.2;
       ctx.beginPath();
-      ctx.moveTo(width / 2, y - 30);
-      ctx.lineTo(width / 2 + 21, y);
-      ctx.lineTo(width / 2, y + 30);
-      ctx.lineTo(width / 2 - 21, y);
+      ctx.moveTo(width / 2, emblemY - 30);
+      ctx.lineTo(width / 2 + 21, emblemY);
+      ctx.lineTo(width / 2, emblemY + 30);
+      ctx.lineTo(width / 2 - 21, emblemY);
       ctx.closePath();
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(width / 2, y, 4, 0, Math.PI * 2);
+      ctx.arc(width / 2, emblemY, 4, 0, Math.PI * 2);
       ctx.fill();
     } else if (spine.emblem === "star") {
-      const y = height - 122;
       ctx.beginPath();
       for (let index = 0; index < 16; index += 1) {
         const radius = index % 2 ? 7 : index % 4 === 0 ? 28 : 16;
         const angle = (index / 16) * Math.PI * 2 - Math.PI / 2;
         const px = width / 2 + Math.cos(angle) * radius;
-        const py = y + Math.sin(angle) * radius;
+        const py = emblemY + Math.sin(angle) * radius;
         if (index) ctx.lineTo(px, py);
         else ctx.moveTo(px, py);
       }
       ctx.closePath();
       ctx.fill();
-    }
-    if (spine.emblem === "ring") {
-      const y = height - 122;
+    } else if (spine.emblem === "ring") {
       ctx.lineWidth = 2.2;
       ctx.beginPath();
-      ctx.arc(width / 2, y, 24, 0, Math.PI * 2);
+      ctx.arc(width / 2, emblemY, 24, 0, Math.PI * 2);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(width / 2 - 24, y);
-      ctx.lineTo(width / 2 + 24, y);
+      ctx.moveTo(width / 2 - 24, emblemY);
+      ctx.lineTo(width / 2 + 24, emblemY);
       ctx.stroke();
+    } else if (spine.emblem === "fleur" || spine.emblem === "crown" || spine.emblem === "crescent" || spine.emblem === "seal") {
+      const key = spine.emblem === "crescent" ? "moon" : spine.emblem;
+      drawMotif(ctx, key, {
+        cx: width / 2, cy: emblemY - 4, size: 40, color, alpha: 1, lineWidth: 2, text: book.title
+      });
     }
     ctx.restore();
   });
@@ -1297,10 +1583,10 @@ export function paintSpine(book, baseTarget, foilTarget, onAsset, commit, relief
     });
   }
 
-  if (BANDED.has(spine.style)) {
+  if (activeBands.length) {
     // Raised bands: a soft shadow under each cord so the bump reads in the dye too.
     const ctx = layers.base;
-    BAND_POSITIONS.forEach((position) => {
+    activeBands.forEach((position) => {
       const y = position * height;
       const shade = ctx.createLinearGradient(0, y - 16, 0, y + 20);
       shade.addColorStop(0, "rgba(0,0,0,0)");
@@ -1370,10 +1656,10 @@ export function faceSignatures(book, face) {
     const spine = book.spine;
     const title = spine.texts.find((layer) => layer.id === "spine-title");
     const label = [spine.label, title?.y, title?.orient];
-    const motif = spine.emblem === "motif" ? [book.front.motif.key, book.title] : null;
+    const motif = spine.emblem === "motif" || spine.emblem === "seal" ? [book.front.motif.key, book.title] : null;
     parts.base.push(label, spine.style);
-    parts.foil.push(label);
-    parts.relief.push(label, BANDED.has(spine.style), spine.texts.map((layer) => [layer.show, layer.y]));
+    parts.foil.push(label, Boolean(details.stitch?.show));
+    parts.relief.push(label, spine.style, BANDED.has(spine.style), spine.texts.map((layer) => [layer.show, layer.y]));
     if (!twoTone && pattern?.spine && hasPattern(pattern.key)) split(pattern.finish, pattern, parts);
     split(spine.finish, [spine.style, spine.emblem, spine.color, spine.leaf, motif], parts);
     textParts(book, spine.texts, parts);
@@ -1384,8 +1670,12 @@ export function faceSignatures(book, face) {
       parts.base.push(side.image, side.image?.id ? Boolean(getImage(side.image.id)) : null);
       if (side.onlay?.show) {
         parts.base.push(side.onlay);
-        parts.relief.push([side.onlay.mode, side.onlay.shape, side.onlay.x, side.onlay.y, side.onlay.width, side.onlay.height]);
+        if (side.onlay.border) parts.foil.push([side.onlay.shape, side.onlay.x, side.onlay.y, side.onlay.width, side.onlay.height, side.onlay.border]);
+        parts.relief.push([side.onlay.mode, side.onlay.shape, side.onlay.x, side.onlay.y, side.onlay.width, side.onlay.height, side.onlay.border]);
       }
+    } else if (face === "back" && side.badge && side.badge.style !== "none") {
+      if (side.badge.style === "isbn") parts.base.push(side.badge);
+      else split(side.border?.finish || "foil", [side.badge, book.front?.motif?.key, book.title], parts);
     }
     // A pasted panel always prints its paper on the base, whatever its rule is.
     if (side.border.style === "panel" || side.border.style === "slip") parts.base.push(side.border);

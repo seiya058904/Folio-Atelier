@@ -8,6 +8,7 @@ import { perf } from "./perf.js";
 import { sweepImages } from "./state/images.js";
 import { onStorageEvent, requestPersistence } from "./state/storage.js";
 import { createStore } from "./state/store.js";
+import { bindControlAudio } from "./ui/controls.js";
 import { interrupt } from "./ui/dom.js";
 import { createLibraryUi } from "./ui/library.js";
 import { createStudioUi } from "./ui/studio.js";
@@ -82,6 +83,7 @@ async function start() {
   langToggle.addEventListener("click", () => setLang(getLang() === "zh" ? "en" : "zh"));
 
   const audio = createAudioSystem(AUDIO_SOURCES);
+  bindControlAudio(audio);
   const store = createStore();
 
   const lost = () => {
@@ -155,7 +157,10 @@ async function start() {
         }
       },
       onPageState: (state) => studio?.renderPageState(state),
-      onReadingMode: (on) => studio?.renderReading(on)
+      onReadingMode: (on) => studio?.renderReading(on),
+      onPhotoMode: (on) => studio?.renderPhotoMode(on),
+      onViewChange: (view) => studio?.renderView(view),
+      onRoomChange: (room) => studio?.renderRoom(room)
     }
   });
   if (!ready) return;

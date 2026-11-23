@@ -123,6 +123,51 @@ export function paintGrain(ctx, width, height, kind, thread, seed, spine, flip, 
       ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length);
       ctx.stroke();
     }
+  } else if (look.thread === "washi") {
+    // Handmade kozo/mulberry paper: long curved translucent strands + tiny bark flecks.
+    const count = Math.round(1800 * area);
+    for (let i = 0; i < count; i += 1) {
+      const x = random() * width;
+      const y = random() * height;
+      const angle = random() * Math.PI * 2;
+      const length = 16 + random() * 62;
+      const bend = (random() - 0.5) * 18;
+      const ex = x + Math.cos(angle) * length;
+      const ey = y + Math.sin(angle) * length;
+      ctx.strokeStyle = random() > 0.34
+        ? `rgba(255,250,238,${0.045 + random() * 0.075})`
+        : `rgba(92,72,48,${0.025 + random() * 0.045})`;
+      ctx.lineWidth = 0.5 + random() * 1.1;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo((x + ex) * 0.5 + bend, (y + ey) * 0.5 - bend, ex, ey);
+      ctx.stroke();
+    }
+    const flecks = Math.round(280 * area);
+    for (let i = 0; i < flecks; i += 1) {
+      ctx.fillStyle = `rgba(74,52,32,${0.06 + random() * 0.1})`;
+      ctx.fillRect(random() * width, random() * height, 1.2 + random() * 2.4, 0.8 + random() * 1.6);
+    }
+  } else if (look.thread === "tweed") {
+    // Heathered woollen twill: diagonal woven texture with speckled yarn flecks.
+    const count = Math.round(3200 * area);
+    for (let i = 0; i < count; i += 1) {
+      const x = random() * width;
+      const y = random() * height;
+      const len = 5 + random() * 16;
+      const dir = Math.floor(x / 18) % 2 ? 1 : -1;
+      const pick = random();
+      ctx.strokeStyle = pick > 0.62
+        ? `rgba(255,246,230,${0.04 + random() * 0.06})`
+        : pick > 0.25
+          ? `rgba(18,14,10,${0.04 + random() * 0.06})`
+          : `rgba(166,112,68,${0.04 + random() * 0.05})`;
+      ctx.lineWidth = 0.7 + random() * 1.1;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + len * 0.7, y + dir * len * 0.7);
+      ctx.stroke();
+    }
   }
 
   /*
@@ -133,7 +178,7 @@ export function paintGrain(ctx, width, height, kind, thread, seed, spine, flip, 
    * rasterising; the threads above are the only fine detail.
    */
   const scale = Math.abs(ctx.getTransform().a) || 1;
-  const mottled = !["woven", "slub", "silk", "twill", "speckle", "scales", "wood", "fibre"].includes(look.thread);
+  const mottled = !["woven", "slub", "silk", "twill", "speckle", "scales", "wood", "fibre", "washi", "tweed"].includes(look.thread);
   // Small boards (the shelf, drafts) with threads gain nothing from a sheet
   // of their own: there the gradients go straight on.
   const useSheet = mottled || width * height * scale * scale > GRAIN_CACHE_PIXELS;

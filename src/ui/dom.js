@@ -74,13 +74,16 @@ export function busy(element) {
 
 let toastTimer = 0;
 
-export function toast(message, duration = 2600) {
+export function toast(message, duration = 2600, { inplace = false } = {}) {
   const element = document.querySelector("#toast");
   if (!element) return;
-  element.hidden = true;
-  element.classList.remove("is-leaving");
-  // Restart the entry animation for back-to-back messages.
-  void element.offsetWidth;
+  const alreadyVisible = !element.hidden && !element.classList.contains("is-leaving");
+  if (!inplace || !alreadyVisible) {
+    element.hidden = true;
+    element.classList.remove("is-leaving");
+    // Restart the entry animation for back-to-back messages.
+    void element.offsetWidth;
+  }
   element.textContent = message;
   element.hidden = false;
   clearTimeout(toastTimer);

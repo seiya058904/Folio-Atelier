@@ -13,10 +13,24 @@ const TIERS = {
 
 const ORDER = ["high", "balanced", "lite"];
 const STORAGE_KEY = "folio-atelier-quality";
+const STORAGE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function readStored() {
   try {
-    return localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    if (TIERS[raw]) {
+      // Legacy permanent downgrade without timestamp: clear it so users on
+      // previously throttled/backgrounded sessions can recover cleanly.
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed && TIERS[parsed.tier] && typeof parsed.at === "number" && Date.now() - parsed.at < STORAGE_TTL_MS) {
+      return parsed.tier;
+    }
+    localStorage.removeItem(STORAGE_KEY);
+    return null;
   } catch (error) {
     return null;
   }
@@ -43,7 +57,7 @@ export function lowerQuality(current) {
   const next = ORDER[ORDER.indexOf(current.name) + 1];
   if (!next) return null;
   try {
-    localStorage.setItem(STORAGE_KEY, next);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tier: next, at: Date.now() }));
   } catch (error) {
     // Remembering the tier is optional.
   }

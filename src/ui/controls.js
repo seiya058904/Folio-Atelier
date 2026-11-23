@@ -7,6 +7,28 @@ import { h } from "./dom.js";
 
 let controlCount = 0;
 const nextId = (prefix) => `${prefix}-${(controlCount += 1)}`;
+let controlAudio = null;
+
+/** Connect the audio system for subtle micro-tactile control cues. */
+export function bindControlAudio(audio) {
+  controlAudio = audio || null;
+}
+
+// Single shared ResizeObserver for every segmented control (prevents observer
+// accumulation across studio tab rebuilds).
+const segCallbacks = new WeakMap();
+const segObserver = typeof ResizeObserver !== "undefined"
+  ? new ResizeObserver((entries) => {
+    for (let i = 0; i < entries.length; i += 1) {
+      const target = entries[i].target;
+      if (!target.isConnected) {
+        segObserver.unobserve(target);
+        continue;
+      }
+      segCallbacks.get(target)?.();
+    }
+  })
+  : null;
 
 export function group(title, hint, ...children) {
   return h("section", { class: "group" },
@@ -51,11 +73,11 @@ export function textArea({ label, value = "", placeholder = "", tall = false, on
   );
 }
 
-export function slider({ label, value, min, max, step = 0.01, format = (v) => v, onInput }) {
+export function slider({ label, value, min, max, step = 0.01, detent = null, format = (v) => v, onInput }) {
   const id = nextId("range");
   const labelId = `${id}-label`;
   const output = h("span", { class: "field__value", text: format(value) });
-  const control = createSlider({ id, labelledBy: labelId, value, min, max, step, format, onInput: (next) => {
+  const control = createSlider({ id, labelledBy: labelId, value, min, max, step, detent, format, onInput: (next) => {
     output.textContent = format(next);
     onInput(next);
   } });
@@ -72,13 +94,17 @@ export function slider({ label, value, min, max, step = 0.01, format = (v) => v,
  * The atelier's slider (no browser widget). Press anywhere on the track and
  * the thumb springs there; drag and it follows the finger; move the finger
  * away from the track while dragging and it slows for fine adjustment (a
- * half, then a quarter, as on a phone). The thumb grows and shows its value
- * while held. Arrow keys step, Shift steps ten, Home and End go to the ends.
- * `setValue(v)` on the element sets it as if dragged (used by the bench).
+ * half, then a quarter, as on a phone). Optional `detent` renders a subtle
+ * tick mark and snaps magnetically with a soft wooden tick when dragged near.
  */
-export function createSlider({ id, labelledBy, label = "", value, min, max, step = 0.01, format = (v) => v, onInput, className = "" }) {
-  const thumb = h("span", { class: "slider__thumb" }, h("span", { class: "slider__bubble", "aria-hidden": "true" }));
+export function createSlider({ id, labelledBy, label = "", value, min, max, step = 0.01, detent = null, format = (v) => v, onInput, className = "" }) {
+  const thumb = h("span", { class: "slider__thumb" });
+  const bubble = h("span", { class: "slider__bubble", "aria-hidden": "true" });
   const fill = h("span", { class: "slider__fill" });
+  const hasDetent = typeof detent === "number" && detent >= min && detent <= max && max > min;
+  const detentTick = hasDetent
+    ? h("span", { class: "slider__detent", "aria-hidden": "true", style: { "--detent": String((detent - min) / (max - min)) } })
+    : null;
   const root = h("div", {
     id,
     class: `slider ${className}`.trim(),
@@ -88,28 +114,36 @@ export function createSlider({ id, labelledBy, label = "", value, min, max, step
     "aria-valuemax": String(max),
     "aria-labelledby": labelledBy || null,
     "aria-label": labelledBy ? null : t(label)
-  }, h("span", { class: "slider__track" }, fill), thumb);
-  const bubble = thumb.firstChild;
+  }, h("span", { class: "slider__track" }, fill), detentTick, thumb, bubble);
   const decimals = Math.max(0, (String(step).split(".")[1] || "").length);
   const snap = (next) => {
     const stepped = Math.round((next - min) / step) * step + min;
     return Number(Math.min(max, Math.max(min, stepped)).toFixed(decimals));
   };
   let current = snap(Number(value));
+  const detentValue = hasDetent ? snap(detent) : null;
+  const detentBand = hasDetent ? (max - min) * 0.022 : 0;
 
   function show() {
     const ratio = max > min ? (current - min) / (max - min) : 0;
     root.style.setProperty("--ratio", String(ratio));
     root.setAttribute("aria-valuenow", String(current));
     root.setAttribute("aria-valuetext", String(format(current)));
+    if (hasDetent) root.classList.toggle("is-detent", Math.abs(current - detentValue) <= step * 0.5);
     bubble.textContent = format(current);
   }
 
-  function set(next) {
-    const snapped = snap(next);
+  function set(next, { magnetic = false } = {}) {
+    let target = next;
+    if (magnetic && hasDetent && Math.abs(next - detentValue) <= detentBand) {
+      target = detentValue;
+    }
+    const snapped = snap(target);
     if (snapped === current) return;
+    const hitDetent = magnetic && hasDetent && snapped === detentValue && current !== detentValue;
     current = snapped;
     show();
+    if (hitDetent) controlAudio?.playCue("detent");
     onInput(current);
   }
   show();
@@ -124,7 +158,7 @@ export function createSlider({ id, labelledBy, label = "", value, min, max, step
     // A press on the track: the thumb springs to it (the CSS eases --ratio).
     if (!onThumb) {
       root.classList.add("is-jumping");
-      set(min + ((event.clientX - box.left) / box.width) * (max - min));
+      set(min + ((event.clientX - box.left) / box.width) * (max - min), { magnetic: true });
       setTimeout(() => root.classList.remove("is-jumping"), 260);
     }
     root.classList.add("is-held");
@@ -138,7 +172,7 @@ export function createSlider({ id, labelledBy, label = "", value, min, max, step
       root.dataset.rate = String(rate);
       exact = Math.min(max, Math.max(min, exact + ((moveEvent.clientX - lastX) / box.width) * (max - min) * rate));
       lastX = moveEvent.clientX;
-      set(exact);
+      set(exact, { magnetic: true });
     };
     const end = () => {
       root.classList.remove("is-held");
@@ -178,6 +212,7 @@ export function createSlider({ id, labelledBy, label = "", value, min, max, step
 
 // One list is open at a time; opening another closes it.
 let openSelect = null;
+let activeSelectPress = null;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 /**
@@ -298,25 +333,24 @@ export function select({ label, value, options, onChange, preview = null, face =
   }
 
   // As in a system menu: press, drag to an option, let go to choose it.
-  // (Mouse only; a touch opens on tap and chooses on a second tap.)
-  let pressed = null;
+  // Uses a single shared document pointerup listener so rebuilt studio tabs never leak listeners.
   button.addEventListener("pointerdown", (event) => {
     if (event.pointerType !== "mouse" || event.button !== 0 || list) return;
-    pressed = { x: event.clientX, y: event.clientY, at: performance.now() };
+    activeSelectPress = {
+      x: event.clientX,
+      y: event.clientY,
+      at: performance.now(),
+      owner: button,
+      finish: (item) => {
+        if (list && item && list.contains(item)) choose(Number(item.dataset.index));
+      }
+    };
     button.dataset.pressOpened = "1";
     open();
   });
-  document.addEventListener("pointerup", (event) => {
-    if (!pressed || event.pointerType !== "mouse") return;
-    const press = pressed;
-    pressed = null;
-    const item = event.target.closest?.(".select__option");
-    const dragged = Math.hypot(event.clientX - press.x, event.clientY - press.y) > 6 || performance.now() - press.at > 320;
-    if (list && item && list.contains(item) && dragged) choose(Number(item.dataset.index));
-  });
   button.addEventListener("click", (event) => {
     // The press already opened the list.
-    if (event.detail && list && !pressed && openSelect?.owner === button && button.dataset.pressOpened === "1") {
+    if (event.detail && list && activeSelectPress?.owner !== button && openSelect?.owner === button && button.dataset.pressOpened === "1") {
       delete button.dataset.pressOpened;
       return;
     }
@@ -371,6 +405,16 @@ export function select({ label, value, options, onChange, preview = null, face =
   );
 }
 
+// Single module-level press-drag-release handler for all select comboboxes.
+document.addEventListener("pointerup", (event) => {
+  if (!activeSelectPress || event.pointerType !== "mouse") return;
+  const press = activeSelectPress;
+  activeSelectPress = null;
+  const item = event.target.closest?.(".select__option");
+  const dragged = Math.hypot(event.clientX - press.x, event.clientY - press.y) > 6 || performance.now() - press.at > 320;
+  if (item && dragged) press.finish(item);
+});
+
 // An open list follows nothing: a scroll elsewhere, a resize or a press
 // outside closes it.
 document.addEventListener("pointerdown", (event) => {
@@ -400,10 +444,11 @@ function radioGroup(container, buttons, value, onChange) {
   container.addEventListener("keydown", (event) => {
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
     if (!step) return;
-    const index = buttons.indexOf(document.activeElement);
+    const visible = buttons.filter((button) => !button.hidden);
+    const index = visible.indexOf(document.activeElement);
     if (index < 0) return;
     event.preventDefault();
-    const next = buttons[(index + step + buttons.length) % buttons.length];
+    const next = visible[(index + step + visible.length) % visible.length];
     next.focus();
     next.click();
   });
@@ -432,11 +477,12 @@ export function segmented({ label, value, options, onChange }) {
     }
   };
   radioGroup(container, buttons, value, (next) => {
-    requestAnimationFrame(place);
+    place();
+    controlAudio?.playCue("tap");
     onChange(next);
   });
-  // Measured once laid out (and again whenever its width changes).
-  new ResizeObserver(place).observe(container);
+  segCallbacks.set(container, place);
+  segObserver?.observe(container);
   return h("div", { class: "field" },
     label ? h("span", { class: "field__label", text: t(label) }) : null,
     container
@@ -444,31 +490,63 @@ export function segmented({ label, value, options, onChange }) {
 }
 
 export function toggle({ label, value, onChange }) {
-  const input = h("input", { type: "checkbox", role: "switch", checked: Boolean(value), onchange: (event) => onChange(event.target.checked) });
-  // The knob can be slid as well as tapped: a drag past a few pixels sets the
-  // switch to the side it was slid towards.
-  let slide = null;
+  const input = h("input", {
+    type: "checkbox",
+    role: "switch",
+    checked: Boolean(value),
+    onchange: (event) => {
+      controlAudio?.playCue("toggle", { on: event.target.checked });
+      onChange(event.target.checked);
+    }
+  });
+  // Real-time finger-following switch: horizontal drag moves the knob live
+  // along 0..14 px and snaps cleanly on release; simple taps toggle immediately.
+  const TRAVEL = 14;
+  let drag = null;
+  let swallowClick = false;
   input.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    slide = { x: event.clientX, to: null };
-    input.setPointerCapture(event.pointerId);
+    drag = { x: event.clientX, startOn: input.checked, pos: input.checked ? TRAVEL : 0, moved: false };
+    input.setPointerCapture?.(event.pointerId);
   });
   input.addEventListener("pointermove", (event) => {
-    if (!slide) return;
-    const dx = event.clientX - slide.x;
-    if (Math.abs(dx) > 5) slide.to = dx > 0;
+    if (!drag) return;
+    const dx = event.clientX - drag.x;
+    if (!drag.moved && Math.abs(dx) > 3) {
+      drag.moved = true;
+      input.classList.add("is-dragging");
+    }
+    if (!drag.moved) return;
+    const base = drag.startOn ? TRAVEL : 0;
+    drag.pos = Math.min(TRAVEL, Math.max(0, base + dx));
+    input.style.setProperty("--switch-x", `${drag.pos.toFixed(1)}px`);
+    input.classList.toggle("is-drag-on", drag.pos >= TRAVEL * 0.5);
   });
+  const finishDrag = (commit) => {
+    if (!drag) return;
+    const state = drag;
+    drag = null;
+    input.classList.remove("is-dragging", "is-drag-on");
+    input.style.removeProperty("--switch-x");
+    if (!state.moved) return;
+    swallowClick = true;
+    setTimeout(() => { swallowClick = false; }, 0);
+    if (!commit) return;
+    const want = state.pos >= TRAVEL * 0.5;
+    if (want !== input.checked) {
+      input.checked = want;
+      controlAudio?.playCue("toggle", { on: want });
+      onChange(want);
+    }
+  };
+  input.addEventListener("pointerup", () => finishDrag(true));
+  input.addEventListener("pointercancel", () => finishDrag(false));
   input.addEventListener("click", (event) => {
-    const to = slide?.to;
-    slide = null;
-    if (to === null || to === undefined) return;
-    // During the click the box already shows the toggled state. Slid towards
-    // the side it is already on: cancel (it stays). Otherwise the toggle is
-    // what was asked for.
-    if (!input.checked !== to) return;
-    event.preventDefault();
+    if (swallowClick) {
+      swallowClick = false;
+      event.preventDefault();
+    }
   });
-  input.addEventListener("pointercancel", () => { slide = null; });
   return h("label", { class: "toggle" },
     h("span", { class: "field__label", text: t(label) }),
     input
@@ -492,19 +570,24 @@ export function colorField({ label, value, swatches = [], metal = false, custom 
     style: { "--swatch": item.color }
   }));
   buttons.forEach((button, index) => button.style.setProperty("--swatch", items[index].color));
-  // The last swatch opens the atelier's own colour picker (no system dialog).
-  let customColour = /^#[0-9a-f]{6}$/i.test(value) ? value : "#888888";
+  // Sync initial custom colour with either the matched preset's hex or the raw hex value.
+  const matched = items.find((item) => String(item.value) === String(value));
+  let customColour = matched?.color || (/^#[0-9a-f]{6}$/i.test(value) ? value : "#888888");
+  const isCustomInitial = Boolean(!matched && /^#[0-9a-f]{6}$/i.test(value));
   const picker = custom ? h("button", {
     type: "button",
-    class: "swatch swatch--custom",
+    class: `swatch swatch--custom${isCustomInitial ? " is-custom-active" : ""}`,
     title: t("Custom colour"),
     "aria-label": `${t(label)}: ${t("Custom colour")}`,
     "aria-haspopup": "dialog",
     "aria-expanded": "false"
   }) : null;
   if (picker) {
+    if (isCustomInitial) picker.style.setProperty("--custom-color", customColour);
     picker.setColour = (next) => {
       customColour = next;
+      picker.classList.add("is-custom-active");
+      picker.style.setProperty("--custom-color", next);
       mark("");
       onInput(next, true);
     };
@@ -512,12 +595,20 @@ export function colorField({ label, value, swatches = [], metal = false, custom 
   picker?.addEventListener("click", () => {
     openColourPicker(picker, customColour, (next) => {
       customColour = next;
+      picker.classList.add("is-custom-active");
+      picker.style.setProperty("--custom-color", next);
       mark("");
       onInput(next, true);
     });
   });
   const container = h("div", { class: "swatches", role: "radiogroup", "aria-label": t(label) }, buttons, picker);
-  const mark = radioGroup(container, buttons, value, (next) => onInput(next, false));
+  const mark = radioGroup(container, buttons, value, (next) => {
+    const picked = items.find((item) => String(item.value) === String(next));
+    if (picked?.color) customColour = picked.color;
+    picker?.classList.remove("is-custom-active");
+    controlAudio?.playCue("swatch");
+    onInput(next, false);
+  });
   return h("div", { class: "field" },
     h("span", { class: "field__label", text: t(label) }),
     container
