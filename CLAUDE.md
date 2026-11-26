@@ -3,9 +3,9 @@
 Interactive 3D bookbinding studio (`README.md` has full overview; `docs/ROADMAP.md` & `docs/roadmap-round-1.md`–`4.md` hold active roadmap).
 
 ## Hard Constraints
-- No build step, no npm dependencies, Three.js `0.165` pinned in `index.html`; get approval before upgrading or adding dependencies.
+- No build step, no npm dependencies, Three.js `0.165` pinned in `index.html`.
 - Bilingual EN/ZH: English source with `ZH` table in `src/i18n.js`; book content supports CJK.
-- **Licensing & release gate**: original repo license applies (`README.md` credits); strictly no brand cover artwork or product names; explicit approval required before pushing or deploying.
+- **Licensing**: original repo license applies (`README.md` credits); strictly no brand cover artwork or product names.
 - Match or beat current visual/motion quality when touching rig, lighting, or page motion. Optimize real cost first (masking must not add GPU/CPU cost); respect `prefers-reduced-motion`.
 
 ## Run & Smoke Check
