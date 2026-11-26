@@ -1,5 +1,4 @@
-// Performance instrumentation. Collection is a handful of counters and is
-// always on; the overlay only exists when the page is opened with `?perf`.
+// Performance instrumentation enabled by `?perf` or `?bench`.
 //
 //   ?perf        overlay: frame rate, repaint cost per painter, uploads
 //   ?perf=gpu    as above, and wait for the GPU each frame so the frame time
@@ -39,8 +38,9 @@ export const perf = {
 
   /** One rendered frame: `delta` since the previous one, `work` spent in it. */
   frame(delta, work, note) {
+    if (!enabled) return;
     const at = now();
-    if (enabled && note) {
+    if (note) {
       trace.push([Math.round(at), Math.round(delta * 10) / 10, Math.round(work * 10) / 10, note]);
       if (trace.length > 600) trace.splice(0, 200);
     }
@@ -49,10 +49,8 @@ export const perf = {
     frameCursor = (frameCursor + 1) % FRAME_WINDOW;
     frameCount += 1;
     lastFrameAt = at;
-    if (enabled) {
-      frameTimes.push(at);
-      if (frameTimes.length > 240) frameTimes = frameTimes.slice(-120);
-    }
+    frameTimes.push(at);
+    if (frameTimes.length > 240) frameTimes = frameTimes.slice(-120);
     if (editAt) {
       latency.push(at - editAt);
       if (latency.length > 40) latency.shift();
@@ -62,6 +60,7 @@ export const perf = {
 
   /** Time a painter; returns whatever `run` returns. */
   paint(name, run) {
+    if (!enabled) return run();
     const started = now();
     const result = run();
     const spent = now() - started;
@@ -75,17 +74,18 @@ export const perf = {
 
   /** A canvas was handed to the GPU. */
   upload(pixels) {
+    if (!enabled) return;
     uploads += 1;
     uploadPixels += pixels;
   },
 
   /** An edit arrived; the next rendered frame closes the measurement. */
-  edit(at = now()) {
-    if (!editAt) editAt = at;
+  edit(at) {
+    if (enabled && !editAt) editAt = at ?? now();
   },
 
   mark(name, ms) {
-    marks.set(name, ms);
+    if (enabled) marks.set(name, ms);
   },
 
   trace,
@@ -98,9 +98,13 @@ export const perf = {
     paints.clear();
     uploads = 0;
     uploadPixels = 0;
+    editAt = 0;
     latency.length = 0;
+    frameCursor = 0;
     frameCount = 0;
     frameTimes = [];
+    marks.clear();
+    trace.length = 0;
   },
 
   snapshot() {

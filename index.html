@@ -22,8 +22,6 @@
     rel="stylesheet"
   >
   <link rel="stylesheet" href="./styles/app.css">
-  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js">
-  <link rel="modulepreload" href="./src/engine.js">
   <script type="importmap">
     {
       "imports": {
@@ -32,6 +30,8 @@
       }
     }
   </script>
+  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js">
+  <link rel="modulepreload" href="./src/engine.js">
 </head>
 <body>
   <main class="experience" id="experience">
@@ -129,7 +129,7 @@
             <span data-i18n>New book</span>
           </button>
         </div>
-        <div class="markers" id="markers" role="tablist" aria-label="Choose a book" data-i18n-attrs="aria-label"></div>
+        <div class="markers" id="markers" role="tablist" aria-label="Choose a book" data-i18n-attrs="aria-label" data-scroll></div>
       </nav>
     </section>
 

@@ -50,14 +50,17 @@ export function createLibraryUi({ store, engine, audio }) {
 
   /* ----- shelf read-out ----- */
 
+  let currentMarker = null;
+
   function renderMarkers() {
+    currentMarker = null;
     markers.replaceChildren(...store.books.map((book, index) => h("button", {
       class: "marker",
       type: "button",
       role: "tab",
       "aria-label": t("Select {title}", { title: book.title }),
-      "aria-selected": String(index === engine.selectedIndex),
-      tabIndex: index === engine.selectedIndex ? 0 : -1,
+      "aria-selected": "false",
+      tabIndex: -1,
       onclick: (event) => engine.select(index, event.currentTarget)
     })));
   }
@@ -85,11 +88,17 @@ export function createLibraryUi({ store, engine, audio }) {
     inspectButton.setAttribute("aria-label", t("Open {title} in the atelier", { title: book.title }));
     previousButton.disabled = index <= 0;
     nextButton.disabled = index >= count - 1;
-    [...markers.children].forEach((marker, markerIndex) => {
-      const current = markerIndex === index;
-      marker.setAttribute("aria-selected", String(current));
-      marker.tabIndex = current ? 0 : -1;
-    });
+    const marker = markers.children[index];
+    if (marker && currentMarker !== marker) {
+      currentMarker?.setAttribute("aria-selected", "false");
+      if (currentMarker) currentMarker.tabIndex = -1;
+      marker.setAttribute("aria-selected", "true");
+      marker.tabIndex = 0;
+      if (markers.scrollWidth > markers.clientWidth) {
+        marker.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+      currentMarker = marker;
+    }
   }
 
   function refresh() {
@@ -758,6 +767,26 @@ export function createLibraryUi({ store, engine, audio }) {
   previousButton.addEventListener("click", () => engine.navigate(-1, previousButton));
   nextButton.addEventListener("click", () => engine.navigate(1, nextButton));
   inspectButton.addEventListener("click", () => engine.openDetail(inspectButton));
+  markers.addEventListener("keydown", (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    let index = engine.selectedIndex;
+    if (event.key === "ArrowLeft") index -= 1;
+    else if (event.key === "ArrowRight") index += 1;
+    else if (event.key === "Home") index = 0;
+    else if (event.key === "End") index = store.books.length - 1;
+    else return;
+    event.preventDefault();
+    const marker = markers.children[index];
+    if (marker) {
+      engine.select(index, marker);
+      marker.focus({ preventScroll: true });
+    }
+  });
+  markers.addEventListener("wheel", (event) => {
+    if (markers.scrollWidth <= markers.clientWidth || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    event.preventDefault();
+    markers.scrollLeft += event.deltaY;
+  }, { passive: false });
   [nameInput, authorInput].forEach((input) => input.addEventListener("input", () => {
     clearTimeout(thumbTimer);
     thumbTimer = setTimeout(paintPresetThumbs, 160);

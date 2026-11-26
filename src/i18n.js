@@ -273,6 +273,7 @@ const ZH = {
     "把自己的图片铺满封面，或作为嵌入的图版。烫箔和印刷文字会叠在上面。",
   "Upload an image": "上传图片", "Replace image": "更换图片", "Remove": "移除",
   "That image could not be read.": "无法读取这张图片。",
+  "Could not save the image. Check your browser storage and try again.": "无法保存图片。请检查浏览器存储空间后重试。",
   "Placement": "位置", "Full cover": "铺满封面",
   "Each line can use the book's shared words or its own text.": "每一行可以使用书的共用文字，也可以单独输入。",
 

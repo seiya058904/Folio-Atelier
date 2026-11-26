@@ -2663,10 +2663,11 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
         face.target = null;
         face.signature = null;
       });
+      linkShowThrough(pivot);
     });
   }
 
-  function dispose() {
+  function dispose(releaseMaterial = (material) => material.dispose()) {
     releaseSwaps();
     clearLeaves();
     Object.values(targets).forEach((target) => target.dispose());
@@ -2678,7 +2679,7 @@ export function createBookRig(book, { resolution = 0.75, onAsset = () => {}, laz
     sealTexture.dispose();
     caseLabelTexture.dispose();
     pocketCardTexture.dispose();
-    [...fadeMaterials, hitMaterial, contactShadowMaterial].forEach((material) => material.dispose());
+    [...fadeMaterials, hitMaterial, contactShadowMaterial].forEach(releaseMaterial);
     root.removeFromParent();
   }
 

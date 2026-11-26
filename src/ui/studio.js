@@ -168,6 +168,22 @@ export function createStudioUi({ store, engine, audio }) {
     refreshThumbsSoon();
   }
 
+  async function chooseBookImage(button) {
+    const file = await pickFile(imageInput);
+    if (!file) return null;
+    const done = busy(button);
+    try {
+      const id = await addImage(file);
+      if (!id) toast(t("That image could not be read."));
+      return id;
+    } catch (error) {
+      toast(t("Could not save the image. Check your browser storage and try again."));
+      return null;
+    } finally {
+      done();
+    }
+  }
+
   /* ---------------------------------------------------------------- */
   /* Header, tabs                                                       */
   /* ---------------------------------------------------------------- */
@@ -1048,18 +1064,13 @@ export function createStudioUi({ store, engine, audio }) {
       show();
     }
     const chooseImage = async (event) => {
-      const button = event?.currentTarget;
-      const file = await pickFile(imageInput);
-      if (!file) return;
-      const done = busy(button);
-      const id = await addImage(file).finally(done);
-      if (!id) {
-        toast(t("That image could not be read."));
-        return;
-      }
-      edit(() => {
-        book().front.image = { id, mode: book().front.image?.mode || "full", opacity: 1, treatment: "none", zoom: 1, focusX: 0.5, focusY: 0.5 };
-      }, ["front"], { rerender: true });
+      const id = await chooseBookImage(event.currentTarget);
+      if (!id) return;
+      const apply = (volume) => {
+        volume.front.image = { id, mode: volume.front.image?.mode || "full", opacity: 1, treatment: "none", zoom: 1, focusX: 0.5, focusY: 0.5 };
+      };
+      if (book() === current) edit(() => apply(current), ["front"], { rerender: true });
+      else store.update(current.id, apply, { dirty: ["front"] });
     };
 
     return [
@@ -1722,14 +1733,14 @@ export function createStudioUi({ store, engine, audio }) {
         h("p", { class: "group__hint", text: t("The list is built from your chapter openers, with their page numbers.") })
       );
     } else if (page.type === "plate") {
+      const volume = book();
       const choose = async (event) => {
-        const button = event?.currentTarget;
-        const file = await pickFile(imageInput);
-        if (!file) return;
-        const done = busy(button);
-        const id = await addImage(file).finally(done);
-        if (!id) { toast(t("That image could not be read.")); return; }
-        edit(() => { target().image = id; }, ["pages"], { rerender: true });
+        const id = await chooseBookImage(event.currentTarget);
+        const plate = volume.pages.find((candidate) => candidate.id === page.id && candidate.type === "plate");
+        if (!id || !plate) return;
+        const apply = () => { plate.image = id; };
+        if (book() === volume) edit(apply, ["pages"], { rerender: true });
+        else store.update(volume.id, apply, { dirty: ["pages"] });
       };
       fields.push(
         h("div", { class: "upload" },

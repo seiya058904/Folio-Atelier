@@ -38,15 +38,28 @@ export function deepClone(value) {
 
 export function debounce(fn, wait) {
   let timer = 0;
-  const debounced = (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), wait);
-  };
-  debounced.flush = (...args) => {
-    clearTimeout(timer);
+  let pending;
+  const run = () => {
+    timer = 0;
+    const args = pending;
+    pending = null;
     fn(...args);
   };
-  debounced.cancel = () => clearTimeout(timer);
+  const debounced = (...args) => {
+    clearTimeout(timer);
+    pending = args;
+    timer = setTimeout(run, wait);
+  };
+  debounced.flush = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    run();
+  };
+  debounced.cancel = () => {
+    clearTimeout(timer);
+    timer = 0;
+    pending = null;
+  };
   return debounced;
 }
 

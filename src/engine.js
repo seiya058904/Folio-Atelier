@@ -126,8 +126,15 @@ let camera;
 let controls;
 let environmentTarget;
 let shelfStage;
+// One slot per saved volume. Only the volumes around the camera own a rig.
 let bookRigs = [];
 let hitTargets = [];
+let shelfJump = null;
+const SHELF_LOAD_RADIUS = 4;
+const SHELF_KEEP_RADIUS = 7;
+const SHELF_CACHE_SIZE = 2 * SHELF_KEEP_RADIUS + 1;
+const compiledPrograms = new Set();
+const programOwners = new Set();
 let rafId = 0;
 let lastTime = performance.now();
 let mode = "hero";
@@ -152,6 +159,7 @@ let detailBookHovered = false;
 let currentSpread = 0;
 let pointerDirty = false;
 let suspended = false;
+let graphicsUnavailable = false;
 let viewWidth = window.innerWidth;
 let viewHeight = window.innerHeight;
 let detailViewOffsetX = 0;
@@ -722,11 +730,15 @@ function applySelectedTheme() {
 /* ------------------------------------------------------------------ */
 
 function rebuildHitTargets() {
-  hitTargets = bookRigs.map((rig) => rig.hit);
+  hitTargets = [];
+  bookRigs.forEach((rig, index) => {
+    rig.hit.userData.shelfIndex = index;
+    hitTargets.push(rig.hit);
+  });
 }
 
 function rigFor(id) {
-  return bookRigs.find((rig) => rig.data.id === id) || null;
+  return bookRigs.find((rig) => rig?.data.id === id) || null;
 }
 
 /** Start loading the web fonts a cover needs; `onFontsArrived` repaints. */
@@ -769,9 +781,8 @@ function paintRig(rig) {
 // A book scrolling into view for the first time used to pay for everything in
 // that frame: painting its boards, compiling the shader variants its
 // materials need (100-200 ms each on ANGLE) and uploading its textures. In
-// idle time, every book does it ahead, nearest first, one small step at a
-// time. (A scroll along the shelf paints them all anyway.)
-const WARM_RANGE = Infinity;
+// idle time, the resident neighbours do it ahead, nearest first, one small
+// step at a time. Distant books retain only their saved specifications.
 let warmHandle = 0;
 
 function rigTextures(rig) {
@@ -800,17 +811,21 @@ function warmStep(deadline) {
   warmHandle = 0;
   // Only on the shelf: in the studio every quiet moment belongs to the open
   // book (returning to the shelf starts it again).
-  if (!renderer || suspended || mode !== "hero") return;
+  if (!renderer || suspended || mode !== "hero" || shelfJump) return;
   // Painting a book takes a few tens of milliseconds: only while the shelf is
   // still (an ambient frame may wait, nobody sees it) or when it is overdue.
   const still = position === targetPosition && wheelIdle <= 0;
+  const large = books.length > SHELF_CACHE_SIZE;
+  if (large && !still) return;
   const roomy = deadline.didTimeout || (still && deadline.timeRemaining() > 2);
   // The book at rest in front is the likeliest to be opened.
   if (still && bookRigs[selectedIndex]) prefetchBoardGrain(bookRigs[selectedIndex].data, quality.detail);
-  const near = bookRigs
-    .map((rig, index) => [Math.abs(index - targetPosition), rig])
-    .filter(([distance]) => distance <= WARM_RANGE)
-    .sort((a, b) => a[0] - b[0]);
+  const near = [];
+  bookRigs.forEach((rig, index) => {
+    const distance = Math.abs(index - position);
+    if (!large || distance <= SHELF_LOAD_RADIUS) near.push([distance, rig]);
+  });
+  near.sort((a, b) => a[0] - b[0]);
   for (const [, rig] of near) {
     if (!rig.painted) {
       if (!roomy) continue;
@@ -823,8 +838,12 @@ function warmStep(deadline) {
       // Parallel where the browser can (KHR_parallel_shader_compile). The
       // program depends on where it draws (tone mapping and colour space are
       // off inside the composer), so compile against the same target.
-      compileQuietly(rig.root);
-      scheduleWarmup();
+      const done = compileQuietly(rig.root).finally(() => {
+        if (rig.compiling === done) rig.compiling = null;
+        if (large) scheduleWarmup();
+      });
+      rig.compiling = done;
+      if (!large) scheduleWarmup();
       return;
     }
     let uploaded = 0;
@@ -847,9 +866,38 @@ function warmStep(deadline) {
 function compileQuietly(object) {
   const previous = renderer.getRenderTarget();
   renderer.setRenderTarget(composer ? composer.readBuffer : null);
-  const done = renderer.compileAsync(object, camera, scene).catch(() => {});
-  renderer.setRenderTarget(previous);
-  return done;
+  let materials;
+  try {
+    materials = renderer.compile(object, camera, scene);
+  } finally {
+    renderer.setRenderTarget(previous);
+  }
+  if (!renderer.extensions.has("KHR_parallel_shader_compile")) return Promise.resolve();
+  // Three r165's compileAsync assumes every material stays alive while it
+  // polls. Closing the tab or disposing a variant can remove its program.
+  return new Promise((resolve) => {
+    const check = () => {
+      if (graphicsUnavailable) {
+        resolve();
+        return;
+      }
+      for (const material of materials) {
+        const program = renderer.properties.get(material).currentProgram;
+        if (!program || program.isReady()) materials.delete(material);
+      }
+      if (materials.size) setTimeout(check, 10);
+      else resolve();
+    };
+    check();
+  });
+}
+
+function compileVisibleScene() {
+  const visible = new THREE.Group();
+  scene.traverseVisible((object) => {
+    if (object.material && object.layers.test(camera.layers)) visible.add(object.clone(false));
+  });
+  return compileQuietly(visible);
 }
 
 /* ----- the first book: compiled before it is made ----- */
@@ -869,7 +917,11 @@ function prewarmFirstBook() {
   whenIdle(() => {
     if (standIn !== rig || !renderer) return;
     compileQuietly(rig.root).then(() => whenIdle(() => {
-      if (standIn === rig && renderer) compileQuietly(variants);
+      if (standIn === rig && renderer) {
+        compileQuietly(variants).then(() => {
+          variants.children.forEach((stand) => keepCompiledMaterial(stand.material));
+        });
+      }
     }, 2000));
   }, 2000);
 }
@@ -879,7 +931,7 @@ function releaseStandIn() {
   const rig = standIn;
   standIn = null;
   // Once the real book has drawn, its own materials hold the programs.
-  setTimeout(() => rig.dispose(), 4000);
+  setTimeout(() => releaseShelfRig(rig), 4000);
 }
 
 /* ----- shader variants for the studio ----- */
@@ -905,20 +957,13 @@ function prewarmVariants() {
   };
   whenIdle(mapsNext, 3000);
   const stands = [...activeBook.shaderVariants().children];
-  const release = (batch) => batch.forEach((stand) => {
-    // Keep the material (it holds the program); let go of the book's canvases.
-    for (const key in stand.material) {
-      if (stand.material[key]?.isTexture) stand.material[key] = null;
-    }
-    stand.material.userData = {};
-  });
   const next = () => {
-    if (!stands.length || !renderer) return;
+    if (!stands.length || !renderer || suspended) return;
     const batch = stands.splice(0, 4);
     const group = new THREE.Group();
     batch.forEach((stand) => group.add(stand));
     compileQuietly(group).then(() => {
-      release(batch);
+      batch.forEach((stand) => keepCompiledMaterial(stand.material));
       whenIdle(next, 1500);
     });
   };
@@ -940,13 +985,82 @@ function buildRig(book) {
   return rig;
 }
 
-function addBook(book, index = bookRigs.length, { from = null } = {}) {
-  releaseStandIn();
+function mountShelfRig(book, index) {
   const rig = buildRig(book);
-  bookRigs.splice(index, 0, rig);
-  rebuildHitTargets();
+  bookRigs[index] = rig;
   shelfStage.add(rig.root);
   snapRigToShelfSlot(rig, index);
+  rig.root.visible = rig.opacity > 0.004;
+  return rig;
+}
+
+function releaseShelfRig(rig) {
+  pendingRepaints.delete(rig);
+  draftRigs.delete(rig);
+  rig.root.removeFromParent();
+  if (rig.compiling) rig.compiling.then(() => rig.dispose(keepCompiledMaterial));
+  else rig.dispose(keepCompiledMaterial);
+}
+
+function keepCompiledMaterial(material) {
+  // Three r165 releases a program with its last material. Keep one owner
+  // for each known variant, without retaining the volume's texture data.
+  const properties = renderer.properties.get(material);
+  const programs = properties.programs;
+  if (!programs || ![...programs.values()].some((program) => !compiledPrograms.has(program))) {
+    material.dispose();
+    return;
+  }
+  for (const program of programs.values()) compiledPrograms.add(program);
+  programOwners.add(material);
+  for (const key in material) {
+    if (material[key]?.isTexture) material[key] = null;
+  }
+  material.userData = {};
+  delete properties.uniforms;
+  delete properties.environment;
+  delete properties.envMap;
+}
+
+function syncShelfRigs() {
+  let changed = false;
+  const large = books.length > SHELF_CACHE_SIZE;
+  if (large) {
+    bookRigs.forEach((rig, index) => {
+      if (rig === activeBook || (shelfDrag.active && shelfDrag.index === index)
+        || Math.abs(dragSlotIndex(index) - position) <= SHELF_KEEP_RADIUS) return;
+      delete bookRigs[index];
+      releaseShelfRig(rig);
+      if (hoveredIndex === index) setHovered(-1);
+      changed = true;
+    });
+  }
+  // During a reorder, one volume can borrow an adjacent slot.
+  const radius = SHELF_LOAD_RADIUS + Number(shelfDrag.active);
+  const first = large ? Math.max(0, Math.ceil(position - radius)) : 0;
+  const last = large ? Math.min(books.length - 1, Math.floor(position + radius)) : books.length - 1;
+  for (let index = first; index <= last; index += 1) {
+    if (bookRigs[index]) continue;
+    mountShelfRig(books[index], index);
+    changed = true;
+  }
+  if (changed) {
+    rebuildHitTargets();
+    scheduleWarmup();
+  }
+}
+
+function addBook(book, index = bookRigs.length, { from = null } = {}) {
+  releaseStandIn();
+  bookRigs.splice(index, 0, undefined);
+  delete bookRigs[index];
+  if (books.length > SHELF_CACHE_SIZE && Math.abs(index - position) > SHELF_LOAD_RADIUS) {
+    rebuildHitTargets();
+    requestFrame();
+    return null;
+  }
+  const rig = mountShelfRig(book, index);
+  rebuildHitTargets();
   paintRig(rig);
   const source = from ? rigFor(from) : null;
   if (source && source !== rig && !reducedMotion) {
@@ -968,19 +1082,21 @@ function addBook(book, index = bookRigs.length, { from = null } = {}) {
 }
 
 function removeBook(id) {
-  const index = bookRigs.findIndex((rig) => rig.data.id === id);
+  const index = books.findIndex((book) => book.id === id);
   if (index < 0) return;
   const [rig] = bookRigs.splice(index, 1);
-  pendingRepaints.delete(rig);
-  draftRigs.delete(rig);
-  rig.hit.visible = false;
-  if (reducedMotion || mode !== "hero" || !rig.root.visible) {
-    rig.dispose();
-  } else {
-    // It lifts off the shelf and fades; its neighbours close the gap.
-    rig.leaving = 0;
-    rig.leaveFrom = rig.root.position.y;
-    leavingRigs.push(rig);
+  if (rig) {
+    if (reducedMotion || mode !== "hero" || !rig.root.visible) {
+      releaseShelfRig(rig);
+    } else {
+      pendingRepaints.delete(rig);
+      draftRigs.delete(rig);
+      rig.hit.visible = false;
+      // It lifts off the shelf and fades; its neighbours close the gap.
+      rig.leaving = 0;
+      rig.leaveFrom = rig.root.position.y;
+      leavingRigs.push(rig);
+    }
   }
   rebuildHitTargets();
   hoveredIndex = -1;
@@ -1138,6 +1254,31 @@ function updateSelection(index, shouldAnnounce = false) {
 function selectIndex(index, origin) {
   if (mode !== "hero" || !books.length) return;
   targetPosition = clamp(index, 0, books.length - 1);
+  const distance = targetPosition - position;
+  // A distant search result or marker falls outside both visible windows.
+  // Bring in its neighbouring volumes from the same direction, without
+  // constructing every intervening binding during the glide.
+  if (books.length > SHELF_CACHE_SIZE && Math.abs(distance) > 2 * SHELF_LOAD_RADIUS) {
+    position = reducedMotion ? targetPosition : targetPosition - Math.sign(distance) * 2;
+    shelfSpring.velocity = 0;
+    setHovered(-1);
+    syncShelfRigs();
+    const job = compileVisibleScene();
+    shelfJump = job;
+    // A second jump can unmount these volumes before linking finishes.
+    bookRigs.forEach((rig) => {
+      if (!rig.root.visible) return;
+      const done = rig.compiling ? Promise.all([rig.compiling, job]) : job;
+      rig.compiling = done;
+      done.then(() => { if (rig.compiling === done) rig.compiling = null; });
+    });
+    job.then(() => {
+      if (shelfJump !== job) return;
+      shelfJump = null;
+      scheduleWarmup();
+      requestFrame();
+    });
+  }
   focusReturnTarget = origin || null;
   updateSelection(targetPosition, true);
   requestFrame();
@@ -1154,6 +1295,7 @@ function navigate(direction, origin) {
 function alignShelfToSelection() {
   targetPosition = Math.max(0, selectedIndex);
   position = targetPosition;
+  shelfSpring.velocity = 0;
 }
 
 function shelfSlot(index) {
@@ -1240,6 +1382,7 @@ function updateShelfLayout(delta, elapsed) {
       position = shelfSpring.value;
     }
     if (Math.abs(position - targetPosition) < 0.0005 && Math.abs(shelfSpring.velocity) < 0.004) {
+      if (position !== targetPosition || shelfSpring.velocity !== 0) scheduleWarmup();
       position = targetPosition;
       shelfSpring.velocity = 0;
     }
@@ -1258,6 +1401,7 @@ function updateShelfLayout(delta, elapsed) {
     }
   }
 
+  syncShelfRigs();
   let paintBudget = 2;
   lazyPaintPending = false;
   bookRigs.forEach((rig, index) => {
@@ -1428,14 +1572,19 @@ function startLeafQueue() {
 }
 
 function syncLeafWindow(rig, force = false) {
-  // Anything still owed is printed before the leaves move.
-  flushLeafQueue();
+  // A reflow supersedes the outstanding work. Printing it first would use
+  // the new text on old slots, then paint those same textures again.
+  if (force) {
+    leafQueue.length = 0;
+    deferredLeaf = null;
+  } else {
+    flushLeafQueue();
+    printDeferredLeaf();
+  }
   const base = leafBaseFor(rig, currentSpread);
   const shift = base - rig.leafBase;
   if (!force && shift === 0) return;
   rig.leafBase = base;
-  printDeferredLeaf();
-
   if (!force && shift === 1) {
     const [pivot] = rig.leaves.splice(0, 1);
     rig.leaves.splice(PRINTED_LEAVES - 1, 0, pivot);
@@ -1760,9 +1909,10 @@ function applyPageReleaseImpulse(turnDirection) {
 /* ------------------------------------------------------------------ */
 
 function bookIndexAtPointer() {
+  if (shelfJump) return -1;
   raycaster.setFromCamera(pointer.ndc, camera);
-  const hits = raycaster.intersectObjects(hitTargets, false);
-  return hits.length ? hitTargets.indexOf(hits[0].object) : -1;
+  const hits = raycaster.intersectObjects(hitTargets.filter((hit) => hit.visible), false);
+  return hits[0]?.object.userData.shelfIndex ?? -1;
 }
 
 function setHovered(index) {
@@ -1955,18 +2105,20 @@ function dragSlotIndex(index) {
 
 /** Move the book at `from` to `to`: the rigs here, the library through `onMove`. */
 function moveBook(from, to) {
-  if (from === to || !bookRigs[from]) return;
+  const book = books[from];
+  if (from === to || !book) return;
   const [rig] = bookRigs.splice(from, 1);
   bookRigs.splice(to, 0, rig);
+  if (!rig) delete bookRigs[to];
   rebuildHitTargets();
   hoveredIndex = -1;
-  emit("onMove", rig.data.id, to);
+  emit("onMove", book.id, to);
   selectedIndex = to;
   targetPosition = to;
   position = clamp(position + (to - from), 0, Math.max(0, books.length - 1));
-  emit("onSelect", selectedIndex, rig.data);
+  emit("onSelect", selectedIndex, book);
   audio.playCue("navigate");
-  announce(t("Moved {title} to place {n} of {count}.", { title: rig.data.title, n: to + 1, count: books.length }));
+  announce(t("Moved {title} to place {n} of {count}.", { title: book.title, n: to + 1, count: books.length }));
   requestFrame();
 }
 
@@ -2019,7 +2171,12 @@ function onWheel(event) {
 /* ------------------------------------------------------------------ */
 
 function openDetail(origin = null) {
-  if (mode !== "hero" || selectedIndex < 0 || !bookRigs[selectedIndex]) return;
+  if (mode !== "hero" || !books[selectedIndex]) return;
+  // A finder jump can be opened before the spring has reached its target.
+  if (!bookRigs[selectedIndex]) {
+    alignShelfToSelection();
+    syncShelfRigs();
+  }
   audio.playCue("select");
   mode = "opening";
   transitionTime = 0;
@@ -2139,6 +2296,7 @@ function closeDetail() {
   transitionCameraTarget.copy(closingCameraTarget);
   experience.classList.remove("is-opening");
   alignShelfToSelection();
+  syncShelfRigs();
   closingBookPosition.set(
     0,
     shelfBoardTop + activeBook.base.height * 0.5 + 0.15,
@@ -2166,7 +2324,10 @@ function finishClosing() {
   const index = bookRigs.indexOf(activeBook);
   snapRigToShelfSlot(activeBook, index);
   activeBook.contactShadow.visible = true;
+  leafQueue.length = 0;
+  deferredLeaf = null;
   activeBook.clearLeaves();
+  activeBook.flat = [];
   activeBook.setLeafShadows(false);
   activeBook.setRibbonShelfRest?.(1);
   activeBook.swayRibbon(0);
@@ -2284,6 +2445,7 @@ let slowGapStreak = 0;
 
 function frame(time) {
   rafId = 0;
+  if (shelfJump) return;
   const frameStarted = performance.now();
   const frameGap = time - lastTime;
   // A lone long frame (a board painted, a texture uploaded) is absorbed:
@@ -2415,7 +2577,7 @@ function updateLeaving(delta) {
     motion = true;
     if (rig.leaving >= 1) {
       leavingRigs.splice(index, 1);
-      rig.dispose();
+      releaseShelfRig(rig);
     }
   }
 }
@@ -2505,6 +2667,14 @@ function buildComposer() {
   // Bloom and depth of field were tried here and removed: both soften the
   // printed page, and a book you are typesetting has to stay sharp.
   composer.addPass(new OutputPass());
+}
+
+function disposeComposer() {
+  if (!composer) return;
+  composer.passes.forEach((pass) => pass.dispose());
+  composer.dispose();
+  composer = null;
+  occlusionPass = null;
 }
 
 function renderFrame() {
@@ -2897,11 +3067,7 @@ function stepQualityDown() {
   quality = next;
   motionScale = 1;
   frameBudget.retry = 4000;
-  if (composer) {
-    composer.dispose();
-    composer = null;
-    occlusionPass = null;
-  }
+  disposeComposer();
   if (roomLights.key) {
     roomLights.key.shadow.mapSize.set(quality.shadow, quality.shadow);
     roomLights.key.shadow.map?.dispose();
@@ -2914,7 +3080,7 @@ function stepQualityDown() {
     try {
       buildComposer();
     } catch (error) {
-      composer = null;
+      disposeComposer();
     }
   }
   shadowHold = 4;
@@ -3025,6 +3191,7 @@ function onKeyDown(event) {
 }
 
 function onVisibilityChange() {
+  if (graphicsUnavailable) return;
   suspended = document.hidden;
   audio.handleVisibility(suspended);
   if (!suspended) {
@@ -3063,6 +3230,7 @@ function handleContextLost(event) {
   event.preventDefault();
   cancelPageDrag();
   resetDetailPress();
+  graphicsUnavailable = true;
   suspended = true;
   if (rafId) cancelAnimationFrame(rafId);
   rafId = 0;
@@ -3070,15 +3238,19 @@ function handleContextLost(event) {
 }
 
 function disposeExperience() {
+  graphicsUnavailable = true;
   suspended = true;
   if (rafId) cancelAnimationFrame(rafId);
   rafId = 0;
   audio.dispose();
   controls?.dispose();
   bookRigs.forEach((rig) => rig.dispose());
+  programOwners.forEach((material) => material.dispose());
+  programOwners.clear();
+  compiledPrograms.clear();
   environmentTarget?.dispose();
   pmrem?.dispose();
-  composer?.dispose();
+  disposeComposer();
   renderer?.dispose();
 }
 
@@ -3153,16 +3325,11 @@ async function initialize(options) {
   addLights();
   addDust();
 
-  bookRigs = books.map((book) => {
-    const rig = buildRig(book);
-    shelfStage.add(rig.root);
-    return rig;
-  });
-  rebuildHitTargets();
+  bookRigs = new Array(books.length);
+  syncShelfRigs();
   selectedIndex = -2;
   updateSelection(0, false);
-  bookRigs.forEach((rig, index) => {
-    snapRigToShelfSlot(rig, index);
+  bookRigs.forEach((rig) => {
     // Only the books in view are painted now; the rest wait their turn.
     if (rig.opacity > 0.004) paintRig(rig);
   });
@@ -3207,7 +3374,7 @@ async function initialize(options) {
       buildComposer();
       resize();
     } catch (error) {
-      composer = null;
+      disposeComposer();
     }
   }
   perf.setInfo(() => ({
@@ -3221,6 +3388,10 @@ async function initialize(options) {
     geometries: renderer.info.memory.geometries,
     programs: renderer.info.programs?.length || 0
   }));
+  // Let ANGLE link the visible materials in parallel before the first draw.
+  // Shader diagnostics and the first shadow/post pass still happen normally.
+  await compileVisibleScene();
+  if (graphicsUnavailable) return false;
   renderFrame();
   // Keep the loading mark up until the covers in view have their real type
   // (briefly: a slow font must not hold the room back), then fade it away.
@@ -3229,6 +3400,7 @@ async function initialize(options) {
     ensureFonts(coverRuns),
     new Promise((resolve) => setTimeout(resolve, 1400))
   ]).then(() => {
+    if (graphicsUnavailable) return;
     bookRigs.forEach((rig) => { if (rig.painted) rig.repaint(); });
     shadowHold = 3;
     if (!suspended) renderFrame();
@@ -3246,7 +3418,7 @@ async function initialize(options) {
   });
 
   woodTexturePromise.then((ready) => {
-    if (!ready || suspended || !renderer) return;
+    if (!ready || graphicsUnavailable || !renderer) return;
     woodTextureReady = true;
     applyWoodTexture();
   });

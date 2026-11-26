@@ -33,6 +33,7 @@ const H = PAGE_SIZE.height;
 const MARGIN = { top: 92, bottom: 88, inner: 62, outer: 50 };
 const TEXT_WIDTH = W - MARGIN.inner - MARGIN.outer;
 const TEXT_BOTTOM = H - MARGIN.bottom;
+const CONTENTS_ROWS = 15;
 
 let measureContext = null;
 const measure = () => {
@@ -103,7 +104,11 @@ const SMALL = (size, weight = 500) => `${weight} ${size}px "Inter", "Noto Sans S
 // almost every word is one that was measured a moment ago.
 const widthTables = new Map(); // font shorthand -> Map(text -> width)
 const flowCache = new Map(); // flow key -> page-sized chunks of lines
+const longFlows = new Map(); // source -> latest layout, for edits within a manuscript
 const FLOW_CACHE_LIMIT = 240;
+const LONG_FLOW_THRESHOLD = 16000;
+const LONG_FLOW_BUDGET = 600000;
+let longFlowLength = 0;
 
 function widthTable(font) {
   let table = widthTables.get(font);
@@ -129,6 +134,8 @@ function measured(ctx, table, text) {
 export function forgetMeasurements() {
   widthTables.clear();
   flowCache.clear();
+  longFlows.clear();
+  longFlowLength = 0;
 }
 
 /* ---------- flowing text ---------- */
@@ -137,7 +144,8 @@ export function forgetMeasurements() {
  * Break running text into lines. Paragraphs after the first are indented and
  * an optional drop cap narrows the opening lines.
  */
-function flowText(ctx, text, { width, indent, dropLines = 0, dropWidth = 0, indentFirst = false, verse = false }) {
+function flowText(ctx, text, options, previous = null, paragraphsOut = null) {
+  const { width, indent, dropLines = 0, dropWidth = 0, indentFirst = false, verse = false } = options;
   const raw = String(text || "");
   const paragraphs = verse
     ? raw.replace(/\s+$/, "").split("\n")
@@ -159,6 +167,13 @@ function flowText(ctx, text, { width, indent, dropLines = 0, dropWidth = 0, inde
     }
     const flush = afterBreak;
     afterBreak = false;
+    const cached = previous?.[paragraphIndex];
+    if (cached?.text === paragraph && cached.flush === flush) {
+      paragraphsOut[paragraphIndex] = cached;
+      for (const line of cached.lines) lines.push(line);
+      return;
+    }
+    const start = lines.length;
     const tokens = tokenize(verse ? paragraph.trim() : paragraph);
     let current = [];
     let lineWidth = 0;
@@ -186,6 +201,7 @@ function flowText(ctx, text, { width, indent, dropLines = 0, dropWidth = 0, inde
       lineWidth += lead + tokenWidth;
     });
     push(true);
+    if (paragraphsOut) paragraphsOut[paragraphIndex] = { text: paragraph, flush, lines: lines.slice(start) };
   });
   return lines;
 }
@@ -207,26 +223,34 @@ function splitDropCap(text) {
 export function paginate(book) {
   const ctx = measure();
   const metrics = bodyMetrics(book);
-  const flat = [];
+  let flat = [];
   const chapters = [];
   const words = printed(book);
   let chapterNumber = 0;
   let partNumber = 0;
+  let hasContents = false;
 
-  const flow = (text, firstTop, options) => {
+  const flow = (source, text, firstTop, options) => {
     const font = bodyFont(book, metrics.size);
-    const key = [font, metrics.lineHeight, metrics.indent, metrics.indentFirst, firstTop, JSON.stringify(options), text].join("|");
-    const cached = flowCache.get(key);
+    const style = [font, metrics.lineHeight, metrics.indent, metrics.indentFirst, firstTop, JSON.stringify(options)].join("|");
+    const long = text.length >= LONG_FLOW_THRESHOLD;
+    const key = long ? JSON.stringify([book.id, source]) : `${style}|${text}`;
+    const previous = long ? longFlows.get(key) : null;
+    const cached = long
+      ? (previous?.style === style && previous.text === text ? previous.chunks : null)
+      : flowCache.get(key);
     if (cached) {
-      flowCache.delete(key);
-      flowCache.set(key, cached);
+      const cache = long ? longFlows : flowCache;
+      cache.delete(key);
+      cache.set(key, long ? previous : cached);
       return cached;
     }
     ctx.font = font;
     ctx.letterSpacing = "0px";
+    const paragraphs = long ? [] : null;
     const lines = flowText(ctx, text, {
       width: TEXT_WIDTH, indent: metrics.indent, indentFirst: metrics.indentFirst, ...options
-    });
+    }, previous?.style === style ? previous.paragraphs : null, paragraphs);
     const chunks = [];
     let top = firstTop;
     let index = 0;
@@ -236,8 +260,20 @@ export function paginate(book) {
       index += capacity;
       top = MARGIN.top + 22;
     }
-    flowCache.set(key, chunks);
-    if (flowCache.size > FLOW_CACHE_LIMIT) flowCache.delete(flowCache.keys().next().value);
+    if (long) {
+      if (previous) longFlowLength -= previous.text.length;
+      longFlows.delete(key);
+      longFlows.set(key, { style, text, chunks, paragraphs });
+      longFlowLength += text.length;
+      while (longFlowLength > LONG_FLOW_BUDGET && longFlows.size > 1) {
+        const oldest = longFlows.keys().next().value;
+        longFlowLength -= longFlows.get(oldest).text.length;
+        longFlows.delete(oldest);
+      }
+    } else {
+      flowCache.set(key, chunks);
+      if (flowCache.size > FLOW_CACHE_LIMIT) flowCache.delete(flowCache.keys().next().value);
+    }
     return chunks;
   };
 
@@ -258,7 +294,7 @@ export function paginate(book) {
         setFont: (size) => { ctx.font = headFont(book, size); }
       });
       const textTop = 232 + titleLines.lines.length * titleLines.size * 1.1 + 62;
-      const chunks = flow(rest, textTop, cap ? { dropLines: 3, dropWidth } : {});
+      const chunks = flow(page.id, rest, textTop, cap ? { dropLines: 3, dropWidth } : {});
       chapters.push({ number: chapterNumber, title: page.title || words.untitled, page: flat.length + 1 });
       flat.push({
         type: "chapter", source: page.id, number: chapterNumber, title: page.title || words.untitled,
@@ -274,7 +310,7 @@ export function paginate(book) {
     } else if (page.type === "poem") {
       const hasTitle = Boolean(page.title?.trim());
       const firstTop = MARGIN.top + 30 + (hasTitle ? 58 : 0);
-      const chunks = flow(page.text || "", firstTop, { verse: true, width: TEXT_WIDTH - 30, indent: metrics.size * 1.4 });
+      const chunks = flow(page.id, page.text || "", firstTop, { verse: true, width: TEXT_WIDTH - 30, indent: metrics.size * 1.4 });
       (chunks.length ? chunks : [[]]).forEach((lines, index) => {
         flat.push({
           type: "verse", source: page.id, running: page.title || "",
@@ -284,7 +320,7 @@ export function paginate(book) {
     } else if (page.type === "body") {
       const hasHeading = Boolean(page.heading?.trim());
       const firstTop = MARGIN.top + 22 + (hasHeading ? 62 : 0);
-      const chunks = flow(page.text || "", firstTop, {});
+      const chunks = flow(page.id, page.text || "", firstTop, {});
       (chunks.length ? chunks : [[]]).forEach((lines, index) => {
         flat.push({
           type: "text", source: page.id, running: page.heading || "",
@@ -295,7 +331,7 @@ export function paginate(book) {
     } else if (page.type === "letter") {
       const hasSalutation = Boolean(page.salutation?.trim());
       const firstTop = MARGIN.top + 68 + (hasSalutation ? 38 : 0);
-      const chunks = flow(page.text || "", firstTop, {});
+      const chunks = flow(page.id, page.text || "", firstTop, {});
       (chunks.length ? chunks : [[]]).forEach((lines, index, arr) => {
         flat.push({
           type: "letter", source: page.id, running: page.date || "",
@@ -309,11 +345,33 @@ export function paginate(book) {
       const count = Math.max(1, Math.min(48, Math.round(page.count || 1)));
       for (let index = 0; index < count; index += 1) flat.push({ type: "notebook", source: page.id, page });
     } else if (page.type === "contents") {
+      hasContents = true;
       flat.push({ type: "contents", source: page.id, heading: page.heading || words.contents, chapters });
     } else {
       flat.push({ type: page.type, source: page.id, page });
     }
   });
+
+  // Expand contents after gathering the chapter list. Number chapters against
+  // the expanded book so a long contents section can point past itself.
+  if (hasContents && chapters.length > CONTENTS_ROWS) {
+    const chapterAt = new Map(chapters.map((chapter) => [chapter.page - 1, chapter]));
+    const contents = [];
+    for (let start = 0; start < chapters.length; start += CONTENTS_ROWS) {
+      contents.push(chapters.slice(start, start + CONTENTS_ROWS));
+    }
+    let folio = 1;
+    flat = flat.flatMap((entry, index) => {
+      const chapter = chapterAt.get(index);
+      if (chapter) chapter.page = folio;
+      if (entry.type === "contents") {
+        folio += contents.length;
+        return contents.map((rows) => ({ ...entry, chapters: rows }));
+      }
+      folio += 1;
+      return [entry];
+    });
+  }
 
   flat.forEach((entry, index) => {
     entry.folio = index + 1;
@@ -625,7 +683,7 @@ const PAINT = {
     ctx.fillText(entry.heading, left, 150);
     ctx.fillStyle = ink.rule;
     ctx.fillRect(left, 172, TEXT_WIDTH, 0.8);
-    const rows = entry.chapters.slice(0, 15);
+    const rows = entry.chapters;
     const step = Math.min(34, (TEXT_BOTTOM - 214) / Math.max(rows.length, 1));
     const words = printed(book);
     rows.forEach((chapter, index) => {

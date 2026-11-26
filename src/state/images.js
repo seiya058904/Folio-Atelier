@@ -1,5 +1,5 @@
 // User-supplied images (cover art, plates). Stored as blobs in IndexedDB and
-// decoded once into ImageBitmaps / <img> elements that the painters can draw.
+// decoded into <img> elements for the texture painters and thumbnails.
 
 import { uid } from "../util.js";
 import { deleteImage, listImageIds, loadImage, saveImage } from "./storage.js";
@@ -27,11 +27,15 @@ async function shrink(file) {
   const scale = Math.min(1, MAX_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
   if (scale === 1 && file.size < 1_500_000) return { blob: file, image };
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(image.naturalWidth * scale);
-  canvas.height = Math.round(image.naturalHeight * scale);
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
   canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
-  return blob ? { blob, image } : { blob: file, image };
+  const type = file.type === "image/jpeg" ? "image/jpeg" : "image/webp";
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.92));
+  if (!blob) return { blob: file, image };
+  URL.revokeObjectURL(image.src);
+  const resized = await decode(blob);
+  return resized ? { blob, image: resized } : null;
 }
 
 /** Store an uploaded file. Resolves with the new image id, or null if unreadable. */
@@ -40,8 +44,13 @@ export async function addImage(file) {
   const result = await shrink(file);
   if (!result) return null;
   const id = uid("img");
+  try {
+    await saveImage(id, result.blob);
+  } catch (error) {
+    URL.revokeObjectURL(result.image.src);
+    throw error;
+  }
   cache.set(id, result.image);
-  await saveImage(id, result.blob);
   return id;
 }
 

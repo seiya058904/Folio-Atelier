@@ -134,6 +134,7 @@ export function createStore() {
       if (index < 0) return null;
       const [book] = books.splice(index, 1);
       history.delete(id);
+      savers.get(id)?.cancel();
       savers.delete(id);
       if (!frozen) storage.deleteBook(id).catch(() => {});
       saveOrder();
